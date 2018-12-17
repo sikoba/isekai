@@ -1,0 +1,21 @@
+name: isekai
+version: 0.1.0
+
+authors:
+  - Nemanja Boric <nemanja@nemanjaboric.com>
+
+targets:
+  isekai:
+    main: src/isekai.cr
+
+crystal: 0.26.1
+
+license: GPL
+
+dependencies:
+  clang:
+    github: Burgos/clang.cr
+    branch: master
+  linked_list:
+    github: abvdasker/crystal-linked-list
+    branch: master
