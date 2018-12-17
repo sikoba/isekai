@@ -65,6 +65,7 @@ module Isekai
 
             filename = ARGV[-1]
 
+            Log.setup(opts.progress)
             parser = CParser.new(filename,
                                  opts.clang_args,
                                  opts.loop_sanity_limit,
