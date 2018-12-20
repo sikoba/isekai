@@ -18,4 +18,4 @@ can be used.
 The project is written in Crystal language. Follow the [Official
 instructions](https://crystal-lang.org/docs/installation/) for instructions how
 to install Crystal lang. The only library dependency is `libclang` library. On
-Ubuntu it can be installed via `sudo apt install libclang1-6.0`. 
+Ubuntu it can be installed via `sudo apt install libclang1-6.0 clang-6.0`
