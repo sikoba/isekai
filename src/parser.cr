@@ -37,7 +37,7 @@ module Isekai
         #   loop_sanity_limit = sanity limit to stop unrolling loops
         #   bit_width = bit width
         #   progress = print progress during processing
-        def initialize (@input_file : String, @clang_args : String, @loop_sanity_limit : Int32,
+        def initialize (input_file : String, clang_args : String, @loop_sanity_limit : Int32,
                         @bit_width : Int32, @progress = false)
         end
     end
