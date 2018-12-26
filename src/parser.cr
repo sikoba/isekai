@@ -1,6 +1,8 @@
 require "clang"
 require "logger"
 require "./clangutils"
+require "./dfg"
+require "./frontend/symbol_table"
 
 module Isekai
     VERSION = "0.1.0"
@@ -30,6 +32,38 @@ module Isekai
 
     # Class that parses and transforms C code into internal state
     class CParser
+        # Result of the C-AST -> internal format (DFG expression + symbol table)
+        # transformation
+        private class State
+            def initialize(@expr : DFGExpr, @symtab : SymbolTable)
+            end
+
+            # Getter function for @expr member, used
+            # to avoid the type-inference bug withing crystal
+            def expr
+                @expr
+            end
+
+            # Getter function for @symmember member, used
+            # to avoid the type-inference bug withing crystal
+            def symtab
+                @symtab
+            end
+        end
+
+        # Class analog to State, just returns a result of C type decoding
+        private class TypeState
+            def initialize(@type : Type, @symtab : SymbolTable)
+            end
+
+            def self.create(type, symtab)
+                if type.is_a? Type
+                    return TypeState.new(type, symtab)
+                else
+                    raise "Passing non-type to TypeState"
+                end
+            end
+        end
 
         # Initialization method.
         # Parameters:
