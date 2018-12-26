@@ -60,6 +60,27 @@ module Isekai
           end
       end
 
+      # Returns the initializer for the variable decl.
+      def self.getCursorValue (cursor : Clang::Cursor)
+          result = nil
+          if result = getValue(cursor)
+              return result
+          end
+
+          if child = getFirstChild(cursor)
+              if result = getValue(child)
+                  return result
+              end
+          end
+
+          if result.is_a? Nil
+              dumpCursorAst(cursor)
+              raise "Can't get the initializer: #{cursor}"
+          else
+              return result
+          end
+      end
+
       # Dumps the AST from the cursor to stdout.
       def self.dumpCursorAst (cursor_instance)
           if cursor = cursor_instance
@@ -176,7 +197,7 @@ module Isekai
               case child.kind
               when .type_ref?
                   typeref_cursor = child
-                  Log.log.warn "Found type_ref child: #{typeref_cursor}"
+                  Log.log.debug "Found type_ref child: #{typeref_cursor}"
                   next Clang::ChildVisitResult::Break
               else
                   next Clang::ChildVisitResult::Continue
@@ -217,7 +238,7 @@ module Isekai
               case child.kind
               when .field_decl?
                   struct_fields << child
-                  Log.log.warn "Found struct field child: #{child}"
+                  Log.log.debug "Found struct field child: #{child}"
               end
               next Clang::ChildVisitResult::Continue
           end
@@ -237,8 +258,6 @@ module Isekai
           case cursor.kind
           when .integer_literal?
               result = cursor.literal.to_i
-          else
-              raise "Getting value of the non-literal"
           end
           return result
       end
@@ -290,6 +309,29 @@ module Isekai
               Clang::ChildVisitResult::Break
           end
           return result
+      end
+
+      # Reads and parses the input file. Returns the AST tree representation.
+      # Params:
+      #     input_file = source file to parse
+      #
+      # Returns:
+      #     cursor representing AST tree of the input file
+      #
+      def self.parse_file_to_ast_tree (input_file, clang_args) : Clang::Cursor
+          # Creates a clang's index. Index holds the state of the parser
+          # and it needs to be initialized before parsing
+          index = Clang::Index.new
+
+          # 1. Set default options
+          options = Clang::TranslationUnit.default_options
+
+          # 2. Load the file and get the translation unit
+          files = [Clang::UnsavedFile.new(input_file, File.read(input_file))]
+          tu = Clang::TranslationUnit.from_source(index, files, clang_args.split, options)
+
+          # 3. return the cursor
+          return tu.cursor
       end
     end
 end
