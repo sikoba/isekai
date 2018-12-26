@@ -1,5 +1,6 @@
 require "./spec_helper"
 require "../src/parser.cr"
+require "../src/clangutils.cr"
 
 describe Isekai do
     cursor = parse_c_code("void foo(int x, int y)
