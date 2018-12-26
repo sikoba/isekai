@@ -30,8 +30,6 @@ module Isekai
 
     # Class that parses and transforms C code into internal state
     class CParser
-        # Root input cursor
-        @file_ast_cursor : Clang::Cursor
 
         # Initialization method.
         # Parameters:
@@ -42,7 +40,7 @@ module Isekai
         #   progress = print progress during processing
         def initialize (input_file : String, clang_args : String, @loop_sanity_limit : Int32,
                         @bit_width : Int32, @progress = false)
-            @ast_cursor = parse_file_to_ast_tree(input_file, clang_args)
+            @ast_cursor = CParser.parse_file_to_ast_tree(input_file, clang_args)
         end
 
         # Reads and parses the input file. Returns the AST tree representation.
@@ -52,7 +50,7 @@ module Isekai
         # Returns:
         #     cursor representing AST tree of the input file
         #
-        def parse_file_to_ast_tree (input_file, clang_args) : Clang::Cursor
+        def self.parse_file_to_ast_tree (input_file, clang_args) : Clang::Cursor
             # Creates a clang's index. Index holds the state of the parser
             # and it needs to be initialized before parsing
             index = Clang::Index.new
