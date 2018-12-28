@@ -1,6 +1,15 @@
 # isekai
 Isekai verifiable computation project
 
+## Description
+
+Isekai is a tool which parses the C program and outputs the arithmetic and/or
+boolean circuit representing the expression equivalent to the input program.
+Isekai uses libclang to parse the C program, so most of the preprocessor
+(including the includes) is available. Isekai is written using crystal
+programming language allowing for a strong type safety and it is compiled to a
+native executable, ensuring maximum efficiency in parsing.
+
 # Building the project
 
 ## Compiling
