@@ -26,12 +26,33 @@ can be used.
 
 The project is written in Crystal language. Follow the [Official
 instructions](https://crystal-lang.org/docs/installation/) for instructions how
-to install Crystal lang. The only library dependency is `libclang` library. On
-Ubuntu it can be installed via `sudo apt install libclang1-6.0 clang-6.0`
+to install Crystal lang. 
 
-### Installing libclang on Debian 9
+Since the project depends on several libclang patches which are not
+yet merged in the libclang (https://www.mail-archive.com/cfe-commits@cs.uiuc.edu/msg95414.html,
+http://lists.llvm.org/pipermail/cfe-commits/Week-of-Mon-20140428/104048.html), the easiest
+is to use the provided pre-build binary and to build and run the software inside
+a container.
 
-To install libclang on Debian 9, the steps are:
+### Installing docker
 
-1. Add https://apt.llvm.org/'s repo as listed
-2. apt install clang-6.0-dev
+To install docker on Ubuntu, follow the [official instructions](https://docs.docker.com/install/linux/docker-ce/ubuntu/)
+
+### Building and running inside docker container
+
+To build a docker image with the `isekai` tag, enter `docker` directory and run `make image`.
+This will build `isekai` image which then you can use to spawn a container and mount
+the main directory:
+
+```
+docker run -w $PWD -v $PWD:$PWD -ti isekai /bin/bash
+```
+
+where you can run `make`, `make test` and run the built binaries.
+
+If you don't want to enter the interactive console, it's enough to
+run make within the container:
+
+```
+docker run -w $PWD -v $PWD:$PWD isekai make test
+```
