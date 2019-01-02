@@ -1,3 +1,4 @@
+require "file"
 require "./spec_helper"
 require "../src/parser.cr"
 require "../src/clangutils.cr"
@@ -30,4 +31,26 @@ describe Isekai do
 
     binary_elements = Isekai::ClangUtils.getBinaryOperatorExprs(binary_expr)
     binary_elements.size.should eq 2
+
+    # Compile parser
+    tempfile = File.tempfile(".c") do |file|
+        file.print("
+        struct Input {
+            int a;
+            int b;
+        };
+
+        struct Output {
+            int x;
+        };
+
+        void outsource(struct Input *input, struct Output *output)
+        {
+          output->x = (input->a + 5) == (input->b * 2);
+        }");
+    end
+
+    parser = Isekai::CParser.new(tempfile.path(), "", 100, 32, false)
+    parser.parse()
+    tempfile.delete()
 end
