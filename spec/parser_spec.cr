@@ -53,4 +53,9 @@ describe Isekai do
     parser = Isekai::CParser.new(tempfile.path(), "", 100, 32, false)
     parser.parse()
     tempfile.delete()
+
+    # test decode type
+    symtable = Isekai::SymbolTable.new(nil, nil)
+    type = parser.decode_type(var_decl, symtable)
+    type.@type.should be_a Isekai::IntType
 end
