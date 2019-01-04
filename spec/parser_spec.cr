@@ -58,4 +58,25 @@ describe Isekai do
     symtable = Isekai::SymbolTable.new(nil, nil)
     type = parser.decode_type(var_decl, symtable)
     type.@type.should be_a Isekai::IntType
+
+    cursor = parse_c_code("struct S { int x; unsigned y; };")
+    type = parser.decode_type(cursor, symtable)
+    type.@type.should be_a Isekai::StructType
+    if s = type.@type.as Isekai::StructType
+        s.get_field("x").@type.should be_a Isekai::IntType
+        s.get_field("y").@type.should be_a Isekai::UnsignedType
+    end
+
+    cursor = parse_c_code("int* x;")
+    type = parser.decode_type(cursor, symtable)
+    type.@type.should be_a Isekai::PtrType
+    (type.@type.as Isekai::PtrType).@base_type.should be_a Isekai::IntType
+
+    cursor = parse_c_code("int y[7];")
+    type = parser.decode_type(cursor, symtable)
+    type.@type.should be_a Isekai::ArrayType
+    if arr = type.@type.as Isekai::ArrayType
+        arr.@type.should be_a Isekai::IntType
+        arr.@size.should eq 7
+    end
 end
