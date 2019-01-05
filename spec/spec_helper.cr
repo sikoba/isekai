@@ -50,7 +50,7 @@ def get_first_child_of_kind (cursor, child_kind)
             real_cursor = child
             next Clang::ChildVisitResult::Break
         else
-            next Clang::ChildVisitResult::Continue
+            next Clang::ChildVisitResult::Recurse
         end
     end
 
