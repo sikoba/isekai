@@ -45,7 +45,7 @@ This will build `isekai` image which then you can use to spawn a container and m
 the main directory:
 
 ```
-docker run -w $PWD -v $PWD:$PWD -ti isekai /bin/bash
+docker run --rm -w $PWD -v $PWD:$PWD -ti isekai /bin/bash
 ```
 
 where you can run `make`, `make test` and run the built binaries.
@@ -54,5 +54,5 @@ If you don't want to enter the interactive console, it's enough to
 run make within the container:
 
 ```
-docker run -w $PWD -v $PWD:$PWD isekai make test
+docker run --rm -w $PWD -v $PWD:$PWD isekai make test
 ```
