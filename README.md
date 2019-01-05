@@ -44,6 +44,15 @@ To build a docker image with the `isekai` tag, enter `docker` directory and run 
 This will build `isekai` image which then you can use to spawn a container and mount
 the main directory:
 
+#### Note
+
+You may need crystal lang dependencies before running this step:
+
+```
+shards update
+```
+
+
 ```
 docker run --rm -w $PWD -v $PWD:$PWD -ti isekai /bin/bash
 ```
