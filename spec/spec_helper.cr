@@ -6,16 +6,22 @@ require "clang"
 #
 # Params:
 #     code = C code represented as string
+#     return_root_cursor = if set, no postprocessing (like skipping macro
+#                          definition) is performed
 #
 # Returns:
 #     libclang's cursor representing the input code
-def parse_c_code (code : String)
+def parse_c_code (code : String, return_root_cursor = false)
     unsaved_file = Clang::UnsavedFile.new("file.c", code)
     options = Clang::TranslationUnit.default_options
     index = Clang::Index.new
 
     # 2. Load the file and get the translation unit
     tu = Clang::TranslationUnit.from_source(index, [unsaved_file], [""], options)
+
+    if return_root_cursor
+        return tu.cursor
+    end
 
     # 3. skip all macro cursors
     real_cursor = tu.cursor
