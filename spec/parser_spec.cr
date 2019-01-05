@@ -55,7 +55,7 @@ describe Isekai do
     tempfile.delete()
 
     # test decode type
-    symtable = Isekai::SymbolTable.new(nil, nil)
+    symtable = Isekai::SymbolTable.new(nil, Set(Isekai::Key).new())
     type = parser.decode_type(var_decl, symtable)
     type.@type.should be_a Isekai::IntType
 
@@ -79,4 +79,21 @@ describe Isekai do
         arr.@type.should be_a Isekai::IntType
         arr.@size.should eq 7
     end
+
+    # declare variable
+    cursor = parse_c_code("int x = 1;")
+    new_symtab = parser.declare_variable(cursor, symtable)
+    x_var = new_symtab.lookup Isekai::Symbol.new("x")
+    x_var.should be_a Isekai::StorageRef
+
+    if var = x_var.as Isekai::StorageRef
+        var.@storage.@label.should eq "x"
+        var.@type.should be_a Isekai::IntType
+    end
+
+    cursor = parse_c_code("void foo(int x, int y) { x = 1; }; void bar() { foo(1, 2); }",
+                          true)
+
+    func_call_cursor = get_first_child_of_kind(cursor, Clang::CursorKind::CallExpr)
+    state = parser.decode_funccall(func_call_cursor, symtable)
 end
