@@ -13,11 +13,6 @@ module Isekai
 class Type < SymbolTableValue
 end
 
-# The void type - result of an expression that yields no value
-# (it only performs side effects).
-class Void < Type
-end
-
 # The signed integer type.
 class IntType < Type
     # Returns the size of the type.

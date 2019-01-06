@@ -9,6 +9,11 @@ module Isekai
 class DFGExpr < SymbolTableValue
 end
 
+# The void type - result of an expression that yields no value
+# (it only performs side effects).
+class Void < DFGExpr
+end
+
 # Undefined operation. Raised if the operation is not supported.
 class Undefined < DFGExpr
 end
