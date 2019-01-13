@@ -7,6 +7,8 @@ module Isekai
 # Internal expression node. All internal state expressions
 # are instances of this class
 class DFGExpr < SymbolTableValue
+    def extra_args()
+    end
 end
 
 # The void type - result of an expression that yields no value
@@ -16,6 +18,17 @@ end
 
 # Undefined operation. Raised if the operation is not supported.
 class Undefined < DFGExpr
+    def evaluate (collapser)
+        raise "Can't evaluate undefined expression."
+    end
+
+    def collapse_dependencies () : Array(DFGExpr)
+        return Array(DFGExpr).new()
+    end
+
+    def collapse_constants(collapser) : DFGExpr
+        return self
+    end
 end
 
 # Abstract operation
@@ -82,6 +95,18 @@ end
 class Constant < DFGExpr
     def initialize (@value : Int32)
     end
+
+    def evaluate (collapser)
+        return @value
+    end
+
+    def collapse_dependencies () : Array(DFGExpr)
+        return Array(DFGExpr).new()
+    end
+
+    def collapse_constants(collapser) : DFGExpr
+        return self
+    end
 end
 
 # Conditional node. Consists itself of the condition, then and else branches.
@@ -96,6 +121,28 @@ end
 class BinaryOp < Op
     def initialize (@op : String, @left : DFGExpr, @right : DFGExpr)
     end
+
+    def evaluate (collapser)
+        raise "Can't evaluate binary op"
+    end
+
+    def collapse_dependencies () : Array(DFGExpr)
+        return Array(DFGExpr).new(@left, @right)
+    end
+
+    def collapse_constants(collapser) : DFGExpr
+        collapsed = dfg(self.class, collapser.lookup(@left),
+                        collapser.lookup(@right), extra_args())
+
+        # check if the result of this is a constant
+        begin
+            evaluated_constant = collapser.evaluate_as_constant(collapsed)
+            collapsed = dfg(Constant, evaluated_constant)
+        rescue NonconstantExpression
+        end
+
+        return collapsed
+    end
 end
 
 # Binary mathematial operation. Performs `@op` (also represented by `DFGOperator`)
@@ -104,6 +151,10 @@ class BinaryMath < BinaryOp
     def initialize (@op, @crystalop : DFGOperator, @identity : (Int32|Nil), @left, @right)
         super(@op, @left, @right)
     end
+
+    # TODO binary math suppoorts collapse_constants
+    # and evaluate which evaluates the result of @op(@left, @right)
+
 end
 
 # Add operation
@@ -225,6 +276,18 @@ class UnaryOp < Op
     def initialize (@op : String, @expr : DFGExpr)
     end
 
+    def collapse_dependencies() : Array(DFGExpr)
+        return Array(DFGExpr).new(@expr)
+    end
+
+    def collapse_constants(collapser)
+        begin
+            return dfg(Constant, collapser.evaluate_as_constant(self))
+        rescue ex : NonconstantExpression
+            return dfg(self.class, collapser.lookup(@expr))
+        end
+    end
+
 end
 
 # Logical-Not unary operation
@@ -252,6 +315,18 @@ end
 # input classes
 class InputBase < DFGExpr
     def initialize(@storage_key : StorageKey)
+    end
+
+    def evaluate (collapser)
+        return collapser.get_input(@storage_key)
+    end
+
+    def collapse_dependencies () : Array(DFGExpr)
+        return Array(DFGExpr).new()
+    end
+
+    def collapse_constants(collapser) : DFGExpr
+        return self
     end
 end
 
