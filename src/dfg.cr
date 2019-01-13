@@ -152,9 +152,28 @@ class BinaryMath < BinaryOp
         super(@op, @left, @right)
     end
 
-    # TODO binary math suppoorts collapse_constants
-    # and evaluate which evaluates the result of @op(@left, @right)
+    def evaluate (collapser)
+        return @crystalop.evaluate(collapser.lookup(@left), collapser.lookup(@right))
+    end
 
+    def collapse_dependencies : Array(DFGExpr)
+        Array(DFGExpr).new(@left, @right)
+    end
+
+    def collapse_constants (collapser)
+        basic_collapsing = super(collapser)
+
+        # check if we can collapse out this operation
+        if basic_collapsing.is_a? typeof(self)
+            if basic_collapsing.@left.is_a? Constant && basic_collapsing.@left.@value == @identity
+                return basic_collapsing.@right
+            elsif basic_collapsing.@right.is_a? Constant && basic_collapsing.@right.@value == @identity
+                return basic_collapsing.@left
+            end
+        end
+
+        return basic_collapsing
+    end
 end
 
 # Add operation
