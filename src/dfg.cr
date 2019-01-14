@@ -6,8 +6,20 @@ module Isekai
 
 # Internal expression node. All internal state expressions
 # are instances of this class
-class DFGExpr < SymbolTableValue
+abstract class DFGExpr < SymbolTableValue
     def extra_args()
+    end
+
+    def collapse_dependencies()
+        raise "Undefined dependencies collapsing on #{self.class}"
+    end
+
+    def collapse_constants(collapser)
+        raise "Undefined dependencies constants on #{self.class}"
+    end
+
+    def evaluate(collapser)
+        raise "Undefined method evaluate on #{self.class}"
     end
 end
 
@@ -127,17 +139,17 @@ class BinaryOp < Op
     end
 
     def collapse_dependencies () : Array(DFGExpr)
-        return Array(DFGExpr).new(@left, @right)
+        return Array(DFGExpr).new().push(@left).push(@right)
     end
 
     def collapse_constants(collapser) : DFGExpr
-        collapsed = dfg(self.class, collapser.lookup(@left),
-                        collapser.lookup(@right), extra_args())
+        collapsed = self.class.new(collapser.lookup(@left),
+                        collapser.lookup(@right))
 
         # check if the result of this is a constant
         begin
             evaluated_constant = collapser.evaluate_as_constant(collapsed)
-            collapsed = dfg(Constant, evaluated_constant)
+            collapsed = Constant.new(evaluated_constant)
         rescue NonconstantExpression
         end
 
@@ -157,7 +169,7 @@ class BinaryMath < BinaryOp
     end
 
     def collapse_dependencies : Array(DFGExpr)
-        Array(DFGExpr).new(@left, @right)
+        Array(DFGExpr).new().push(@left).push(@right)
     end
 
     def collapse_constants (collapser)
@@ -291,19 +303,29 @@ class CmpGEQ < BinaryOp
 end
 
 # Unary operation. Perform `@op` on `@expr`
-class UnaryOp < Op
+abstract class UnaryOp < Op
+    @op : (String)?
+    @expr : (Isekai::DFGExpr)?
+
     def initialize (@op : String, @expr : DFGExpr)
     end
 
+    abstract def initialize(@expr)
+
     def collapse_dependencies() : Array(DFGExpr)
-        return Array(DFGExpr).new(@expr)
+        if expr = @expr
+            return Array(DFGExpr).new().push(expr)
+        else
+            raise "No expression set"
+        end
     end
 
     def collapse_constants(collapser)
         begin
-            return dfg(Constant, collapser.evaluate_as_constant(self))
+            val = collapser.evaluate_as_constant(self).as(Constant)
+            return Constant.new(val.@value)
         rescue ex : NonconstantExpression
-            return dfg(self.class, collapser.lookup(@expr))
+            return self.class.new(collapser.lookup(@expr))
         end
     end
 
@@ -318,7 +340,7 @@ end
 
 # Bitwise-Not unary operation
 class BitNot < UnaryOp
-	def initialize(@expr, @bit_width)
+	def initialize(@expr)#, @bit_width)
 		super("BitNot", @expr)
     end
 end

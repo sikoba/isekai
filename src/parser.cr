@@ -7,6 +7,12 @@ require "./frontend/symbol_table"
 module Isekai
     VERSION = "0.1.0"
 
+
+        # Raised when trying to statically evaluate nonconstant
+        # expression (for example, when lowering for loop)
+        class NonconstantExpression < Exception
+        end
+        
     # Simple wrapper around the logger's instance.
     # Takes care of the Logger's setup and holds Logger instance
     class Log
@@ -67,10 +73,6 @@ module Isekai
             end
         end
 
-        # Raised when trying to statically evaluate nonconstant
-        # expression (for example, when lowering for loop)
-        class NonconstantExpression < Exception
-        end
 
         # Cursor pointing to the `outsource` function - the entry point
         # for the outsourced computation.
