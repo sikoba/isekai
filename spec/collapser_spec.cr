@@ -12,5 +12,5 @@ describe Isekai do
     expr_collapser = Isekai::ExpressionCollapser.new(expr_eval)
 
     evaluated = expr_collapser.collapse_tree(add_expr)
-    pp evaluated
+    (evaluated.as Isekai::Constant).@value.should eq 9
 end
