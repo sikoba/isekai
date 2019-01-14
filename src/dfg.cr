@@ -2,11 +2,16 @@ require "./frontend/types.cr"
 require "./frontend/storage.cr"
 require "./dfgoperator"
 
+
+
 module Isekai
+
 
 # Internal expression node. All internal state expressions
 # are instances of this class
-abstract class DFGExpr < SymbolTableValue
+class DFGExpr < SymbolTableValue
+    #add_object_helpers
+
     def extra_args()
     end
 
@@ -21,15 +26,19 @@ abstract class DFGExpr < SymbolTableValue
     def evaluate(collapser)
         raise "Undefined method evaluate on #{self.class}"
     end
+
+
 end
 
 # The void type - result of an expression that yields no value
 # (it only performs side effects).
 class Void < DFGExpr
+    #add_object_helpers
 end
 
 # Undefined operation. Raised if the operation is not supported.
 class Undefined < DFGExpr
+    #add_object_helpers
     def evaluate (collapser)
         raise "Can't evaluate undefined expression."
     end
@@ -45,14 +54,17 @@ end
 
 # Abstract operation
 class Op < DFGExpr
+    #add_object_helpers
 end
 
 # Operation on the array.
 class ArrayOp < Op
+    #add_object_helpers
 end
 
 # Reference to the part of an existing node
 class StorageRef < ArrayOp
+    #add_object_helpers
     # Constructs a reference to a storage.
     #
     # Params:
@@ -105,6 +117,8 @@ end
 
 # Integer constant node
 class Constant < DFGExpr
+    #add_object_helpers
+
     def initialize (@value : Int32)
     end
 
@@ -119,19 +133,39 @@ class Constant < DFGExpr
     def collapse_constants(collapser) : DFGExpr
         return self
     end
+
+    def_equals @value
+    def_hash @value
 end
 
 # Conditional node. Consists itself of the condition, then and else branches.
 class Conditional < Op
+    #add_object_helpers
     def initialize (@cond : DFGExpr, @valtrue : DFGExpr, @valfalse : DFGExpr)
     end
 
     def_equals @cond, @valtrue, @valfalse 
 end
 
+def self.dfg (dfg_name, *args)
+    if dfg_name.is_a? BinaryMath
+        raise "Can't create abstract classes."
+    else
+        return dfg_name.new(*args)
+    end
+end
+
+  
+
 # Binary operation. Perform `@op` on two operands `@left` and `@right`
 class BinaryOp < Op
+    #add_object_helpers
     def initialize (@op : String, @left : DFGExpr, @right : DFGExpr)
+    end
+
+    def set_operands(left, right)
+        @left = left
+        @right = right
     end
 
     def evaluate (collapser)
@@ -143,23 +177,29 @@ class BinaryOp < Op
     end
 
     def collapse_constants(collapser) : DFGExpr
-        collapsed = self.class.new(collapser.lookup(@left),
-                        collapser.lookup(@right))
-
+        left = collapser.lookup(@left)
+        right = collapser.lookup(@right)
+        collapsed = dup()
+        collapsed.set_operands(left, right)
         # check if the result of this is a constant
         begin
             evaluated_constant = collapser.evaluate_as_constant(collapsed)
-            collapsed = Constant.new(evaluated_constant)
+            collapsed = evaluated_constant.dup
         rescue NonconstantExpression
+            puts "nonconstant expression?"
         end
 
         return collapsed
     end
+
+    def_equals @op, @left, @right
+    def_hash @op, @left, @right
 end
 
 # Binary mathematial operation. Performs `@op` (also represented by `DFGOperator`)
 # on `@left` and `@right`, with the optional identity element (e.g. 0 for addition, 1 for multiplication).
 class BinaryMath < BinaryOp
+    ##add_object_helpers
     def initialize (@op, @crystalop : DFGOperator, @identity : (Int32|Nil), @left, @right)
         super(@op, @left, @right)
     end
@@ -176,11 +216,15 @@ class BinaryMath < BinaryOp
         basic_collapsing = super(collapser)
 
         # check if we can collapse out this operation
-        if basic_collapsing.is_a? typeof(self)
-            if basic_collapsing.@left.is_a? Constant && basic_collapsing.@left.@value == @identity
-                return basic_collapsing.@right
-            elsif basic_collapsing.@right.is_a? Constant && basic_collapsing.@right.@value == @identity
-                return basic_collapsing.@left
+        if basic_collapsing.is_a? BinaryMath
+            if left = basic_collapsing.@left.as? Constant 
+                if left.@value == @identity
+                    basic_collapsing = basic_collapsing.@right
+                end
+            elsif right = basic_collapsing.@right.as? Constant 
+                if right.@value == @identity
+                    basic_collapsing = basic_collapsing.@left
+                end
             end
         end
 
@@ -190,6 +234,7 @@ end
 
 # Add operation
 class Add < BinaryMath
+    #add_object_helpers
     def initialize (@left, @right)
         super("+", OperatorAdd.new, 0, @left, @right)
     end
@@ -197,6 +242,7 @@ end
 
 # Multiply operation
 class Multiply < BinaryMath
+    #add_object_helpers
     def initialize (@left, @right)
         super("*", OperatorMul.new, 1, @left, @right)
     end
@@ -303,14 +349,15 @@ class CmpGEQ < BinaryOp
 end
 
 # Unary operation. Perform `@op` on `@expr`
-abstract class UnaryOp < Op
+class UnaryOp < Op
+    #add_object_helpers
+
     @op : (String)?
     @expr : (Isekai::DFGExpr)?
+    setter expr : DFGExpr
 
     def initialize (@op : String, @expr : DFGExpr)
     end
-
-    abstract def initialize(@expr)
 
     def collapse_dependencies() : Array(DFGExpr)
         if expr = @expr
@@ -325,7 +372,9 @@ abstract class UnaryOp < Op
             val = collapser.evaluate_as_constant(self).as(Constant)
             return Constant.new(val.@value)
         rescue ex : NonconstantExpression
-            return self.class.new(collapser.lookup(@expr))
+            new_obj = self.dup
+            new_obj.expr = collapser.lookup(@expr)
+            return new_obj
         end
     end
 
