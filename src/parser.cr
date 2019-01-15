@@ -32,6 +32,8 @@ module Isekai
 
     # Class that parses and transforms C code into internal state
     class CParser
+        @parsed : State?
+
         # Result of the C-AST -> internal format (DFG expression + symbol table)
         # transformation
         private class State
@@ -91,7 +93,7 @@ module Isekai
             @ast_cursor = ClangUtils.parse_file_to_ast_tree(@input_file, @clang_args)
 
             global_symtable = create_global_symtab
-            root_funccall(global_symtable)
+            @parsed = root_funccall(global_symtable)
         end
 
         # Indices of the arguments for the root call - first argument
