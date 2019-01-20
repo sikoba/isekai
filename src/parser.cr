@@ -89,6 +89,7 @@ module Isekai
                         @bit_width : Int32, @progress = false)
             @loops = 0
             @sanity = 0
+            @expr_evaluator = ExpressionEvaluator.new
         end
         
         def parse()
@@ -481,7 +482,7 @@ module Isekai
                     key = expr.key
                     expr = symtab.lookup(key)
                 end
-                return expr
+                return expr.as DFGExpr
             end
 
             # Decodes the type of the cursor. Note that this expects the
@@ -586,7 +587,8 @@ module Isekai
 
             # Resolves the expression and gets its value
             def decode_expression_value (expression, symtab) : State
-                return decode_expression(expression, symtab)
+                state = decode_expression(expression, symtab)
+                return State.new(coerce_value(state.expr, symtab), state.symtab)
             end
 
             # Resolves the expression and gets its value, if the
@@ -1104,9 +1106,11 @@ module Isekai
                 return working_symtab
             end
 
-            #TODO - glue layer
-            def evaluate (expr : DFGExpr) : Int32|Nil
-                return 0
+            def evaluate (expr : DFGExpr) : Int32
+                resolved_const = @expr_evaluator.collapse_tree(expr)
+                raise NonconstantExpression.new("Can't resolve #{expr} to Constant") \
+                    unless resolved_const.is_a? Constant
+                return (resolved_const.as Constant).@value
             end 
 
             # Make a global variable

@@ -144,6 +144,31 @@ class Conditional < Op
     def initialize (@cond : DFGExpr, @valtrue : DFGExpr, @valfalse : DFGExpr)
     end
 
+    def evaluate (collapser)
+        cond = collapser.lookup(@cond)
+
+        if cond
+            return collapser.lookup(@valtrue)
+        else
+            return collapser.lookup(@valfalse)
+        end
+    end
+
+    def collapse_dependencies
+        return [@cond, @valtrue, @valfalse]
+    end
+
+    def collapse_constants (collapser)
+        begin
+            return Constant.new(collapser.evaluate_as_constant(self).@value)
+        rescue
+            return Conditional.new(
+                collapser.lookup(@cond),
+                collapser.lookup(@valtrue),
+                collapser.lookup(@valfalse))
+        end
+    end
+
     def_equals @cond, @valtrue, @valfalse 
 end
 
@@ -385,12 +410,21 @@ class LogicalNot < UnaryOp
 	def initialize (@expr)
 		super("Not", @expr)
     end
+
+    def evaluate (collapser)
+        return !collapser.lookup(@expr)
+    end
 end
 
 # Bitwise-Not unary operation
 class BitNot < UnaryOp
+    # TODO - handle bit widths here
 	def initialize(@expr)#, @bit_width)
 		super("BitNot", @expr)
+    end
+
+    def evaluate(collapser)
+        #return (~collapser.lookup(@expr) & @bit_width.get_neg1()
     end
 end
 

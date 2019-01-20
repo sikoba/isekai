@@ -40,8 +40,8 @@ abstract class Collapser
             if new_deps.size() == 0
                 stack.pop()
                 res = collapse_impl(key)
-                if res.is_a? Int32
-                    res = Constant.new(res)
+                if !res.is_a? DFGExpr
+                    res = Constant.new(res.as Int32)
                 end
                 @table[key] = res
             else
@@ -92,7 +92,10 @@ class ExpressionCollapser < Collapser
     end
 
     def evaluate_as_constant(expr)
-        return @expr_evaluator.collapse_tree(expr)
+        const = @expr_evaluator.collapse_tree(expr)
+        raise NonconstantExpression.new("Can't resolve #{expr} as constant") \
+            unless const.is_a? Constant
+        return const.as Constant
     end
 end
 end
