@@ -46,7 +46,11 @@ describe Isekai do
 
         void outsource(struct Input *input, struct Output *output)
         {
-          output->x = (input->a + 5) == (input->b * 2);
+          int x = 5;
+          if (x)
+            output->x = (input->a + 5) == (input->b * 2);
+          else
+            output->x = (input->a + 10) == (input->b * 20);
         }");
     end
 
