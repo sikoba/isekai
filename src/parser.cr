@@ -3,6 +3,7 @@ require "logger"
 require "./clangutils"
 require "./dfg"
 require "./frontend/symbol_table"
+require "./collapser"
 
 module Isekai
     VERSION = "0.1.0"
@@ -39,6 +40,15 @@ module Isekai
     # Class that parses and transforms C code into internal state
     class CParser
         @parsed : State?
+        @ast_cursor : Clang::Cursor?
+
+        def parsed_state
+            if state = @parsed
+                return state
+            else
+                raise "Output state not resolved"
+            end
+        end
 
         # Result of the C-AST -> internal format (DFG expression + symbol table)
         # transformation
@@ -90,13 +100,20 @@ module Isekai
             @loops = 0
             @sanity = 0
             @expr_evaluator = ExpressionEvaluator.new
+            @index = Clang::Index.new
         end
-        
-        def parse()
-            @ast_cursor = ClangUtils.parse_file_to_ast_tree(@input_file, @clang_args)
 
-            global_symtable = create_global_symtab
-            @parsed = root_funccall(global_symtable)
+        def parse()
+            @tu =  ClangUtils.parse_file_to_ast_tree(@index, @input_file, @clang_args)
+            if tu = @tu
+                @ast_cursor = tu.cursor
+                global_symtable = create_global_symtab
+                @parsed = root_funccall(global_symtable)
+                @tu = nil
+                @index = nil
+            else
+                raise "Can't parse #{@input_file}"
+            end
         end
 
         # Indices of the arguments for the root call - first argument

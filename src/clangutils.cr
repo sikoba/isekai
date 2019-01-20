@@ -326,7 +326,7 @@ module Isekai
       # Returns:
       #     cursor representing AST tree of the input file
       #
-      def self.parse_file_to_ast_tree (input_file, clang_args) : Clang::Cursor
+      def self.parse_file_to_ast_tree (index, input_file, clang_args) : Clang::TranslationUnit
           # Creates a clang's index. Index holds the state of the parser
           # and it needs to be initialized before parsing
           index = Clang::Index.new
@@ -338,8 +338,8 @@ module Isekai
           files = [Clang::UnsavedFile.new(input_file, File.read(input_file))]
           tu = Clang::TranslationUnit.from_source(index, files, clang_args.split, options)
 
-          # 3. return the cursor
-          return tu.cursor
+          # 3. return the translation unit
+          return tu
       end
     end
 end
