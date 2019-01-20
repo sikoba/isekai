@@ -957,7 +957,7 @@ module Isekai
 
                 begin
                     cond_val = evaluate(cond_state.@expr)
-                    if cond_val
+                    if cond_val != 0
                         return transform_statement(if_parts[1], symtab)
                     elsif if_parts.size == 3
                         return transform_statement(if_parts[2], symtab)
@@ -1016,6 +1016,7 @@ module Isekai
 
                 begin
                     begin
+                        # TODO: check this
                         cond_val = evaluate(cond_state.@expr)
                     rescue ex : NonconstantExpression
                         Log.log.debug("Falling back to dynamic unrolling")
@@ -1057,7 +1058,7 @@ module Isekai
                     cond_val = evaluate(cond_state.@expr)
 
                     # Break?
-                    if cond_val.is_a? Nil
+                    if cond_val == 0
                         break
                     end
 
