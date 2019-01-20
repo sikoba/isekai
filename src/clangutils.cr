@@ -170,7 +170,7 @@ module Isekai
       # Returns:
       #    the cursor to the first child node of the input cursor
       #
-      def self.getFirstChild (cursor)
+      def self.getFirstChild (cursor) : Clang::Cursor
           result = nil
 
           cursor.visit_children do |child|
@@ -182,7 +182,11 @@ module Isekai
               next Clang::ChildVisitResult::Break
           end
 
-          return result
+          if cursor = result
+            return cursor
+          else
+            raise "No child found"
+          end
       end
 
       # Gets the cursor to the type reference for the given
