@@ -84,9 +84,9 @@ module Isekai
       # Dumps the AST from the cursor to stdout.
       def self.dumpCursorAst (cursor_instance)
           if cursor = cursor_instance
-              puts "* #{cursor}"
+              STDERR.puts "\n\n* #{cursor}"
               cursor.visit_children do |child|
-                  puts "- Child #{child}"
+                  STDERR.puts "- Child #{child}"
                   next Clang::ChildVisitResult::Recurse
               end
             else
