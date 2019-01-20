@@ -343,6 +343,14 @@ class CmpLT < BinaryOp
     def initialize (@left, @right)
         super("<", @left, @right)
     end
+
+    def evaluate(collapser)
+        begin
+            return collapser.lookup(@left).as(Constant).@value < collapser.lookup(@right).as(Constant).@value
+        rescue
+            raise NonconstantExpression.new("can't evaluate #{@left} >= #{@right}")
+        end
+    end
 end
 
 # Less-than-or-equal compare operation
@@ -350,12 +358,44 @@ class CmpLEQ < BinaryOp
     def initialize (@left, @right)
         super("<=", @left, @right)
     end
+
+    def evaluate(collapser)
+        begin
+            return collapser.lookup(@left).as(Constant).@value <= collapser.lookup(@right).as(Constant).@value
+        rescue
+            raise NonconstantExpression.new("can't evaluate #{@left} <= #{@right}")
+        end
+    end
+
 end
 
 # Equal compare operation
 class CmpEQ < BinaryOp
     def initialize (@left, @right)
         super("==", @left, @right)
+    end
+
+    def evaluate(collapser)
+        begin
+            return collapser.lookup(@left).as(Constant).@value == collapser.lookup(@right).as(Constant).@value
+        rescue
+            raise NonconstantExpression.new("can't evaluate #{@left} == #{@right}")
+        end
+    end
+end
+
+# Equal compare operation
+class CmpNEQ < BinaryOp
+    def initialize (@left, @right)
+        super("!=", @left, @right)
+    end
+
+    def evaluate(collapser)
+        begin
+            return collapser.lookup(@left).as(Constant).@value != collapser.lookup(@right).as(Constant).@value
+        rescue
+            raise NonconstantExpression.new("can't evaluate #{@left} != #{@right}")
+        end
     end
 end
 
@@ -364,12 +404,28 @@ class CmpGT < BinaryOp
     def initialize (@left, @right)
         super(">", @left, @right)
     end
+
+    def evaluate(collapser)
+        begin
+            return collapser.lookup(@left).as(Constant).@value > collapser.lookup(@right).as(Constant).@value
+        rescue
+            raise NonconstantExpression.new("can't evaluate #{@left} > #{@right}")
+        end
+    end
 end
 
 # Greater-than compare operation
 class CmpGEQ < BinaryOp
     def initialize (@left, @right)
         super(">=", @left, @right)
+    end
+
+    def evaluate(collapser)
+        begin
+            return collapser.lookup(@left).as(Constant).@value >= collapser.lookup(@right).as(Constant).@value
+        rescue
+            raise NonconstantExpression.new("can't evaluate #{@left} >= #{@right}")
+        end
     end
 end
 

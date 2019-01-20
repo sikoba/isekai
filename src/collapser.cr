@@ -40,10 +40,18 @@ abstract class Collapser
             if new_deps.size() == 0
                 stack.pop()
                 res = collapse_impl(key)
-                if !res.is_a? DFGExpr
-                    res = Constant.new(res.as Int32)
+                if res.is_a? Int32
+                    res = Constant.new(res)
                 end
-                @table[key] = res
+                if res.is_a? Bool
+                    res = Constant.new(res ? 1 : 0)
+                end
+
+                if res
+                    @table[key] = res
+                else
+                    raise "Can't convert #{res} to DFGExpr"
+                end
             else
                 # go on and calculate all dependencies first
                 stack += new_deps

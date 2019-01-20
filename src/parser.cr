@@ -136,7 +136,7 @@ module Isekai
                 when 2
                     has_nizk = false
                 else
-                    raise "Malformed outsource func parameters"
+                    raise "Malformed outsource func parameters: #{params.size}"
                 end
 
                 arg_exprs = Array(DFGExpr).new()
@@ -652,6 +652,8 @@ module Isekai
                         dfg_expr = dfg(CmpLEQ, left_state.expr, right_state.expr)
                     when "=="
                         dfg_expr = dfg(CmpEQ, left_state.expr, right_state.expr)
+                    when "!="
+                        dfg_expr = dfg(CmpNEQ, left_state.expr, right_state.expr)
                     when ">"
                         dfg_expr = dfg(CmpGT, left_state.expr, right_state.expr)
                     when ">="
@@ -835,7 +837,11 @@ module Isekai
 
             # Delegates the statement to the transform function based on its type
             def transform_statement (statement, working_symtab)
+                statement = ClangUtils.getConcreteExpression(statement);
+
                 case statement.kind
+                when .decl_ref_expr?
+                    # already seen variable, do nothing
                 when .decl_stmt?
                     working_symtab = declare_variable(ClangUtils.getFirstChild(statement), working_symtab)
                 when .compound_stmt?
