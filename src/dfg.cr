@@ -210,8 +210,8 @@ class BinaryOp < Op
         begin
             evaluated_constant = collapser.evaluate_as_constant(collapsed)
             collapsed = evaluated_constant.dup
-        rescue NonconstantExpression
-            puts "nonconstant expression?"
+        rescue ex : NonconstantExpression
+            # can't evaluate further
         end
 
         return collapsed
