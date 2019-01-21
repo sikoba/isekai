@@ -99,6 +99,15 @@ describe Isekai do
             .as(Isekai::CmpEQ).@left
                 .as(Isekai::Divide).@right
                     .as(Isekai::Constant).@value.should eq 10
+        if minimized = parser.@output
+            minimized[0][1].as(Isekai::Conditional).@valfalse
+            .as(Isekai::CmpEQ).@left
+                .as(Isekai::Divide).@right
+                    .as(Isekai::Constant).@value.should eq 10
+
+        else
+            raise "No output generated"
+        end
     end
 
     it "Constant folding for loop - single body exec" do
@@ -133,6 +142,12 @@ describe Isekai do
              .as(Isekai::Constant).@value.should eq 1
         output.as(Isekai::Add).@right
              .as(Isekai::Constant).@value.should eq 10
+
+        if minimized = parser.@output
+            minimized[0][1].as(Isekai::Constant).@value.should eq 11
+        else
+            raise "No minimized output value."
+        end
     end
 
 
@@ -165,5 +180,46 @@ describe Isekai do
         state = parser.parsed_state
         output = state.symtab.lookup(state.expr.as(Isekai::StorageRef).key)
         output.as(Isekai::Constant).@value.should eq 0
+    end
+
+    it "Constant folding if expression - minimizing expression" do
+        tempfile = File.tempfile(".c") do |file|
+            file.print("
+            struct Input {
+                int a;
+                int b;
+            };
+
+            struct Output {
+                int x;
+            };
+
+            void outsource(struct Input *input, struct Output *output)
+            {
+            int x = input->a;
+            if (x)
+                output->x = (25 + 15) == (input->b * 21);
+            else
+                output->x = (input->a / 10) == (input->b + 20);
+            }");
+        end
+
+        parser = Isekai::CParser.new(tempfile.path(), "", 100, 32, false)
+        parser.parse()
+        tempfile.delete()
+        state = parser.parsed_state
+        output = state.symtab.lookup(state.expr.as(Isekai::StorageRef).key)
+        output.as(Isekai::Conditional).@valtrue
+            .as(Isekai::CmpEQ).@left
+                .as(Isekai::Add).@right
+                    .as(Isekai::Constant).@value.should eq 15
+
+        if minimized = parser.@output
+            minimized[0][1].as(Isekai::Conditional).@valtrue
+            .as(Isekai::CmpEQ).@left
+                .as(Isekai::Constant).@value.should eq 40
+        else
+            raise "No output generated"
+        end
     end
 end
