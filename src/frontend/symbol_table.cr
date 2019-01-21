@@ -108,6 +108,23 @@ class SymbolTable
         return propagate(key)
     end
 
+    # Look up the value for the key in this and
+    # all parent scopes. If the found value is a storage reference,
+    # it resolves that reference
+    #
+    # Params:
+    #     key = key to lookup
+    #
+    # Returns:
+    #     value of the symbol behind the key.
+    def eager_lookup (key) : SymbolTableValue
+        val = lookup(key)
+        if val.is_a? StorageRef
+            return lookup(val.as(StorageRef).key)
+        end
+        return val
+    end
+
     # Finds the key in this or in parent's scope
     # and brings it to the current scope.
     #
