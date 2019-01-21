@@ -88,6 +88,8 @@ module Isekai
         # for the outsourced computation.
         @root_func_cursor : (Clang::Cursor | Nil)
 
+        @output : Array(Tuple(StorageKey, DFGExpr))?
+
         # Initialization method.
         # Parameters:
         #   input_file = C file to read
@@ -111,9 +113,30 @@ module Isekai
                 @parsed = root_funccall(global_symtable)
                 @tu = nil
                 @index = nil
+
+                if parsed = @parsed
+                    @output = create_expression(parsed)
+                else
+                    raise "Parsing failed."
+                end
             else
                 raise "Can't parse #{@input_file}"
             end
+        end
+
+        def create_expression (output_state)
+            collapser = ExpressionCollapser.new(@expr_evaluator)
+            output = Array(Tuple(StorageKey, DFGExpr)).new
+
+            output_storage = output_state.expr.as(StorageRef)
+            (0..output_storage.@type.sizeof()-1).each do |i|
+                    sk = StorageKey.new(output_storage.@storage, i)
+                    out_expr = output_state.symtab.eager_lookup(sk).as(DFGExpr)
+                    value = collapser.collapse_tree(out_expr)
+                    output << {sk, value}
+            end
+
+            return output
         end
 
         # Indices of the arguments for the root call - first argument
