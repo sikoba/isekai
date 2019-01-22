@@ -7,7 +7,7 @@ test: $(wildcard src/**/*.cr) $(wildcard src/*.cr) $(wildcard spec/*.cr)
 
 .PHONY: container_test
 container_test: $(wildcard src/**/*.cr) $(wildcard src/*.cr) $(wildcard spec/*.cr)
-	docker run -w $(PWD) -v $(PWD):$(PWD) isekai crystal spec
+	docker run --rm -w $(PWD) -v $(PWD):$(PWD) isekai crystal spec
 
 .PHONY: clean
 clean:
