@@ -90,7 +90,7 @@ module Isekai
                   next Clang::ChildVisitResult::Recurse
               end
             else
-                puts "Cursor Nil"
+                STDERR.puts "Cursor Nil"
             end
       end
 
