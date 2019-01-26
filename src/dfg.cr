@@ -171,15 +171,6 @@ class Conditional < Op
 
     def_equals @cond, @valtrue, @valfalse 
 end
-
-def self.dfg (dfg_name, *args)
-    if dfg_name.is_a? BinaryMath
-        raise "Can't create abstract classes."
-    else
-        return dfg_name.new(*args)
-    end
-end
-
   
 
 # Binary operation. Perform `@op` on two operands `@left` and `@right`
