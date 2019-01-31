@@ -1072,7 +1072,7 @@ module Isekai
                     end
                 end          
 
-                # Unroll the scopes and apply changes
+                # Unroll the scopes and conditionally apply changes to the expressions
                 while (cond_stack.size > 0)
                     cond = cond_stack.pop()
                     scope = scope_stack.pop()
@@ -1080,6 +1080,11 @@ module Isekai
                     raise "Mismatch between scope and cond stack size" if scope.is_a? Nil
                     modified_idents = scope.@scope
                     raise "Missing scope in dynamic loop unrolling" if modified_idents.is_a? Nil
+
+                    # For every identifier modified in the current scope, create a conditional
+                    # based on the loop condition - if the condition is true, take the value
+                    # from the scope, if it's false, take the value from the parent scope.c
+                    # This is equivalent of not running the scope if the condition is false.
 
                     applied_symtab = working_symtab
                     modified_idents.each do |id|
