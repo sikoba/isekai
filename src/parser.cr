@@ -659,10 +659,6 @@ module Isekai
                     # Unary operator - unwrap the operand (may be hidden behind FirstExpr)
                     child = ClangUtils.getFirstChild(expression)
                     raise "Unary expression incomplete" unless !child.is_a? Nil
-                    if child.kind.first_expr?
-                        child = ClangUtils.getFirstChild(child) 
-                    end
-                    raise "Unary expression incomplete" unless !child.is_a? Nil
                     Log.log.debug "Child: #{child} op str: #{expression.operator_str}"
 
                     case expression.operator_str

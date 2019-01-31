@@ -174,6 +174,10 @@ module Isekai
           result = nil
 
           cursor.visit_children do |child|
+              if child.kind.first_expr? || child.kind.first_decl?
+                  next Clang::ChildVisitResult::Recurse
+              end
+
               result = child
               next Clang::ChildVisitResult::Break
           end
