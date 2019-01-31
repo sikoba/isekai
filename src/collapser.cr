@@ -1,16 +1,16 @@
 require "./dfg.cr"
 
 module Isekai
-abstract class Collapser
+abstract class Collapser(ExprType, ReducedType)
     def initialize()
-        @table = Hash(DFGExpr, DFGExpr).new()
+        @table = Hash(ExprType, (Constant|ReducedType)).new()
     end
 
-    abstract def get_dependencies(key)
+    abstract def get_dependencies(key) : Array(ExprType)
     abstract def collapse_impl(key)
 
-    def collapse_tree(key)
-        stack = Array(DFGExpr).new()
+    def collapse_tree(key : ExprType)
+        stack = Array(ExprType).new()
         stack.push(key)
 
         while stack.size() > 0
@@ -22,10 +22,10 @@ abstract class Collapser
             end
 
             # get all dependencies for this expression
-            deps = get_dependencies(key)
+            deps : Array(ExprType) = get_dependencies(key)
             raise "Can't get dependencies" if deps.is_a? Nil
             
-            new_deps = Array(DFGExpr).new()
+            new_deps = Array(ExprType).new()
 
             deps.each do |key|
                 if !@table[key]?
@@ -40,11 +40,14 @@ abstract class Collapser
             if new_deps.size() == 0
                 stack.pop()
                 res = collapse_impl(key)
-                if res.is_a? Int32
-                    res = Constant.new(res)
-                end
-                if res.is_a? Bool
-                    res = Constant.new(res ? 1 : 0)
+
+                if ReducedType.is_a? DFGExpr
+                    if res.is_a? Int32
+                        res = Constant.new(res)
+                    end
+                    if res.is_a? Bool
+                        res = Constant.new(res ? 1 : 0)
+                    end
                 end
 
                 if res
@@ -59,23 +62,34 @@ abstract class Collapser
 
         end
 
-        return @table[key]
+        return @table[key].as(ReducedType)
     end
 
     def lookup (key)
-        return @table[key]
+        return @table[key].as(ReducedType)
     end
 end
 
 # Expression evaluator - evaluates the expression to scalar
 # constants
-class ExpressionEvaluator < Collapser
+class ExpressionEvaluator(ExprType, ReducedType) < Collapser(ExprType, ReducedType)
     def get_dependencies(expr)
         return expr.collapse_dependencies()
     end
 
     def collapse_impl(expr)
-        return expr.evaluate(self)
+        evaluate = expr.evaluate(self)
+        if evaluate.is_a? Int32
+            return Constant.new(evaluate)
+        elsif evaluate.is_a? Bool
+            if evaluate
+                return Constant.new(1)
+            else 
+                return Constant.new(0)
+            end 
+        else
+            return evaluate.as(ReducedType)
+        end
     end 
 
     def get_input(key)
@@ -86,8 +100,8 @@ end
 
 # Expression collapser - evaluates the expression to their minimal
 # form (with no dependency expressions that are consisted only of constants)
-class ExpressionCollapser < Collapser
-    def initialize (@expr_evaluator : ExpressionEvaluator)
+class ExpressionCollapser(ExprType, ReducedType) < Collapser(ExprType, ReducedType)
+    def initialize (@expr_evaluator : ExpressionEvaluator(ExprType, ReducedType))
         super()
     end
 
@@ -96,7 +110,7 @@ class ExpressionCollapser < Collapser
     end
 
     def collapse_impl(expr)
-        return expr.collapse_constants(self)
+        return expr.collapse_constants(self).as(ReducedType)
     end
 
     def evaluate_as_constant(expr)

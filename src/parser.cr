@@ -101,7 +101,7 @@ module Isekai
                         @bit_width : Int32, @progress = false)
             @loops = 0
             @sanity = 0
-            @expr_evaluator = ExpressionEvaluator.new
+            @expr_evaluator = ExpressionEvaluator(DFGExpr, DFGExpr).new
             @index = Clang::Index.new
         end
 
@@ -111,8 +111,6 @@ module Isekai
                 @ast_cursor = tu.cursor
                 global_symtable = create_global_symtab
                 @parsed = root_funccall(global_symtable)
-                @tu = nil
-                @index = nil
 
                 if parsed = @parsed
                     @output = create_expression(parsed)
@@ -122,6 +120,14 @@ module Isekai
             else
                 raise "Can't parse #{@input_file}"
             end
+
+            if inputs = @inputs
+                if output = @output
+                    return {inputs, output}
+                end
+            end
+
+            raise "Couldn't parse the input file (no input/output found)."
         end
 
         def create_expression (output_state)
