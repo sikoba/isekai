@@ -1,5 +1,7 @@
 require "option_parser"
 require "./parser.cr"
+require "./backend/arithfactory"
+require "./backend/booleanfactory"
 
 module Isekai
     # Structure holding the options passed by the user
@@ -62,6 +64,18 @@ module Isekai
                                  opts.clang_args,
                                  opts.loop_sanity_limit,
                                  opts.bit_width, opts.progress)
+
+            inputs, output = parser.parse()
+
+            
+
+            if opts.arith_file
+                ArithFactory.new(opts.arith_file, inputs, parser.@nizk_inputs, output, opts.bit_width)
+            end
+
+            if opts.arith_file
+                BooleanFactory.new(opts.arith_file, inputs, output, opts.bit_width)
+            end
         end
     end
 end

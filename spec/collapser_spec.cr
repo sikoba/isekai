@@ -9,8 +9,8 @@ describe Isekai do
     mul_expr = Isekai::Multiply.new(five, four)
 
     # evaluate the expression
-    expr_eval = Isekai::ExpressionEvaluator.new()
-    expr_collapser = Isekai::ExpressionCollapser.new(expr_eval)
+    expr_eval = Isekai::ExpressionEvaluator(Isekai::DFGExpr, Isekai::DFGExpr).new()
+    expr_collapser = Isekai::ExpressionCollapser(Isekai::DFGExpr, Isekai::DFGExpr).new(expr_eval)
 
     evaluated = expr_collapser.collapse_tree(add_expr)
     (evaluated.as Isekai::Constant).@value.should eq 9
