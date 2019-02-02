@@ -101,8 +101,7 @@ class ExpressionCollapser < Collapser
 
     def evaluate_as_constant(expr)
         const = @expr_evaluator.collapse_tree(expr)
-        raise NonconstantExpression.new("Can't resolve #{expr} as constant") \
-            unless const.is_a? Constant
+        raise NonconstantExpression.new("Can't resolve #{expr} as constant") unless const.is_a? Constant
         return const.as Constant
     end
 end

@@ -487,8 +487,7 @@ module Isekai
             # word inside a compound type, instantiate a StorageKey with the
             # right value and offset
             if !initial_values.is_a? Nil
-                raise "The initial values doesn't match the type's size." \
-                    unless initial_values.size == store_type.sizeof
+                raise "The initial values doesn't match the type's size." unless initial_values.size == store_type.sizeof
 
                         (0..initial_values.size-1).each do |i| 
                             value = initial_values[i]
@@ -1158,8 +1157,7 @@ module Isekai
 
             def evaluate (expr : DFGExpr) : Int32
                 resolved_const = @expr_evaluator.collapse_tree(expr)
-                raise NonconstantExpression.new("Can't resolve #{expr} to Constant") \
-                    unless resolved_const.is_a? Constant
+                raise NonconstantExpression.new("Can't resolve #{expr} to Constant") unless resolved_const.is_a? Constant
                 return (resolved_const.as Constant).@value
             end 
 

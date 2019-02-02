@@ -38,22 +38,14 @@ module Isekai
             # explanations refer to struct ProgramOptions
             OptionParser.parse! do |parser|
                 parser.banner = "Usage: isekai [arguments] file"
-                parser.on("-c", "--cpparg=ARGS", "Extra arguments to clang")\
-                    { |args| opts.clang_args = args }
-                parser.on("-a", "--arith=FILE", "Arithmetic circuit output file")\
-                    { |file| opts.arith_file = file }
-                parser.on("-b", "--bool=FILE", "Boolean circuit output file")\
-                    { |file| opts.bool_file = file }
-                parser.on("-w", "--bit-width", "Width of the word in bits (used for overflow/bitwise operations)")\
-                    { |width| opts.bit_width = width.to_i() }
-                parser.on("-l", "--loop-sanity-limit=LIMIT", "Limit on statically-measured loop unrolling")\
-                    { |limit| opts.loop_sanity_limit = limit.to_i }
-                parser.on("-p", "--progress", "Print progress messages during compilation")\
-                    { opts.progress = true }
-                parser.on("-i", "--ignore-overflow", "Ignore field-P overflows; never truncate")\
-                    { opts.ignore_overflow = true }
-                parser.on("-x", "--print-exprs", "Print output expressions to stdout")\
-                    { opts.print_exprs = true }
+                parser.on("-c", "--cpparg=ARGS", "Extra arguments to clang") { |args| opts.clang_args = args }
+                parser.on("-a", "--arith=FILE", "Arithmetic circuit output file") { |file| opts.arith_file = file }
+                parser.on("-b", "--bool=FILE", "Boolean circuit output file") { |file| opts.bool_file = file }
+                parser.on("-w", "--bit-width", "Width of the word in bits (used for overflow/bitwise operations)") { |width| opts.bit_width = width.to_i() }
+                parser.on("-l", "--loop-sanity-limit=LIMIT", "Limit on statically-measured loop unrolling") { |limit| opts.loop_sanity_limit = limit.to_i }
+                parser.on("-p", "--progress", "Print progress messages during compilation") { opts.progress = true }
+                parser.on("-i", "--ignore-overflow", "Ignore field-P overflows; never truncate") { opts.ignore_overflow = true }
+                parser.on("-x", "--print-exprs", "Print output expressions to stdout") { opts.print_exprs = true }
                 parser.on("-h", "--help", "Show this help") { puts parser; exit 0 }
             end
 
