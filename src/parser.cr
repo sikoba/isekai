@@ -109,7 +109,7 @@ module Isekai
             @tu =  ClangUtils.parse_file_to_ast_tree(@index, @input_file, @clang_args)
             if tu = @tu
                 @ast_cursor = tu.cursor
-                global_symtable = create_global_symtab
+                global_symtable = create_global_symtab()
                 @parsed = root_funccall(global_symtable)
 
                 if parsed = @parsed

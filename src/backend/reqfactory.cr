@@ -34,6 +34,9 @@ module Isekai
 
             # Generate output file from Field
             write_to_file(output_filename)
+
+            # Generate input file from Field
+            write_inputs_to_file("#{output_filename}.in")   #todo remove .arith extension
         end
 
         # Differs for arithmetic and boolean circuits.
@@ -165,6 +168,23 @@ module Isekai
             end 
             File.write(filename, File.read(tmp_file.path()))
             tmp_file.delete
+        end
+
+        # Writes inputs into the file, one variable per line.
+        def write_inputs_to_file (filename)
+            tmp_file = File.tempfile(".tmp") do |file|
+                # varaibles: circuit_inputs/ constant / circuit_nizk_inputs / LOGIC / circuit_outputs.size
+                #TODO What about LOGIC variables?
+                #arith file: inputs +1
+                i = 0;
+                @circuit_inputs.each do |circuit_in|
+                    file.print("#{i} 0\n")  #No value..yet...
+                    i += 1                   
+                end
+                file.print("#{i} 1\n")
+            end 
+            FileUtils.mv(tmp_file.path(), filename)
+
         end
     end
 end

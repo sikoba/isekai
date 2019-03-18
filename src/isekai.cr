@@ -2,6 +2,8 @@ require "option_parser"
 require "./parser.cr"
 require "./backend/arithfactory"
 require "./backend/booleanfactory"
+require "./zksnark/libsnark.cr"
+require "file_utils.cr"
 
 module Isekai
     # Structure holding the options passed by the user
@@ -20,6 +22,9 @@ module Isekai
         # an boolean circuit if set
         # an arithmetic circuit if set
         property bool_file = ""
+        # R1CS output file - the program will output
+        # a r1cs json file if set
+        property r1cs_file = ""
         # Number of bits in the word - used in the bitwise operations
         # (left shift/right shift/etc) and in calculations/side-effects that
         # are bitwidth-aware - 2nd complement's arithmetic/overflow detection
@@ -35,7 +40,7 @@ module Isekai
         # Main 
         def main
             opts = ProgramOptions.new
-
+           
             # Parse the program options. For the detailed
             # explanations refer to struct ProgramOptions
             OptionParser.parse! do |parser|
@@ -43,6 +48,7 @@ module Isekai
                 parser.on("-c", "--cpparg=ARGS", "Extra arguments to clang") { |args| opts.clang_args = args }
                 parser.on("-a", "--arith=FILE", "Arithmetic circuit output file") { |file| opts.arith_file = file }
                 parser.on("-b", "--bool=FILE", "Boolean circuit output file") { |file| opts.bool_file = file }
+                parser.on("-r", "--r1cs=FILE", "R1CS output file") { |file| opts.r1cs_file = file }
                 parser.on("-w", "--bit-width", "Width of the word in bits (used for overflow/bitwise operations)") { |width| opts.bit_width = width.to_i() }
                 parser.on("-l", "--loop-sanity-limit=LIMIT", "Limit on statically-measured loop unrolling") { |limit| opts.loop_sanity_limit = limit.to_i }
                 parser.on("-p", "--progress", "Print progress messages during compilation") { opts.progress = true }
@@ -53,12 +59,12 @@ module Isekai
 
             # Filename is passed as the last argument.
             if ARGV.size() != 1
-                puts "There should be exactly one file argument"
+                puts "There should be exactly one file argument: #{ARGV.size()}"
                 exit 1
             end
 
             filename = ARGV[-1]
-
+    
             Log.setup(opts.progress)
             parser = CParser.new(filename,
                                  opts.clang_args,
@@ -66,8 +72,8 @@ module Isekai
                                  opts.bit_width, opts.progress)
 
             inputs, output = parser.parse()
-
-            
+     
+            #add: pp output.state  to print the AST
 
             if opts.arith_file != ""
                 ArithFactory.new(opts.arith_file, inputs, parser.@nizk_inputs, output, opts.bit_width)
@@ -76,6 +82,29 @@ module Isekai
             if opts.bool_file != ""
                 BooleanFactory.new(opts.arith_file, inputs, output, opts.bit_width)
             end
+        
+
+            #r1cs
+            if opts.r1cs_file != ""
+                if opts.arith_file != ""
+                    tempArith = opts.arith_file
+                else
+                    tempArith = File.tempfile("arith").path
+                    ArithFactory.new(tempArith, inputs, parser.@nizk_inputs, output, opts.bit_width)
+                end
+                tempIn = "#{tempArith}.in"
+                if File.exists?(tempIn) == false
+                    puts "inputs file #{tempIn} is missing\n"
+                else
+                    LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
+                end
+                #clean-up
+                if opts.arith_file == ""
+                    FileUtils.rm(tempArith)
+                end
+            end
+
+          
         end
     end
 end
