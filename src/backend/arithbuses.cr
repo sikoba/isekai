@@ -18,7 +18,7 @@ abstract class ArithmeticBus < Bus
     # Abstract, but has to be implemented to avoid
     # nonsense implementations in concrete cases.
 	def get_trace_count() : Int32
-        return 0
+        return 1
     end
 
     def get_active_bits() : Int32
@@ -27,7 +27,12 @@ abstract class ArithmeticBus < Bus
 
     # Gets the value of the last wire. Will be overriden
 	def do_trace(j)
-        raise "Abstract."
+        raise "Bus should implement more if wants to access non-last element" unless j == 0
+        if wire_list = @wire_list
+            return wire_list[-1]
+        else
+            raise "No wire list yet assigned."
+        end
     end
 end
 
