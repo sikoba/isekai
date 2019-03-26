@@ -2,8 +2,11 @@ require "option_parser"
 require "./parser.cr"
 require "./backend/arithfactory"
 require "./backend/booleanfactory"
+require "file_utils"
 require "./zksnark/libsnark.cr"
-require "file_utils.cr"
+# TODO require "./crystal/ast_dump"
+
+
 
 module Isekai
     # Structure holding the options passed by the user
@@ -25,6 +28,8 @@ module Isekai
         # R1CS output file - the program will output
         # a r1cs json file if set
         property r1cs_file = ""
+        # root name for the generated files for snark proofs. Files will get a suffix 
+        property root_file = ""
         # Number of bits in the word - used in the bitwise operations
         # (left shift/right shift/etc) and in calculations/side-effects that
         # are bitwidth-aware - 2nd complement's arithmetic/overflow detection
@@ -40,6 +45,11 @@ module Isekai
         # Main 
         def main
             opts = ProgramOptions.new
+
+           # debugger
+           # dump "[1,2,3].each do |e|
+           #     puts e
+           #   end"
            
             # Parse the program options. For the detailed
             # explanations refer to struct ProgramOptions
@@ -49,6 +59,7 @@ module Isekai
                 parser.on("-a", "--arith=FILE", "Arithmetic circuit output file") { |file| opts.arith_file = file }
                 parser.on("-b", "--bool=FILE", "Boolean circuit output file") { |file| opts.bool_file = file }
                 parser.on("-r", "--r1cs=FILE", "R1CS output file") { |file| opts.r1cs_file = file }
+                parser.on("-s", "--snark=FILE", "root file name") { |file| opts.root_file = file }
                 parser.on("-w", "--bit-width", "Width of the word in bits (used for overflow/bitwise operations)") { |width| opts.bit_width = width.to_i() }
                 parser.on("-l", "--loop-sanity-limit=LIMIT", "Limit on statically-measured loop unrolling") { |limit| opts.loop_sanity_limit = limit.to_i }
                 parser.on("-p", "--progress", "Print progress messages during compilation") { opts.progress = true }
@@ -64,7 +75,28 @@ module Isekai
             end
 
             filename = ARGV[-1]
-    
+
+            #snakes
+            if opts.root_file != ""
+                snarc = LibSnark.new()
+                snarc.vcSetup(filename, opts.root_file + ".s")
+                snarc.proof(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
+
+                if snarc.verify(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
+                    puts "Proved execution successfully with libSnark, generated:
+                        Trusted setup : #{opts.root_file}.s
+                        Proof: #{opts.root_file}.p"
+                else
+                    puts "error generating the proof\n"
+                end
+                return
+            end         
+            #verify
+            #snarc = LibSnark.new()
+            #root_name = opts.root_file
+            #if result = snarc.verify(root_name +".s", filename + ".in", root_name + ".p")
+            #    result.should eq(true)
+            
             Log.setup(opts.progress)
             parser = CParser.new(filename,
                                  opts.clang_args,
@@ -72,17 +104,16 @@ module Isekai
                                  opts.bit_width, opts.progress)
 
             inputs, output = parser.parse()
-     
+            
             #add: pp output.state  to print the AST
 
             if opts.arith_file != ""
                 ArithFactory.new(opts.arith_file, inputs, parser.@nizk_inputs, output, opts.bit_width)
             end
-
             if opts.bool_file != ""
                 BooleanFactory.new(opts.arith_file, inputs, output, opts.bit_width)
             end
-        
+            
 
             #r1cs
             if opts.r1cs_file != ""

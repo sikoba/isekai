@@ -20,15 +20,24 @@ describe LibSnark do
         File.exists?("temp.r1").should eq(true)
         snarc.vcSetup("temp.r1", "temp.s")
         File.exists?("temp.s").should eq(true)
-        snarc.proof("temp.s", "simple_example.in.json", "temp.p")
+        snarc.proof("temp.s", "temp.r1.in", "temp.p")
         File.exists?("temp.p").should eq(true)
-        result = snarc.verify("temp.s", "simple_example.in.json", "temp.p")
+        result = snarc.verify("temp.s", "temp.r1.in", "temp.p")
         result.should eq(true)
         
         FileUtils.rm("temp.r1")
+        FileUtils.rm("temp.r1.in")
         FileUtils.rm("temp.s")
         FileUtils.rm("temp.p")
     end
 
+    it "R1CS" do
+        snarc = LibSnark.new()
+        snarc.generateR1cs("simple_example.arith","simple_example.in", "temp.r1")
+        File.exists?("temp.r1").should eq(true)
+        
+        FileUtils.rm("temp.r1")
+
+    end
 
 end

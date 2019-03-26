@@ -6,10 +6,10 @@ To find out more, read our recent (11 Feb 19) [Medium post](https://medium.com/s
 
 ## Description
 
-Isekai is a tool which parses a C program and outputs the arithmetic and/or
+Isekai is a tool for zero-knowledge applications. It parses a C program and outputs the arithmetic and/or
 boolean circuit representing the expression equivalent to the input program.
 Isekai uses libclang to parse the C program, so most of the preprocessor
-(including the includes) is available. Isekai is written using crystal
+(including the includes) is available. Then isekai uses libsnark to produce a rank-1 constraints system from the arithmetic representation. Isekai can then proove and verify the program execution using libsnark. Isekai is written using crystal
 programming language allowing for a strong type safety and it is compiled to a
 native executable, ensuring maximum efficiency in parsing.
 
@@ -68,3 +68,13 @@ run make within the container:
 ```
 docker run --rm -w $PWD -v $PWD:$PWD isekai make test
 ```
+
+## Usage
+In order to generate an arithmetic representation of a C program, use the following command:
+./isekai --arith=output_file.arith my_C_prog.c
+To generate the rank-1 contraints system (r1cs)
+./isekai --r1cs=output_file.r1 my_C_prog.c
+You can do both operations at the same time using --r1cs and arith options
+To generate (and verify) a proof with libsnark:
+./isekai --snark=my_snark output_file.r1
+If the verification pass, this command will generate json files of the proof (my_snark.p) and trusted setup (my_snark.s)
