@@ -71,10 +71,21 @@ docker run --rm -w $PWD -v $PWD:$PWD isekai make test
 
 ## Usage
 In order to generate an arithmetic representation of a C program, use the following command:
+
+...
 ./isekai --arith=output_file.arith my_C_prog.c
+...
+
 To generate the rank-1 contraints system (r1cs)
+
+...
 ./isekai --r1cs=output_file.r1 my_C_prog.c
-You can do both operations at the same time using --r1cs and arith options
-To generate (and verify) a proof with libsnark:
+...
+
+You can do both operations at the same time using --r1cs and arith options. To generate (and verify) a proof with libsnark:
+
+...
 ./isekai --snark=my_snark output_file.r1
+...
+
 If the verification pass, this command will generate json files of the proof (my_snark.p) and trusted setup (my_snark.s)
