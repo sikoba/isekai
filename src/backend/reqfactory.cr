@@ -10,7 +10,7 @@ module Isekai
     # The translation from DFGExpr into BusReq is inside make_req.
     abstract class RequestFactory < Collapser(BaseReq, Bus)
         def initialize(@output_filename : String, @circuit_inputs : Array(DFGExpr), @circuit_nizk_inputs : Array(DFGExpr)|Nil,
-                @circuit_outputs : Array(Tuple(StorageKey, DFGExpr)), @bit_width)
+                @circuit_outputs : Array(Tuple(StorageKey, DFGExpr)), @bit_width, @circuit_inputs_val : Array(Int32))
             super()
 
             # lay down the board, one and zero buses
@@ -72,10 +72,10 @@ module Isekai
         def generate_output_buses(circuit_outputs)
             i = 0
             circuit_outputs.each do |output|
-                name, expr = output
-                expression_bus = collapse_tree(make_req(expr, type()).as(BaseReq))
-                out_bus = make_output_bus(expression_bus, i)
-                i += 1
+                name, expr = output       
+                expression_bus = collapse_tree(make_req(expr, type()).as(BaseReq))      
+                out_bus = make_output_bus(expression_bus, i)    
+                i += 1;
                 add_extra_bus(out_bus)
             end
         end
@@ -178,10 +178,25 @@ module Isekai
                 #arith file: inputs +1
                 i = 0;
                 @circuit_inputs.each do |circuit_in|
-                    file.print("#{i} 0\n")  #No value..yet...
+                    val = 0;
+                    if i < @circuit_inputs_val.size
+                        val = @circuit_inputs_val[i];
+                    end
+                    file.print("#{i} #{val.to_s(16)}\n")  #No value..yet...
                     i += 1                   
                 end
-                file.print("#{i} 1\n")
+                file.print("#{i} 1\n")      # the ONE constant
+                i += 1
+                if nzik = @circuit_nizk_inputs
+                    nzik.each do |circuit_in|
+                        val = 0;
+                        if i < @circuit_inputs_val.size
+                            val = @circuit_inputs_val[i];
+                        end
+                        file.print("#{i} #{val.to_s(16)}\n")  #No value..yet...
+                        i += 1                   
+                    end
+                end
             end 
             FileUtils.mv(tmp_file.path(), filename)
 

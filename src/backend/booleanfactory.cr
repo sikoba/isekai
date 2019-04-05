@@ -9,7 +9,7 @@ module Isekai
 class BooleanFactory < RequestFactory
     def initialize(@output_filename : String, @circuit_inputs : Array(DFGExpr),
         @circuit_outputs : Array(Tuple(StorageKey, DFGExpr))?, @bit_width : Int32)
-        super(@output_filename, @circuit_inputs, nil, @circuit_outputs, @bit_width)
+        super(@output_filename, @circuit_inputs, nil, @circuit_outputs, @bit_width, [] of Int32)
     end
 
     def type : String

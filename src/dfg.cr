@@ -27,6 +27,9 @@ class DFGExpr < SymbolTableValue
         raise "Undefined method evaluate on #{self.class}"
     end
 
+    def class_name
+        return self.class.name
+    end
 
 end
 
@@ -480,6 +483,13 @@ class Negate < UnaryOp
 	def initialize(@expr)
 		super("Negate", @expr)
     end
+
+    def evaluate(collapser)
+        return -collapser.lookup(@expr).as(Constant).@value  
+    end
+
+    def_hash @expr, class_name
+    def_equals @expr, class_name
 end
 
 # Program input expression. The subclass for both NIZK and regular

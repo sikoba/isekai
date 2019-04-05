@@ -61,7 +61,7 @@ end
 abstract class ArithmeticInputBaseBus < ArithmeticBus
     @used : Bool?
  
-	def initialize (@major, @board, @input_idx)
+	def initialize (@major, @board, @input_idx : Int32)
         super(@board, @major)
         @used = nil
     end
@@ -77,6 +77,15 @@ abstract class ArithmeticInputBaseBus < ArithmeticBus
 
 	def get_wire_count()
         return 1
+    end
+
+    #Fix issue with reverse inputs; order is stricly on the input index, and not just on the type
+    def <(other : Bus)
+        if other.is_a? typeof(self)
+           return @input_idx < other.as(typeof(self)).@input_idx
+        else
+            return super(other)
+        end
     end
 end
 
@@ -318,7 +327,7 @@ class JoinBus < Bus
 	# Convert a Constants::BOOLEAN_TRACE bus into an Constants::ARITHMETIC_TRACE bus
 	def initialize (@board, @input_bus : Bus)
         super(@board, Constants::MAJOR_LOGIC)
-		raise "Already arith. bus" if (input_bus.get_trace_type() == Constants::BOOLEAN_TRACE)
+		raise "Already arith. bus" if (input_bus.get_trace_type() == Constants::ARITHMETIC_TRACE)
 		@input_bus = input_bus
 		@active_bits = input_bus.get_trace_count()
     end

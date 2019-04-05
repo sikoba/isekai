@@ -8,8 +8,8 @@ module Isekai
 # Check ReqFactory's documentation.
 class ArithFactory < RequestFactory
     def initialize(@output_filename : String, @circuit_inputs : Array(DFGExpr), @circuit_nizk_inputs : Array(DFGExpr)|Nil,
-        @circuit_outputs : Array(Tuple(StorageKey, DFGExpr))?, @bit_width : Int32)
-        super(@output_filename, @circuit_inputs, @circuit_nizk_inputs, @circuit_outputs, @bit_width)
+        @circuit_outputs : Array(Tuple(StorageKey, DFGExpr))?, @bit_width : Int32, @circuit_inputs_val : Array(Int32))
+        super(@output_filename, @circuit_inputs, @circuit_nizk_inputs, @circuit_outputs, @bit_width, @circuit_inputs_val)
     end
 
 	def type : String
@@ -67,7 +67,7 @@ class ArithFactory < RequestFactory
         return result
     end
 
-    # If the type of the buses, doesn't match, use SplutBus/JoinBus
+    # If the type of the buses, doesn't match, use SplitBus/JoinBus
     # to convert.
 	def collapse_req(req)
 		if (req.natural_type() == req.@trace_type)

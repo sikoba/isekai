@@ -30,6 +30,8 @@ module Isekai
         property r1cs_file = ""
         # root name for the generated files for snark proofs. Files will get a suffix 
         property root_file = ""
+        # root name for trusted setup and proof (snark)
+        property verif_file = ""
         # Number of bits in the word - used in the bitwise operations
         # (left shift/right shift/etc) and in calculations/side-effects that
         # are bitwidth-aware - 2nd complement's arithmetic/overflow detection
@@ -60,6 +62,7 @@ module Isekai
                 parser.on("-b", "--bool=FILE", "Boolean circuit output file") { |file| opts.bool_file = file }
                 parser.on("-r", "--r1cs=FILE", "R1CS output file") { |file| opts.r1cs_file = file }
                 parser.on("-s", "--snark=FILE", "root file name") { |file| opts.root_file = file }
+                parser.on("-v", "--verif=FILE", "input file name") { |file| opts.verif_file = file }
                 parser.on("-w", "--bit-width", "Width of the word in bits (used for overflow/bitwise operations)") { |width| opts.bit_width = width.to_i() }
                 parser.on("-l", "--loop-sanity-limit=LIMIT", "Limit on statically-measured loop unrolling") { |limit| opts.loop_sanity_limit = limit.to_i }
                 parser.on("-p", "--progress", "Print progress messages during compilation") { opts.progress = true }
@@ -71,13 +74,29 @@ module Isekai
             # Filename is passed as the last argument.
             if ARGV.size() != 1
                 puts "There should be exactly one file argument: #{ARGV.size()}"
+                #filename = "ex1.c"
+                #opts.arith_file = "ex1.ari"
                 exit 1
+            else 
+                filename = ARGV[-1]
             end
 
-            filename = ARGV[-1]
-
             #snakes
+            if opts.verif_file != ""
+                #verify
+                snarc = LibSnark.new()
+                root_name = opts.verif_file
+                result = snarc.verify(root_name + ".s", filename, root_name + ".p")
+                if result == true
+                    puts "Congratulations, the proof is correct!\n"
+                else
+                    puts "Incorrect statement\n"
+                end
+                return
+            end
+
             if opts.root_file != ""
+                #proof
                 snarc = LibSnark.new()
                 snarc.vcSetup(filename, opts.root_file + ".s")
                 snarc.proof(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
@@ -91,11 +110,7 @@ module Isekai
                 end
                 return
             end         
-            #verify
-            #snarc = LibSnark.new()
-            #root_name = opts.root_file
-            #if result = snarc.verify(root_name +".s", filename + ".in", root_name + ".p")
-            #    result.should eq(true)
+  
             
             Log.setup(opts.progress)
             parser = CParser.new(filename,
@@ -103,12 +118,20 @@ module Isekai
                                  opts.loop_sanity_limit,
                                  opts.bit_width, opts.progress)
 
-            inputs, output = parser.parse()
+            inputs, output = parser.parse()         
             
-            #add: pp output.state  to print the AST
+            #pp output #add: pp output.state  to print the AST
+            in_file = filename + ".in"   #optional file containing the input values to the program
+            in_array = [] of Int32
+            if File.exists?(in_file)
+                File.each_line(in_file) do |line|
+                    in_array << line.to_i32 { 0 }
+                end
+            end
+            in_array << 0
 
             if opts.arith_file != ""
-                ArithFactory.new(opts.arith_file, inputs, parser.@nizk_inputs, output, opts.bit_width)
+                ArithFactory.new(opts.arith_file, inputs, parser.@nizk_inputs, output, opts.bit_width, in_array)
             end
             if opts.bool_file != ""
                 BooleanFactory.new(opts.arith_file, inputs, output, opts.bit_width)
@@ -121,7 +144,7 @@ module Isekai
                     tempArith = opts.arith_file
                 else
                     tempArith = File.tempfile("arith").path
-                    ArithFactory.new(tempArith, inputs, parser.@nizk_inputs, output, opts.bit_width)
+                    ArithFactory.new(tempArith, inputs, parser.@nizk_inputs, output, opts.bit_width, in_array)
                 end
                 tempIn = "#{tempArith}.in"
                 if File.exists?(tempIn) == false

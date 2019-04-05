@@ -185,9 +185,9 @@ module Isekai
         def natural_type 
             return Constants::BOOLEAN_TRACE
         end
-
+        #NOT needs to be applied on any UnaryOp
         def natural_dependencies
-            return [make_req(@expr.as(Negate).@expr, Constants::BOOLEAN_TRACE)]
+            return [make_req(@expr.as(UnaryOp).@expr, Constants::BOOLEAN_TRACE)]
         end
 
     end
@@ -210,7 +210,12 @@ module Isekai
             wide_bus = get_bus_from_req(make_req(@expr, Constants::BOOLEAN_TRACE))
             return make_logical_cast(wide_bus)
         end
+        #The natural dependency for it is just the expression itself because it doesn’t depend on anything else:
+        def natural_dependencies
+            return [make_req(@expr, Constants::BOOLEAN_TRACE)]
+        end
     end
+   
 
     # Lays down shift request. Right operand must be constant.
     abstract class ShiftRequest < BusReq
