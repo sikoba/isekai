@@ -683,9 +683,9 @@ module Isekai
                     when "!="
                         dfg_expr = dfg(CmpNEQ, left_state.expr, right_state.expr)
                     when ">"
-                        dfg_expr = dfg(CmpGT, left_state.expr, right_state.expr)
+                        dfg_expr = dfg(CmpLT, right_state.expr, left_state.expr) 
                     when ">="
-                        dfg_expr = dfg(CmpGEQ, left_state.expr, right_state.expr)
+                        dfg_expr = dfg(CmpLEQ, right_state.expr, left_state.expr) 
                     when "/"
                         dfg_expr = dfg(Divide, left_state.expr, right_state.expr)
                     when "%"

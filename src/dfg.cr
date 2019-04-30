@@ -394,34 +394,34 @@ class CmpNEQ < BinaryOp
 end
 
 # Greater-than compare operation
-class CmpGT < BinaryOp
-    def initialize (@left, @right)
-        super(">", @left, @right)
-    end
-
-    def evaluate(collapser)
-        begin
-            return collapser.lookup(@left).as(Constant).@value > collapser.lookup(@right).as(Constant).@value
-        rescue
-            raise NonconstantExpression.new("can't evaluate #{@left} > #{@right}")
-        end
-    end
-end
+#class CmpGT < BinaryOp
+#    def initialize (@left, @right)
+#       super(">", @left, @right)
+#    end
+#
+#    def evaluate(collapser)
+#        begin
+#            return collapser.lookup(@left).as(Constant).@value > collapser.lookup(@right).as(Constant).@value
+#        rescue
+#            raise NonconstantExpression.new("can't evaluate #{@left} > #{@right}")
+#        end
+#    end
+#end
 
 # Greater-than compare operation
-class CmpGEQ < BinaryOp
-    def initialize (@left, @right)
-        super(">=", @left, @right)
-    end
-
-    def evaluate(collapser)
-        begin
-            return collapser.lookup(@left).as(Constant).@value >= collapser.lookup(@right).as(Constant).@value
-        rescue
-            raise NonconstantExpression.new("can't evaluate #{@left} >= #{@right}")
-        end
-    end
-end
+#class CmpGEQ < BinaryOp
+#    def initialize (@left, @right)
+#        super(">=", @left, @right)
+#    end
+#
+#    def evaluate(collapser)
+#        begin
+#            return collapser.lookup(@left).as(Constant).@value >= collapser.lookup(@right).as(Constant).@value
+#        rescue
+#            raise NonconstantExpression.new("can't evaluate #{@left} >= #{@right}")
+#        end
+#    end
+#end
 
 # Unary operation. Perform `@op` on `@expr`
 class UnaryOp < Op
@@ -520,3 +520,4 @@ class NIZKInput < InputBase
 end
 
 end
+

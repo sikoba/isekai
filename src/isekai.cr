@@ -15,7 +15,7 @@ module Isekai
         # Additional arguments to pass to libclang (e.g. -I)
         property clang_args = ""
         # Dynamic loop unrolling limit
-        property loop_sanity_limit = 0
+        property loop_sanity_limit = 1000000
         # Print progress during the execution
         property progress = false
         # Arithmetic circuit output file - the program will output
