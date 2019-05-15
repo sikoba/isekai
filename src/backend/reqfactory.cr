@@ -187,14 +187,16 @@ module Isekai
                 end
                 file.print("#{i} 1\n")      # the ONE constant
                 i += 1
+                ni = 0
                 if nzik = @circuit_nizk_inputs
                     nzik.each do |circuit_in|
                         val = 0;
-                        if i < @circuit_inputs_val.size
-                            val = @circuit_inputs_val[i];
+                        if ni < @circuit_inputs_val.size
+                            val = @circuit_inputs_val[ni];
                         end
                         file.print("#{i} #{val.to_s(16)}\n")  #No value..yet...
-                        i += 1                   
+                        i += 1  
+                        ni += 1                 
                     end
                 end
             end 
