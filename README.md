@@ -72,12 +72,12 @@ docker run --rm -w $PWD -v $PWD:$PWD isekai make test
 ## Usage
 
 Isekai can generate a proof of the execution of a C function. 
-The C function must have the following signature:
+The C function must have one of the following signature:
+```
 void outsource(struct Input *input, struct NzikInput * nzik, struct Output *output);
-or 
 void outsource(struct Input *input, struct Output *output);
-or
 void outsource(struct NzikInput * nzik, struct Output *output);
+```
 Input and Output are public parameters and NzikInput are the private parameters (zero-knowledge). Inputs and NzikInputs can be provided in an additional file, by putting each value one per line. This input file must have the same name as the C program file, with an additional ‘.in’ extension. For instance, if the function is implemented in my_C_prog.c, the inputs must be provided in my_C_prog.c.in
 
 In order to generate an arithmetic representation of a C program, use the following command:
