@@ -70,6 +70,16 @@ docker run --rm -w $PWD -v $PWD:$PWD isekai make test
 ```
 
 ## Usage
+
+Isekai can generate a proof of the execution of a C function. 
+The C function must have the following signature:
+void outsource(struct Input *input, struct NzikInput * nzik, struct Output *output);
+or 
+void outsource(struct Input *input, struct Output *output);
+or
+void outsource(struct NzikInput * nzik, struct Output *output);
+Input and Output are public parameters and NzikInput are the private parameters (zero-knowledge). Inputs and NzikInputs can be provided in an additional file, by putting each value one per line. This input file must have the same name as the C program file, with an additional ‘.in’ extension. For instance, if the function is implemented in my_C_prog.c, the inputs must be provided in my_C_prog.c.in
+
 In order to generate an arithmetic representation of a C program, use the following command:
 
 ```
@@ -79,13 +89,25 @@ In order to generate an arithmetic representation of a C program, use the follow
 To generate the rank-1 contraints system (r1cs)
 
 ```
-./isekai --r1cs=output_file.r1 my_C_prog.c
+./isekai --r1cs=output_file.j1 my_C_prog.c
+```
+You can do both operations at the same time using --r1cs and arith options. 
+Isekai also generate the assignments in the file output_file.j1.in. It adds ‘.in’ to the filename provided in the r1cs option to get a file for the assignments. Note that existing files are overwritten by isekai.
+Isekai automatically uses the inputs provided in my_C_prog.c.in if it exists. If not, isekai assumes all the inputs are 0.
+
+
+To generate (and verify) a proof with libsnark:
+
+```
+./isekai --snark=my_snark output_file.j1
 ```
 
-You can do both operations at the same time using --r1cs and arith options. To generate (and verify) a proof with libsnark:
+If the verification pass, this command will generate json files of the proof (my_snark.p) and trusted setup (my_snark.s). Of course in real life, you should not generate a proof and the trusted setup at the same time!
+
+A verifier can verify the proof with the following command:
 
 ```
-./isekai --snark=my_snark output_file.r1
+./isekai --verif=my_snark output_file.j1.in
 ```
 
-If the verification pass, this command will generate json files of the proof (my_snark.p) and trusted setup (my_snark.s)
+A verifier should not know the private inputs (NzikInput) so you should remove the ‘witnesses’ part from the input file before giving it to the verifier.
