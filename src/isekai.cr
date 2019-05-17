@@ -44,6 +44,34 @@ module Isekai
     end
 
     class ParserProgram
+
+        # C => Arith/Bool circuit
+        def create_circuit(in_c_program, out_circuit, options)
+            parser = CParser.new(in_c_program,
+            options.clang_args,
+            options.loop_sanity_limit,
+            options.bit_width, options.progress)
+
+            inputs, output = parser.parse()         
+
+            #pp output #add: pp output.state  to print the AST
+            in_file = in_c_program + ".in"   #optional file containing the input values to the program
+            in_array = [] of Int32
+            if File.exists?(in_file)
+                File.each_line(in_file) do |line|
+                    in_array << line.to_i32 { 0 }
+                end
+            end
+            in_array << 0
+            ArithFactory.new(out_circuit, inputs, parser.@nizk_inputs, output, options.bit_width, in_array)
+        #    if options.arith_file != ""
+         #       ArithFactory.new(options.arith_file, inputs, parser.@nizk_inputs, output, options.bit_width, in_array)
+          #  end
+           # if options.bool_file != ""
+            #    BooleanFactory.new(options.arith_file, inputs, output, options.bit_width)
+            #end
+        end
+
         # Main 
         def main
             opts = ProgramOptions.new
@@ -111,41 +139,37 @@ module Isekai
                 return
             end         
   
-            
-            Log.setup(opts.progress)
-            parser = CParser.new(filename,
-                                 opts.clang_args,
-                                 opts.loop_sanity_limit,
-                                 opts.bit_width, opts.progress)
-
-            inputs, output = parser.parse()         
-            
-            #pp output #add: pp output.state  to print the AST
-            in_file = filename + ".in"   #optional file containing the input values to the program
-            in_array = [] of Int32
-            if File.exists?(in_file)
-                File.each_line(in_file) do |line|
-                    in_array << line.to_i32 { 0 }
+            #circuit
+            arith_input = false
+            if File.exists?(filename) == false
+                puts "file #{filename} is missing\n"
+                return
+            else
+                File.each_line(filename) do |line|
+                    if line.starts_with?("total")
+                        arith_input = true; #instead of the C program, the input file is an arithmetic circuit
+                    end
+                    break
                 end
             end
-            in_array << 0
-
-            if opts.arith_file != ""
-                ArithFactory.new(opts.arith_file, inputs, parser.@nizk_inputs, output, opts.bit_width, in_array)
-            end
-            if opts.bool_file != ""
-                BooleanFactory.new(opts.arith_file, inputs, output, opts.bit_width)
+            Log.setup(opts.progress)
+            #Generate the arithmetic circuit if arith option is set or r1cs option is set (a temp arith file) and none is provided
+            if arith_input == false
+                tempArith = ""
+                if opts.arith_file != ""
+                    tempArith = opts.arith_file
+                elsif opts.r1cs_file != ""
+                    tempArith = File.tempfile("arith").path
+                end
+                create_circuit(filename, tempArith, opts)
+              
+            else
+                tempArith = filename
             end
             
 
             #r1cs
             if opts.r1cs_file != ""
-                if opts.arith_file != ""
-                    tempArith = opts.arith_file
-                else
-                    tempArith = File.tempfile("arith").path
-                    ArithFactory.new(tempArith, inputs, parser.@nizk_inputs, output, opts.bit_width, in_array)
-                end
                 tempIn = "#{tempArith}.in"
                 if File.exists?(tempIn) == false
                     puts "inputs file #{tempIn} is missing\n"
@@ -153,7 +177,7 @@ module Isekai
                     LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
                 end
                 #clean-up
-                if opts.arith_file == ""
+                if opts.arith_file == "" && arith_input == false
                     FileUtils.rm(tempArith)
                 end
             end
