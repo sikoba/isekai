@@ -193,7 +193,7 @@ class ConstantArithmeticBus < ArithmeticBus
     end
 
 	def get_field_ops()
-        return [ FieldConstMul.new( "constant #{@value}", @value, @board.one_wire(), @wire_list.as(WireList)[0]) ]
+        return [ FieldConstMul.new( "constant #{@value}", @value.to_i64, @board.one_wire(), @wire_list.as(WireList)[0]) ]
     end
 end
 
@@ -201,9 +201,13 @@ end
 class ConstantMultiplyBus < ArithmeticBus
     @active_bits : Int32
 
-	def initialize (@board, @value : Int32, @bus : Bus)
+	def initialize (@board, @value : Int64, @bus : Bus)
         super(@board, Constants::MAJOR_LOGIC)
-		@value = value & @board.bit_width.get_neg1()
+        if (@board.bit_width.get_width()<=32)
+            @value = (value & @board.bit_width.get_neg1().to_i64) 
+        else
+            @value = (BigInt.new(value) & @board.bit_width.get_neg1()).to_i64
+        end
         @active_bits = Isekai.ceillg2(@value) + @bus.get_active_bits()
     end
 
@@ -630,7 +634,7 @@ class OrFamilyBus < BinaryBooleanBus
 				WireList.new([ab]))
 			minus2ab = @wire_list.as(WireList)[i*4+2]
 			cmds << FieldConstMul.new(comment+"#{@product_coeff}ab",
-				@product_coeff, ab, minus2ab)
+				@product_coeff.to_i64, ab, minus2ab)
 			result = @wire_list.as(WireList)[i*4+3]
 			cmds << FieldAdd.new(comment+"(a+b)#{@product_coeff}ab",
 				WireList.new([aplusb, minus2ab]),

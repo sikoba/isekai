@@ -75,7 +75,7 @@ class ArithMultiplyReq < BinaryOpReq
 
     # Implementation in case of a multiply by constant.
 	def const_impl(const_expr, variable_bus)
-        return ConstantMultiplyBus.new(board(), const_expr.as(Constant).@value, variable_bus)
+        return ConstantMultiplyBus.new(board(), const_expr.as(Constant).@value.to_i64, variable_bus)
     end
 
     # Lays down full arithmetic multiply bus. 
@@ -103,7 +103,7 @@ class NegateReq < BusReq
 
 	def natural_impl()
 		sub_bus = get_bus_from_req(req())
-        return ConstantMultiplyBus.new(board(), -1, sub_bus)
+        return ConstantMultiplyBus.new(board(), -1_i64, sub_bus)
     end
 end
 
@@ -154,7 +154,10 @@ end
 # Compares less-than in boolean domain and then moves back to arithmetic (using split and join buses)
 class CmpLTReq < CmpReq
         def var_impl(abus, bbus)
-            minusb_bus = ConstantMultiplyBus.new(board(), board().bit_width.get_neg1(), bbus)
+            if(board().bit_width.get_width() > 32) #TODO we should handle also bigger width, by using BigInt when size > 64
+                raise "unsupported width...TODO"
+            end
+            minusb_bus = ConstantMultiplyBus.new(board(), board().bit_width.get_neg1().to_i64, bbus)
             @reqfactory.add_extra_bus(minusb_bus)
 
             left_class = typeof(@expr.as(BinaryOp).@left)

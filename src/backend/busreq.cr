@@ -164,7 +164,7 @@ module Isekai
     abstract class NotFamily < BusReq
         # bitwise not - XOR(bus, 1111...11111)
         def make_bitnot (bus)
-            return @reqfactory.get_ConstantBitXorBus_class.new(board(), board().bit_width.get_neg1(), bus)
+           return @reqfactory.get_ConstantBitXorBus_class.new(board(), board().bit_width.get_neg1().to_i32, bus)    #TODO to check it is correect for all width!
         end
 
         # Makes logical not - uses BitXorBus with -1 (all ones)

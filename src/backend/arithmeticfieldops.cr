@@ -32,7 +32,7 @@ class FieldZeroP < FieldOp
     end
 
 class FieldConstMul < FieldOp
-	def initialize(@comment, @value : Int32, @in_wire : Wire, @out_wire : Wire)
+	def initialize(@comment, @value : Int64, @in_wire : Wire, @out_wire : Wire)
 		super(@comment)
     end
 

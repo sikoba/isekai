@@ -1,8 +1,10 @@
+require "big"
+
 module Isekai
     def self.ceillg2(val)
         result = -1
         (0..254-1).each do |i|
-            if (val < (1<<i))
+            if (val < (BigInt.new(1)<<i))
                 result = i
                 break
             end

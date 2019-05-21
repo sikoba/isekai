@@ -1,3 +1,6 @@
+
+require "big"
+
 module Isekai
 
 # Bitwidth class - holds the bit width of the board,
@@ -26,7 +29,8 @@ class BitWidth
     end
 
 	def get_neg1()
-        return (1 << @width) - 1
+       # return (1 << @width) - 1
+       return ((BigInt.new(1) << @width) -1) 
     end
 
 	def leftshift(a, b)
