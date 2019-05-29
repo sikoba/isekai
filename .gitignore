@@ -5,3 +5,9 @@
 shard.lock
 *.dwarf
 isekai
+
+/wk
+/wk1
+/wk2
+/wk3
+/clang+llvm-7.0.1-x86_64-linux-gnu-ubuntu-18.04

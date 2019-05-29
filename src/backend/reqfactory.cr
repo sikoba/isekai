@@ -200,7 +200,9 @@ module Isekai
                     end
                 end
             end 
-            FileUtils.mv(tmp_file.path(), filename)
+            # FileUtils.mv(tmp_file.path(), filename) # generates error when moving files between different filesystems 
+            FileUtils.cp(tmp_file.path(), filename)
+            FileUtils.rm(tmp_file.path())
 
         end
     end
