@@ -87,6 +87,11 @@ abstract class ArithmeticInputBaseBus < ArithmeticBus
             return super(other)
         end
     end
+
+    def <=>(other : Bus)
+        # Override <=> because crystal 0.28 is using it for sorting
+        other < self  ? 1 : (self < other ? -1 : 0)
+    end
 end
 
 # Concrete input
