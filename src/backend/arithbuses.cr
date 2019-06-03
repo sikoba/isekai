@@ -82,7 +82,7 @@ abstract class ArithmeticInputBaseBus < ArithmeticBus
     #Fix issue with reverse inputs; order is stricly on the input index, and not just on the type
     def <(other : Bus)
         if other.is_a? typeof(self)
-           return @input_idx < other.as(typeof(self)).@input_idx
+            return @input_idx < other.as(typeof(self)).@input_idx
         else
             return super(other)
         end
