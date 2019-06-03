@@ -173,7 +173,7 @@ module Isekai
         # Writes inputs into the file, one variable per line.
         def write_inputs_to_file (filename)
             tmp_file = File.tempfile(".tmp") do |file|
-                # varaibles: circuit_inputs/ constant / circuit_nizk_inputs / LOGIC / circuit_outputs.size
+                # variables: circuit_inputs/ constant / circuit_nizk_inputs / LOGIC / circuit_outputs.size
                 #TODO What about LOGIC variables?
                 #arith file: inputs +1
                 i = 0;
@@ -186,8 +186,8 @@ module Isekai
                     i += 1                   
                 end
                 file.print("#{i} 1\n")      # the ONE constant
+                ni = i
                 i += 1
-                ni = 0
                 if nzik = @circuit_nizk_inputs
                     nzik.each do |circuit_in|
                         val = 0;
