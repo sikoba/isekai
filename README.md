@@ -15,6 +15,8 @@ native executable, ensuring maximum efficiency in parsing.
 
 # Building the project
 
+isekai can be easily tested on Windows using Ubuntu for windows. This [Medium post](https://medium.com/@alexkampa/first-steps-with-isekai-on-windows-e9e5ab2c64d7) indicates how to do it. The instructions below are for Ubuntu.
+
 ## Compiling
 
 The project comes with the Makefile and in order to compile the
