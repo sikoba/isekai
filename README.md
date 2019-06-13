@@ -2,76 +2,83 @@
 
 Isekai is a **verifiable computation framework** that will allow to work with several programming languages and verifiable computation systems while using a single code-to-circuit module. Isekai is being developed by [Sikoba Research](http://research.sikoba.com) with the support of [Fantom Foundation](http://fantom.foundation). We seek to cooperate with researchers and developers who work on verifiable computation projects, as well as with blockchain projects that want to offer verifiable computation.
 
-To find out more, read our recent (11 Feb 19) [Medium post](https://medium.com/sikoba-network/isekai-verifiable-computation-framework-introduction-and-call-for-partners-daea383b1277) or contact us: isekai at protonmail dot com.
+To find out more, read this [Medium post](https://medium.com/sikoba-network/isekai-verifiable-computation-framework-introduction-and-call-for-partners-daea383b1277) or contact us: isekai at protonmail dot com.
 
-## Description
 
-Isekai is a tool for zero-knowledge applications. It parses a C program and outputs the arithmetic and/or
-boolean circuit representing the expression equivalent to the input program.
-Isekai uses libclang to parse the C program, so most of the preprocessor
-(including the includes) is available. Then isekai uses libsnark to produce a rank-1 constraints system from the arithmetic representation. Isekai can then proove and verify the program execution using libsnark. Isekai is written using crystal
-programming language allowing for a strong type safety and it is compiled to a
-native executable, ensuring maximum efficiency in parsing.
+## Overview
+
+Isekai is a tool for zero-knowledge applications. It currently parses a C program and outputs the arithmetic and/or boolean circuit representing the expression equivalent to the input program. Support for more languages will be added in the future. Isekai uses libclang to parse the C program, so most of the preprocessor (including the includes) is available. Then isekai uses libsnark to produce a rank-1 constraints system from the arithmetic representation. Isekai can then proove and verify the program execution using libsnark. Isekai is written using crystal programming language allowing for a strong type safety and it is compiled to a native executable, ensuring maximum efficiency in parsing.
+
 
 # Building the project
 
-isekai can be easily tested on Windows using Ubuntu for windows. This [Medium post](https://medium.com/@alexkampa/first-steps-with-isekai-on-windows-e9e5ab2c64d7) indicates how to do it. The instructions below are for Ubuntu.
+## Windows
 
-## Compiling
+isekai can be easily tested on Windows using Ubuntu for windows. This [Medium post](https://medium.com/@alexkampa/first-steps-with-isekai-on-windows-e9e5ab2c64d7) indicates how to do it.
 
-The project comes with the Makefile and in order to compile the
-project, running `make` will be enough. That will create `isekai`
-binary file in the current directory. To run tests `make test`
-should be used.
+## Ubuntu (should work on other Linux distributions)
 
-Alternatively, `crystal build src/isekai.cr` or `crystal test`
-can be used.
+Start by cloning isekai to a local directory.
 
-## Dependencies
+### 1. Install Crystal and required packages
 
-The project is written in Crystal language. Follow the [Official
-instructions](https://crystal-lang.org/docs/installation/) for instructions how
-to install Crystal lang. 
+The project is written in Crystal language. Follow the [Official instructions](https://crystal-lang.org/docs/installation/) for instructions how to install Crystal lang. 
 
-Since the project depends on several libclang patches which are not
-yet merged in the libclang (https://www.mail-archive.com/cfe-commits@cs.uiuc.edu/msg95414.html,
-http://lists.llvm.org/pipermail/cfe-commits/Week-of-Mon-20140428/104048.html), the easiest
-is to use the provided pre-build binary and to build and run the software inside
-a container.
+Make sure to install the recommended packages, even though only libgmp-dev is actually required for isekai.
 
-### Installing docker
-
-To install docker on Ubuntu, follow the [official instructions](https://docs.docker.com/install/linux/docker-ce/ubuntu/)
-
-### Building and running inside docker container
-
-To build a docker image with the `isekai` tag, enter `docker` directory and run `make image`.
-This will build `isekai` image which then you can use to spawn a container and mount
-the main directory:
-
-#### Note
-
-You may need crystal lang dependencies before running this step:
+Then install the following additional packages required by isekai:
 
 ```
-shards update
+$ sudo apt install clang-7
+$ sudo apt install libclang-7-dev
+$ sudo apt-get install libprocps-dev
 ```
+### 2. Apply libclang patch
+
+The project depends on several libclang patches which are not yet merged in the libclang (https://www.mail-archive.com/cfe-commits@cs.uiuc.edu/msg95414.html,
+http://lists.llvm.org/pipermail/cfe-commits/Week-of-Mon-20140428/104048.html)
+
+Applying the patch is done from the docker subdirectory:
 
 
 ```
-docker run --rm -w $PWD -v $PWD:$PWD -ti isekai /bin/bash
+$ cd docker/
+$ cp bin/libclang.so.gz /tmp/libclang.so.gz
+$ gzip -d /tmp/libclang.so.gz
+$ sudo cp /tmp/libclang.so /usr/lib/x86_64-linux-gnu/libclang-7.so.1
+$ sudo cp /tmp/libclang.so /usr/lib/libclang.so.7
+$ cd ..
 ```
 
-where you can run `make`, `make test` and run the built binaries.
+### 3. Install isekai
 
-If you don't want to enter the interactive console, it's enough to
-run make within the container:
+The project comes with the Makefile and in order to compile the project, running `make` will be enough. That will create the `isekai` binary file in the current directory. To run tests `make test` should be used.
+
+Alternatively, `crystal build src/isekai.cr` or `crystal test` can be used.
+
 
 ```
-docker run --rm -w $PWD -v $PWD:$PWD isekai make test
+$ make
+$ make test
 ```
+
+The result of `make test` should end with something resembling this:
+
+```
+...
+Finished in 800.85 milliseconds
+9 examples, 0 failures, 0 errors, 0 pending
+```
+
+
+## Docker
+
+The docker files included with the project are not up to date and should not be used. 
+
 
 ## Usage
+
+(Also check the "Some tests with isekai" section of the above-mentioned [Medium post](https://medium.com/@alexkampa/first-steps-with-isekai-on-windows-e9e5ab2c64d7))
 
 Isekai can generate a proof of the execution of a C function. 
 The C function must have one of the following signature:
