@@ -378,7 +378,7 @@ class CmpEQ < BinaryOp
     end
 end
 
-# Equal compare operation
+# Not-equal compare operation
 class CmpNEQ < BinaryOp
     def initialize (@left, @right)
         super("!=", @left, @right)
@@ -408,7 +408,7 @@ end
 #    end
 #end
 
-# Greater-than compare operation
+# Greater-than-or-equal compare operation
 #class CmpGEQ < BinaryOp
 #    def initialize (@left, @right)
 #        super(">=", @left, @right)
