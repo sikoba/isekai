@@ -1,0 +1,3 @@
+[submodule "zkp/libsnark"]
+	path = zkp/libsnark
+	url = https://github.com/scipr-lab/libsnark
