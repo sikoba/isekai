@@ -20,3 +20,6 @@ dependencies:
   linked_list:
     github: abvdasker/crystal-linked-list
     branch: master
+  llvm-crystal:
+    github: shdown/llvm-crystal
+    branch: master
