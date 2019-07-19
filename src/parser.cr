@@ -123,7 +123,7 @@ module Isekai
 
             if inputs = @inputs
                 if output = @output
-                    return {inputs, output}
+                    return {inputs, @nizk_inputs, output}
                 end
             end
 

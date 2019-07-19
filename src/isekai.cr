@@ -1,5 +1,6 @@
 require "option_parser"
 require "./parser.cr"
+require "./bitcode_parser.cr"
 require "./backend/arithfactory"
 require "./backend/booleanfactory"
 require "file_utils"
@@ -43,19 +44,46 @@ module Isekai
         property ignore_overflow = false
     end
 
+    class InputFile
+        enum Kind
+            Arith
+            C
+            Bitcode
+        end
+
+        def initialize(@filename : String)
+            @kind =
+                if filename.ends_with? ".c"
+                    Kind::C
+                elsif filename.ends_with? ".bc"
+                    Kind::Bitcode
+                else
+                    Kind::Arith
+                end
+        end
+    end
+
     class ParserProgram
 
-        # C => Arith/Bool circuit
-        def create_circuit(in_c_program, out_circuit, options)
-            parser = CParser.new(in_c_program,
-            options.clang_args,
-            options.loop_sanity_limit,
-            options.bit_width, options.progress)
+        def create_circuit(input_file, out_circuit, options)
+            case input_file.@kind
+            when .bitcode?
+                parser = BitcodeParser.new(input_file.@filename,
+                    options.loop_sanity_limit,
+                    options.bit_width)
+            when .c?
+                parser = CParser.new(input_file.@filename,
+                    options.clang_args,
+                    options.loop_sanity_limit,
+                    options.bit_width, options.progress)
+            else
+                raise "Unsupported input_file.@kind"
+            end
 
-            inputs, output = parser.parse()         
+            inputs, nizk_inputs, output = parser.parse()
 
-            #pp output #add: pp output.state  to print the AST
-            in_file = in_c_program + ".in"   #optional file containing the input values to the program
+            # optional file containing the input values to the program
+            in_file = input_file.@filename + ".in"
             in_array = [] of Int32
             if File.exists?(in_file)
                 File.each_line(in_file) do |line|
@@ -63,16 +91,11 @@ module Isekai
                 end
             end
             in_array << 0
-            ArithFactory.new(out_circuit, inputs, parser.@nizk_inputs, output, options.bit_width, in_array)
-        #    if options.arith_file != ""
-         #       ArithFactory.new(options.arith_file, inputs, parser.@nizk_inputs, output, options.bit_width, in_array)
-          #  end
-           # if options.bool_file != ""
-            #    BooleanFactory.new(options.arith_file, inputs, output, options.bit_width)
-            #end
+
+            ArithFactory.new(out_circuit, inputs, nizk_inputs, output, options.bit_width, in_array)
         end
 
-        # Main 
+        # Main
         def main
             opts = ProgramOptions.new
 
@@ -80,7 +103,7 @@ module Isekai
            # dump "[1,2,3].each do |e|
            #     puts e
            #   end"
-           
+
             # Parse the program options. For the detailed
             # explanations refer to struct ProgramOptions
             OptionParser.parse! do |parser|
@@ -100,14 +123,11 @@ module Isekai
             end
 
             # Filename is passed as the last argument.
-            if ARGV.size() != 1
-                puts "There should be exactly one file argument: #{ARGV.size()}"
-                #filename = "ex1.c"
-                #opts.arith_file = "ex1.ari"
+            unless ARGV.size() == 1
+                puts "There should be exactly one file argument (found #{ARGV.size()})"
                 exit 1
-            else 
-                filename = ARGV[-1]
             end
+            filename = ARGV[-1]
 
             #snakes
             #if opts.verif_file != ""
@@ -139,34 +159,23 @@ module Isekai
             #    return
             #end         
   
-            #circuit
-            arith_input = false
-            if File.exists?(filename) == false
-                puts "file #{filename} is missing\n"
-                return
-            else
-                File.each_line(filename) do |line|
-                    if line.starts_with?("total")
-                        arith_input = true; #instead of the C program, the input file is an arithmetic circuit
-                    end
-                    break
-                end
-            end
             Log.setup(opts.progress)
-            #Generate the arithmetic circuit if arith option is set or r1cs option is set (a temp arith file) and none is provided
-            if arith_input == false
+
+            input_file = InputFile.new(filename)
+
+            # Generate the arithmetic circuit if arith option is set or r1cs option is set (a temp arith file) and none is provided
+
+            unless input_file.@kind.arith?
                 tempArith = ""
                 if opts.arith_file != ""
                     tempArith = opts.arith_file
                 elsif opts.r1cs_file != ""
                     tempArith = File.tempfile("arith").path
                 end
-                create_circuit(filename, tempArith, opts)
-              
+                create_circuit(input_file, tempArith, opts)
             else
-                tempArith = filename
+                tempArith = input_file.@filename
             end
-            
 
             #r1cs
             #if opts.r1cs_file != ""
@@ -177,12 +186,10 @@ module Isekai
             #        LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
             #    end
             #    #clean-up
-            #    if opts.arith_file == "" && arith_input == false
+            #    if opts.arith_file == "" && input_file.@kind.arith? == false
             #        FileUtils.rm(tempArith)
             #    end
             #end
-
-          
         end
     end
 end
