@@ -82,6 +82,13 @@ module Isekai
 
             inputs, nizk_inputs, output = parser.parse()
 
+            puts "(!!!) Inputs:"
+            puts inputs
+            puts "(!!!) NIZK inputs:"
+            puts nizk_inputs
+            puts "(!!!) Output:"
+            puts output
+
             # optional file containing the input values to the program
             in_file = input_file.@filename + ".in"
             in_array = [] of Int32
