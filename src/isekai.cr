@@ -65,7 +65,7 @@ module Isekai
 
     class ParserProgram
 
-        def create_circuit(input_file, out_circuit, options)
+        def create_circuit(input_file, arith_outfile, bool_outfile, options)
             case input_file.@kind
             when .bitcode?
                 parser = BitcodeParser.new(input_file.@filename,
@@ -92,7 +92,12 @@ module Isekai
             end
             in_array << 0
 
-            ArithFactory.new(out_circuit, inputs, nizk_inputs, output, options.bit_width, in_array)
+            if arith_outfile != ""
+                ArithFactory.new(arith_outfile, inputs, nizk_inputs, output, options.bit_width, in_array)
+            end
+            #if bool_outfile != ""
+            #    BooleanFactory.new(bool_outfile, inputs, output, options.bit_width)
+            #end
         end
 
         # Main
@@ -172,7 +177,7 @@ module Isekai
                 elsif opts.r1cs_file != ""
                     tempArith = File.tempfile("arith").path
                 end
-                create_circuit(input_file, tempArith, opts)
+                create_circuit(input_file, tempArith, opts.bool_file, opts)
             else
                 tempArith = input_file.@filename
             end
