@@ -3,7 +3,7 @@ require "./parser.cr"
 require "./backend/arithfactory"
 require "./backend/booleanfactory"
 require "file_utils"
-require "./zksnark/libsnark.cr"
+#require "./zksnark/libsnark.cr"
 # TODO require "./crystal/ast_dump"
 
 
@@ -110,34 +110,34 @@ module Isekai
             end
 
             #snakes
-            if opts.verif_file != ""
-                #verify
-                snarc = LibSnark.new()
-                root_name = opts.verif_file
-                result = snarc.verify(root_name + ".s", filename, root_name + ".p")
-                if result == true
-                    puts "Congratulations, the proof is correct!\n"
-                else
-                    puts "Incorrect statement\n"
-                end
-                return
-            end
+            #if opts.verif_file != ""
+            #    #verify
+            #    snarc = LibSnark.new()
+            #    root_name = opts.verif_file
+            #    result = snarc.verify(root_name + ".s", filename, root_name + ".p")
+            #    if result == true
+            #        puts "Congratulations, the proof is correct!\n"
+            #    else
+            #        puts "Incorrect statement\n"
+            #    end
+            #    return
+            #end
 
-            if opts.root_file != ""
-                #proof
-                snarc = LibSnark.new()
-                snarc.vcSetup(filename, opts.root_file + ".s")
-                snarc.proof(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
+            #if opts.root_file != ""
+            #    #proof
+            #    snarc = LibSnark.new()
+            #    snarc.vcSetup(filename, opts.root_file + ".s")
+            #    snarc.proof(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
 
-                if snarc.verify(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
-                    puts "Proved execution successfully with libSnark, generated:
-                        Trusted setup : #{opts.root_file}.s
-                        Proof: #{opts.root_file}.p"
-                else
-                    puts "error generating the proof\n"
-                end
-                return
-            end         
+            #    if snarc.verify(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
+            #        puts "Proved execution successfully with libSnark, generated:
+            #            Trusted setup : #{opts.root_file}.s
+            #            Proof: #{opts.root_file}.p"
+            #    else
+            #        puts "error generating the proof\n"
+            #    end
+            #    return
+            #end         
   
             #circuit
             arith_input = false
@@ -169,18 +169,18 @@ module Isekai
             
 
             #r1cs
-            if opts.r1cs_file != ""
-                tempIn = "#{tempArith}.in"
-                if File.exists?(tempIn) == false
-                    puts "inputs file #{tempIn} is missing\n"
-                else
-                    LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
-                end
-                #clean-up
-                if opts.arith_file == "" && arith_input == false
-                    FileUtils.rm(tempArith)
-                end
-            end
+            #if opts.r1cs_file != ""
+            #    tempIn = "#{tempArith}.in"
+            #    if File.exists?(tempIn) == false
+            #        puts "inputs file #{tempIn} is missing\n"
+            #    else
+            #        LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
+            #    end
+            #    #clean-up
+            #    if opts.arith_file == "" && arith_input == false
+            #        FileUtils.rm(tempArith)
+            #    end
+            #end
 
           
         end
