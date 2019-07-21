@@ -16,5 +16,5 @@ struct Output {
 void
 outsource(struct Input *input, struct NizkInput *nizk, struct Output *output)
 {
-    output->x = input->a + input->b + input->c + nizk->d + nizk->e;
+    output->x = 4 + input->a + input->b + input->c + nizk->d + nizk->e;
 }
