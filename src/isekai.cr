@@ -51,7 +51,7 @@ module Isekai
             Bitcode
         end
 
-        def initialize(@filename : String)
+        def initialize (@filename : String)
             @kind =
                 if filename.ends_with? ".c"
                     Kind::C
@@ -65,7 +65,7 @@ module Isekai
 
     class ParserProgram
 
-        def create_circuit(input_file, arith_outfile, bool_outfile, options)
+        def create_circuit (input_file, arith_outfile, bool_outfile, options)
             case input_file.@kind
             when .bitcode?
                 parser = BitcodeParser.new(input_file.@filename,
@@ -81,13 +81,6 @@ module Isekai
             end
 
             inputs, nizk_inputs, output = parser.parse()
-
-            puts "(!!!) Inputs:"
-            puts inputs
-            puts "(!!!) NIZK inputs:"
-            puts nizk_inputs
-            puts "(!!!) Output:"
-            puts output
 
             # optional file containing the input values to the program
             in_file = input_file.@filename + ".in"

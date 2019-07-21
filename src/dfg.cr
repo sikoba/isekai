@@ -55,9 +55,29 @@ class Undefined < DFGExpr
     end
 end
 
+class Structure < DFGExpr
+    def initialize(@storage : Storage)
+    end
+end
+
+class Field < DFGExpr
+    def initialize(@key : StorageKey)
+    end
+end
+
 # Abstract operation
 class Op < DFGExpr
     #add_object_helpers
+end
+
+class AllocaOp < Op
+    def initialize(@idx : Int32)
+    end
+end
+
+class GetPointerOp < Op
+    def initialize(@target : DFGExpr)
+    end
 end
 
 # Operation on the array.
