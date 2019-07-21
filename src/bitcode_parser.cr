@@ -7,20 +7,21 @@ require "llvm-crystal/lib_llvm_c"
 module Isekai
 
     class FieldTransformer
-        def initialize (@input_storage : Storage, @inputs : Array(DFGExpr))
+        def initialize (
+                @input_storage : Storage, @inputs : Array(DFGExpr),
+                @nizk_input_storage : Storage|Nil, @nizk_inputs : Array(DFGExpr)|Nil)
             super()
-        end
-
-        def get_ith_field (i)
-            @inputs[i].as(Input)
         end
 
         def transform (expr)
             case expr
             when .is_a?(Field)
                 field = expr.as(Field)
-                if field.@key.@storage == @input_storage
-                    get_ith_field(field.@key.@idx)
+                case field.@key.@storage
+                when @input_storage
+                    @inputs[field.@key.@idx]
+                when @nizk_input_storage
+                    @nizk_inputs.as(Array(DFGExpr))[field.@key.@idx]
                 else
                     expr
                 end
@@ -59,6 +60,12 @@ module Isekai
 
         def nizk_input_storage!
             return @inout_storages[1] if @inout_storages.size == 3
+        end
+
+        def make_field_transformer!
+            FieldTransformer.new(
+                input_storage!, @inputs,
+                nizk_input_storage!, @nizk_inputs)
         end
 
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
@@ -126,7 +133,7 @@ module Isekai
                 # TODO fix this atrocity
                 @outputs << {
                     field.@key,
-                    FieldTransformer.new(input_storage!, @inputs).transform(expr)
+                    make_field_transformer!.transform(expr)
                 }
             else
                 raise "NYI: cannot store at #{dst_expr}"
