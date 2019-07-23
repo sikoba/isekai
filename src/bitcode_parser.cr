@@ -8,9 +8,8 @@ module Isekai
 
     class FieldTransformer
         def initialize (
-                @input_storage : Storage, @inputs : Array(DFGExpr),
-                @nizk_input_storage : Storage|Nil, @nizk_inputs : Array(DFGExpr)|Nil)
-            super()
+                @input_storage : Storage?, @inputs : Array(DFGExpr)?,
+                @nizk_input_storage : Storage?, @nizk_inputs : Array(DFGExpr)?)
         end
 
         def transform (expr)
@@ -19,7 +18,7 @@ module Isekai
                 field = expr.as(Field)
                 case field.@key.@storage
                 when @input_storage
-                    @inputs[field.@key.@idx]
+                    @inputs.as(Array(DFGExpr))[field.@key.@idx]
                 when @nizk_input_storage
                     @nizk_inputs.as(Array(DFGExpr))[field.@key.@idx]
                 else
@@ -40,38 +39,26 @@ module Isekai
 
     class BitcodeParser
 
-        @inputs = Array(DFGExpr).new
+        @inputs : Array(DFGExpr)?
         @nizk_inputs : Array(DFGExpr)?
-        @outputs = Array(Tuple(StorageKey, DFGExpr)).new
+        @outputs = [] of Tuple(StorageKey, DFGExpr)
 
         @arguments = {} of LibLLVM_C::ValueRef => DFGExpr
         @locals = {} of LibLLVM_C::ValueRef => DFGExpr
         @allocas = [] of DFGExpr
 
-        @inout_storages = [] of Storage
-
-        def output_storage!
-            @inout_storages[-1]
-        end
-
-        def input_storage!
-            @inout_storages[0]
-        end
-
-        def nizk_input_storage!
-            return @inout_storages[1] if @inout_storages.size == 3
-        end
+        @input_storage : Storage?
+        @nizk_input_storage : Storage?
+        @output_storage : Storage?
 
         def make_field_transformer!
-            FieldTransformer.new(
-                input_storage!, @inputs,
-                nizk_input_storage!, @nizk_inputs)
+            FieldTransformer.new(@input_storage, @inputs, @nizk_input_storage, @nizk_inputs)
         end
 
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
         end
 
-        def inspect_param! (name, ptr, ty)
+        def inspect_param! (is_input, ptr, ty)
             raise "Function parameter is not a pointer" unless
                 LibLLVM_C.get_type_kind(ty).pointer_type_kind?
 
@@ -83,10 +70,32 @@ module Isekai
             raise "Function parameter is a pointer to an incomplete struct" unless
                 LibLLVM_C.is_opaque_struct(s_ty) == 0
 
-            nelems = LibLLVM_C.count_struct_element_types(s_ty)
+            s_name = String.new(LibLLVM_C.get_struct_name(s_ty))
+            nelems = LibLLVM_C.count_struct_element_types(s_ty).to_i32
 
-            st = Storage.new(name, nelems.to_i32)
-            @inout_storages << st
+            if is_input
+                case s_name
+                when "struct.Input"
+                    raise "Duplicate param type" if @input_storage
+                    st = Storage.new("Input", nelems)
+                    @input_storage = st
+
+                when "struct.NzikInput" # sic
+                    raise "Duplicate param type" if @nizk_input_storage
+                    st = Storage.new("NzikInput", nelems)
+                    @nizk_input_storage = st
+
+                else
+                    raise "Invalid param type: #{s_name} for input parameter"
+                end
+            else
+                raise "Invalid param type: #{s_name} for output parameter" unless
+                    s_name == "struct.Output"
+                raise "Duplicate param type" if @output_storage
+                st = Storage.new("Output", nelems)
+                @output_storage = st
+            end
+
             @arguments[ptr] = GetPointerOp.new(Structure.new(st))
         end
 
@@ -129,7 +138,7 @@ module Isekai
                 target = dst_expr.as(GetPointerOp).@target
                 raise "NYI: cannot store at pointer to #{target}" unless target.is_a?(Field)
                 field = target.as(Field)
-                raise "NYI" unless field.@key.@storage == output_storage!
+                raise "NYI" unless field.@key.@storage == @output_storage
                 # TODO fix this atrocity
                 @outputs << {
                     field.@key,
@@ -209,12 +218,13 @@ module Isekai
             end
         end
 
-        def gen_input_array (storage : Storage, x : T.class) forall T
+        def gen_input_array (storage : Storage?, x : T.class) forall T
+            return nil unless storage
             arr = Array(DFGExpr).new
             (0...storage.@size).each do |i|
                 arr << T.new(StorageKey.new(storage, i))
             end
-            arr
+            return arr
         end
 
         def inspect_root_func! (func)
@@ -242,22 +252,18 @@ module Isekai
 
             case func_nparams
             when 2
-                inspect_param!("Input",  params[0], param_tys[0])
-                inspect_param!("Output", params[1], param_tys[1])
+                inspect_param!(true,  params[0], param_tys[0])
+                inspect_param!(false, params[1], param_tys[1])
             when 3
-                inspect_param!("Input",     params[0], param_tys[0])
-                inspect_param!("NizkInput", params[1], param_tys[1])
-                inspect_param!("Output",    params[2], param_tys[2])
+                inspect_param!(true,  params[0], param_tys[0])
+                inspect_param!(true,  params[1], param_tys[1])
+                inspect_param!(false, params[2], param_tys[2])
             else
                 raise "Function takes #{func_nparams} parameter(s), expected 2 or 3"
             end
 
-            @inputs = gen_input_array(input_storage!, Input).as(Array(DFGExpr))
-
-            nizk_input_storage = nizk_input_storage!
-            if nizk_input_storage
-                @nizk_inputs = gen_input_array(nizk_input_storage, NIZKInput)
-            end
+            @inputs = gen_input_array(@input_storage, Input)
+            @nizk_inputs = gen_input_array(@nizk_input_storage, NIZKInput)
 
             inspect_basic_block!(func.entry_basic_block)
         end
@@ -269,7 +275,7 @@ module Isekai
                 raise "Unexpected function defined: #{func.name}" unless
                     func.name == "outsource"
                 inspect_root_func!(func)
-                return {@inputs, @nizk_inputs, @outputs}
+                return {@inputs || [] of DFGExpr, @nizk_inputs, @outputs}
             end
 
             raise "No 'outsource' function found"
