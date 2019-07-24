@@ -22,5 +22,4 @@ public:
     //Verify a proof
     bool Verify(const std::string& setup, std::string inputsFile, std::string proof);
 
-    std::string ProofTest();
 };

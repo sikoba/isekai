@@ -41,8 +41,7 @@ char * Prove(char * setup, char * inputs, char * proofFile);
 //inputs: file name of the inputs in json format.
 //proof: file name of the proof in json format.
 bool Verify(char * setup, char * inputsFile, char * proof);
- 
-void ProofTest();
+
 
 #ifdef __cplusplus
 }
