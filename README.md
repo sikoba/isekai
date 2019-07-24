@@ -72,6 +72,9 @@ Finished in 800.85 milliseconds
 9 examples, 0 failures, 0 errors, 0 pending
 ```
 
+### 4. Compiling libsnarc
+
+libsnarc is a library which provides a C-wrapper over libsnark. The library is already included so you do not need to compile it. If you want to compile it, you should create lib/libsnarc/build directory and from here run cmake .. and then make.
 
 ## Docker
 
