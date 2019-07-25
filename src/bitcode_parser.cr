@@ -15,20 +15,18 @@ module Isekai
         def transform (expr)
             case expr
             when .is_a?(Field)
-                field = expr.as(Field)
-                case field.@key.@storage
+                case expr.@key.@storage
                 when @input_storage
-                    @inputs.as(Array(DFGExpr))[field.@key.@idx]
+                    @inputs.as(Array(DFGExpr))[expr.@key.@idx]
                 when @nizk_input_storage
-                    @nizk_inputs.as(Array(DFGExpr))[field.@key.@idx]
+                    @nizk_inputs.as(Array(DFGExpr))[expr.@key.@idx]
                 else
                     expr
                 end
 
             when .is_a?(Add)
-                add = expr.as(Add)
-                left = transform(add.@left)
-                right = transform(add.@right)
+                left = transform(expr.@left)
+                right = transform(expr.@right)
                 Add.new(left, right)
 
             else
@@ -117,11 +115,18 @@ module Isekai
         def load_expr (src)
             expr = load_expr_preliminary(src)
             # TODO: collapse it properly
-            if expr.is_a?(AllocaOp)
-                idx = expr.as(AllocaOp).@idx
-                expr = GetPointerOp.new(@allocas[idx])
+            case expr
+            when .is_a?(AllocaOp)
+                make_getptr_op!(@allocas[expr.@idx])
+            when .is_a?(Field)
+                if expr.@key.@storage == @output_storage
+                    @outputs[expr.@key.@idx][1]
+                else
+                    expr
+                end
+            else
+                expr
             end
-            expr
         end
 
         def store! (dst, expr)
@@ -133,28 +138,32 @@ module Isekai
             dst_expr = @locals[dst]
             case dst_expr
             when .is_a?(AllocaOp)
-                @allocas[dst_expr.as(AllocaOp).@idx] = expr
+                @allocas[dst_expr.@idx] = expr
             when .is_a?(GetPointerOp)
-                target = dst_expr.as(GetPointerOp).@target
+                target = dst_expr.@target
                 raise "NYI: cannot store at pointer to #{target}" unless target.is_a?(Field)
                 field = target.as(Field)
                 raise "NYI" unless field.@key.@storage == @output_storage
-                # TODO fix this atrocity
-                @outputs << {
-                    field.@key,
-                    make_field_transformer!.transform(expr)
-                }
+                @outputs[field.@key.@idx] = {field.@key, expr}
             else
                 raise "NYI: cannot store at #{dst_expr}"
             end
         end
 
-        # TODO factor it out to a DereferenceOp < DFGExpr?
-        def deref (expr)
+        def make_deref_op! (expr)
             if expr.is_a?(GetPointerOp)
-                return expr.as(GetPointerOp).@target
+                expr.@target
+            else
+                DerefOp.new(expr)
             end
-            raise "NYI: cannot dereference #{expr}"
+        end
+
+        def make_getptr_op! (expr)
+            if expr.is_a?(DerefOp)
+                expr.@target
+            else
+                GetPointerOp.new(expr)
+            end
         end
 
         def get_element_ptr (base, offset, field)
@@ -189,7 +198,7 @@ module Isekai
 
                 when .load?
                     src = LibLLVM_C.get_operand(ins, 0)
-                    @locals[ins] = deref(load_expr(src))
+                    @locals[ins] = make_deref_op!(load_expr(src))
 
                 when .get_element_ptr?
                     nops = LibLLVM_C.get_num_operands(ins)
@@ -265,7 +274,17 @@ module Isekai
             @inputs = gen_input_array(@input_storage, Input)
             @nizk_inputs = gen_input_array(@nizk_input_storage, NIZKInput)
 
+            output_storage = @output_storage.as(Storage)
+            (0...output_storage.@size).each do |i|
+                @outputs << {StorageKey.new(output_storage, i), Undefined.new()}
+            end
+
             inspect_basic_block!(func.entry_basic_block)
+
+            (0...output_storage.@size).each do |i|
+                key, expr = @outputs[i][0], @outputs[i][1]
+                @outputs[i] = {key, make_field_transformer!().transform(expr)}
+            end
         end
 
         def parse ()

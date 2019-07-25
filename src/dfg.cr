@@ -75,6 +75,11 @@ class AllocaOp < Op
     end
 end
 
+class DerefOp < Op
+    def initialize(@target : DFGExpr)
+    end
+end
+
 class GetPointerOp < Op
     def initialize(@target : DFGExpr)
     end
