@@ -200,4 +200,25 @@ class CmpEQReqArith < CmpReq
             return zerop_bus
     end
 end
+
+class CmpNEQReqArith < CmpReq
+    def initialize(reqfactory, expr, type)
+        super(reqfactory, expr, type)
+    end
+
+    def var_impl(abus : Bus, bbus : Bus)
+            # Check EQuality using ZeroP gate.
+            zerop_bus = ArithmeticZeroPBus.new(board(), abus, bbus)
+            @reqfactory.add_extra_bus(zerop_bus)
+            #not eq:-x+1
+            neg_bus = ConstantNegBus.new(board(), -1, zerop_bus)
+            @reqfactory.add_extra_bus(neg_bus)
+            constant_one = ConstantArithmeticBus.new(board(), 1)
+            @reqfactory.add_extra_bus(constant_one)
+            comment = "1 - CmpEQ #{typeof(@expr.as(BinaryOp))}"
+            plus1_bus = ArithAddBus.new(board(), comment, zerop_bus, constant_one)
+            @reqfactory.add_extra_bus(plus1_bus)
+            return plus1_bus
+    end
+end
 end
