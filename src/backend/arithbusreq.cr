@@ -20,7 +20,7 @@ class ArithmeticInputReq < BusReq
     end
 
 	def natural_impl()
-        return ArithmeticInputBus.new(board(), @expr.as(InputBase).@storage_key.@idx)
+        return ArithmeticInputBus.new(board(), @expr.as(Field).@key.@idx)
     end
 end
 
@@ -38,7 +38,7 @@ class ArithmeticNIZKInputReq < BusReq
     end
 
 	def natural_impl()
-        return ArithmeticNIZKInputBus.new(board(), @expr.as(InputBase).@storage_key.@idx)
+        return ArithmeticNIZKInputBus.new(board(), @expr.as(Field).@key.@idx)
     end
 end
 

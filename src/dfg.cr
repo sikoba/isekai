@@ -63,6 +63,9 @@ end
 class Field < DFGExpr
     def initialize(@key : StorageKey)
     end
+
+    def_equals @key
+    def_hash @key
 end
 
 # Abstract operation

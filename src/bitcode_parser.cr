@@ -46,56 +46,6 @@ module Isekai
         end
     end
 
-    class FieldTransformer
-        def initialize (
-                @input_storage : Storage?, @inputs : Array(DFGExpr)?,
-                @nizk_input_storage : Storage?, @nizk_inputs : Array(DFGExpr)?)
-        end
-
-        def transform (expr : DFGExpr) : DFGExpr
-            case expr
-            when .is_a?(Field)
-                case expr.@key.@storage
-                when @input_storage
-                    @inputs.as(Array(DFGExpr))[expr.@key.@idx]
-                when @nizk_input_storage
-                    @nizk_inputs.as(Array(DFGExpr))[expr.@key.@idx]
-                else
-                    expr
-                end
-
-            when .is_a?(Add)
-                left = transform(expr.@left)
-                right = transform(expr.@right)
-                Add.new(left, right)
-
-            when .is_a?(Conditional)
-                cond = transform(expr.@cond)
-                valtrue = transform(expr.@valtrue)
-                valfalse = transform(expr.@valfalse)
-                Conditional.new(cond, valtrue, valfalse)
-
-            when .is_a?(LogicalAnd)
-                left = transform(expr.@left)
-                right = transform(expr.@right)
-                LogicalAnd.new(left, right)
-
-            when .is_a?(CmpEQ)
-                left = transform(expr.@left)
-                right = transform(expr.@right)
-                CmpEQ.new(left, right)
-
-            when .is_a?(CmpNEQ)
-                left = transform(expr.@left)
-                right = transform(expr.@right)
-                CmpNEQ.new(left, right)
-
-            else
-                expr
-            end
-        end
-    end
-
     class BitcodeParser
 
         def make_select_expr (cond : DFGExpr?, if_true : DFGExpr, if_false : DFGExpr) : DFGExpr
@@ -147,10 +97,6 @@ module Isekai
         @output_storage : Storage?
 
         @inspected_blocks = Set(LibLLVM::BasicBlock).new
-
-        def make_field_transformer!
-            FieldTransformer.new(@input_storage, @inputs, @nizk_input_storage, @nizk_inputs)
-        end
 
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
         end
@@ -389,7 +335,7 @@ module Isekai
             return nil unless storage
             arr = Array(DFGExpr).new
             (0...storage.@size).each do |i|
-                arr << yield StorageKey.new(storage, i)
+                arr << Field.new(StorageKey.new(storage, i))
             end
             return arr
         end
@@ -429,8 +375,8 @@ module Isekai
                 raise "Function takes #{func_nparams} parameter(s), expected 2 or 3"
             end
 
-            @inputs      = gen_input_array @input_storage      { |key| Input.new(key)     }
-            @nizk_inputs = gen_input_array @nizk_input_storage { |key| NIZKInput.new(key) }
+            @inputs      = gen_input_array @input_storage
+            @nizk_inputs = gen_input_array @nizk_input_storage
 
             output_storage = @output_storage.as(Storage)
             (0...output_storage.@size).each do |i|
@@ -438,11 +384,6 @@ module Isekai
             end
 
             inspect_basic_block_until(func.entry_basic_block, nil, nil)
-
-            (0...output_storage.@size).each do |i|
-                key, expr = @outputs[i][0], @outputs[i][1]
-                @outputs[i] = {key, make_field_transformer!().transform(expr)}
-            end
         end
 
         def parse ()

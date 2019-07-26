@@ -32,12 +32,28 @@ class ArithFactory < RequestFactory
 		return ArithmeticOutputBus.new(get_board(), expr_bus, idx)
     end
 
+    private def get_input_storage!
+        return nil if @circuit_inputs.empty?
+        return @circuit_inputs[0].as(Field).@key.@storage
+    end
+
+    private def get_nizk_input_storage!
+        arr = @circuit_nizk_inputs || [] of DFGExpr
+        return nil if arr.empty?
+        return arr[0].as(Field).@key.@storage
+    end
+
     def make_req(expr, type : String) : BaseReq
         case expr
-        when .is_a? Input
-			result = ArithmeticInputReq.new(self, expr.as(Input), type)
-		when .is_a? NIZKInput
-			result = ArithmeticNIZKInputReq.new(self, expr.as(NIZKInput), type)
+        when .is_a? Field
+            case expr.@key.@storage
+            when get_input_storage!
+                result = ArithmeticInputReq.new(self, expr.as(Field), type)
+            when get_nizk_input_storage!
+                result = ArithmeticNIZKInputReq.new(self, expr.as(Field), type)
+            else
+                raise "Unsupported storage"
+            end
 		when .is_a? Conditional
 			result = ArithConditionalReq.new(self, expr.as(Conditional), type)
 		when .is_a? CmpLT
