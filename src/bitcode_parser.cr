@@ -6,13 +6,53 @@ require "llvm-crystal/lib_llvm_c"
 
 module Isekai
 
+    class BFSTraverser
+
+        def initialize (bb : LibLLVM::BasicBlock)
+            @queue = [bb]
+            @queue_start = 0
+            @seen = Set{bb}
+        end
+
+        private def maybe_add (bb : LibLLVM::BasicBlock)
+            return if @seen.includes? bb
+            @seen.add(bb)
+            @queue << bb
+        end
+
+        def next!
+            return nil if @queue_start == @queue.size
+            bb = @queue[@queue_start]
+            @queue_start += 1
+
+            ins = bb.last_instruction
+            case LibLLVM_C.get_instruction_opcode(ins)
+            when .br?
+                (0...LibLLVM_C.get_num_successors(ins)).each do |i|
+                    maybe_add(LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, i)))
+                end
+
+            when .ret?
+                # do nothing
+            else
+                raise "NYI"
+            end
+
+            bb
+        end
+
+        def seen? (bb : LibLLVM::BasicBlock)
+            @seen.includes? bb
+        end
+    end
+
     class FieldTransformer
         def initialize (
                 @input_storage : Storage?, @inputs : Array(DFGExpr)?,
                 @nizk_input_storage : Storage?, @nizk_inputs : Array(DFGExpr)?)
         end
 
-        def transform (expr)
+        def transform (expr : DFGExpr) : DFGExpr
             case expr
             when .is_a?(Field)
                 case expr.@key.@storage
@@ -29,6 +69,27 @@ module Isekai
                 right = transform(expr.@right)
                 Add.new(left, right)
 
+            when .is_a?(Conditional)
+                cond = transform(expr.@cond)
+                valtrue = transform(expr.@valtrue)
+                valfalse = transform(expr.@valfalse)
+                Conditional.new(cond, valtrue, valfalse)
+
+            when .is_a?(LogicalAnd)
+                left = transform(expr.@left)
+                right = transform(expr.@right)
+                LogicalAnd.new(left, right)
+
+            when .is_a?(CmpEQ)
+                left = transform(expr.@left)
+                right = transform(expr.@right)
+                CmpEQ.new(left, right)
+
+            when .is_a?(CmpNEQ)
+                left = transform(expr.@left)
+                right = transform(expr.@right)
+                CmpNEQ.new(left, right)
+
             else
                 expr
             end
@@ -36,6 +97,42 @@ module Isekai
     end
 
     class BitcodeParser
+
+        def make_select_expr (cond : DFGExpr?, if_true : DFGExpr, if_false : DFGExpr) : DFGExpr
+            if cond
+                return Conditional.new(cond, if_true, if_false)
+            else
+                if_true
+            end
+        end
+
+        def make_deref_op (expr : DFGExpr) : DFGExpr
+            if expr.is_a?(GetPointerOp)
+                expr.@target
+            else
+                DerefOp.new(expr)
+            end
+        end
+
+        def make_getptr_op (expr : DFGExpr) : DFGExpr
+            if expr.is_a?(DerefOp)
+                expr.@target
+            else
+                GetPointerOp.new(expr)
+            end
+        end
+
+        def make_land_expr (a : DFGExpr?, b : DFGExpr) : DFGExpr
+            if a
+                LogicalAnd.new(a, b)
+            else
+                b
+            end
+        end
+
+        def make_undef_expr! : DFGExpr
+            return Constant.new(0)
+        end
 
         @inputs : Array(DFGExpr)?
         @nizk_inputs : Array(DFGExpr)?
@@ -49,6 +146,8 @@ module Isekai
         @nizk_input_storage : Storage?
         @output_storage : Storage?
 
+        @inspected_blocks = Set(LibLLVM::BasicBlock).new
+
         def make_field_transformer!
             FieldTransformer.new(@input_storage, @inputs, @nizk_input_storage, @nizk_inputs)
         end
@@ -56,7 +155,7 @@ module Isekai
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
         end
 
-        def inspect_param! (is_input, ptr, ty)
+        def inspect_param (is_input : Bool, ptr, ty)
             raise "Function parameter is not a pointer" unless
                 LibLLVM_C.get_type_kind(ty).pointer_type_kind?
 
@@ -97,7 +196,7 @@ module Isekai
             @arguments[ptr] = GetPointerOp.new(Structure.new(st))
         end
 
-        def load_expr_preliminary (src)
+        def load_expr_preliminary (src) : DFGExpr
             kind = LibLLVM_C.get_value_kind(src)
             case kind
             when .argument_value_kind?
@@ -112,24 +211,21 @@ module Isekai
             end
         end
 
-        def load_expr (src)
+        def load_expr (src) : DFGExpr
             expr = load_expr_preliminary(src)
             # TODO: collapse it properly
             case expr
             when .is_a?(AllocaOp)
-                make_getptr_op!(@allocas[expr.@idx])
+                expr = make_getptr_op(@allocas[expr.@idx])
             when .is_a?(Field)
                 if expr.@key.@storage == @output_storage
-                    @outputs[expr.@key.@idx][1]
-                else
-                    expr
+                    expr = @outputs[expr.@key.@idx][1]
                 end
-            else
-                expr
             end
+            expr
         end
 
-        def store! (dst, expr)
+        def store (dst, expr : DFGExpr, precond : DFGExpr?)
             # TODO: collapse it properly
 
             dst_kind = LibLLVM_C.get_value_kind(dst)
@@ -137,36 +233,25 @@ module Isekai
 
             dst_expr = @locals[dst]
             case dst_expr
+
             when .is_a?(AllocaOp)
-                @allocas[dst_expr.@idx] = expr
+                prev_expr = @allocas[dst_expr.@idx]
+                @allocas[dst_expr.@idx] = make_select_expr(precond, expr, prev_expr)
+
             when .is_a?(GetPointerOp)
                 target = dst_expr.@target
                 raise "NYI: cannot store at pointer to #{target}" unless target.is_a?(Field)
                 field = target.as(Field)
                 raise "NYI" unless field.@key.@storage == @output_storage
-                @outputs[field.@key.@idx] = {field.@key, expr}
+                prev_expr = @outputs[field.@key.@idx][1]
+                @outputs[field.@key.@idx] = {field.@key, make_select_expr(precond, expr, prev_expr)}
+
             else
                 raise "NYI: cannot store at #{dst_expr}"
             end
         end
 
-        def make_deref_op! (expr)
-            if expr.is_a?(GetPointerOp)
-                expr.@target
-            else
-                DerefOp.new(expr)
-            end
-        end
-
-        def make_getptr_op! (expr)
-            if expr.is_a?(DerefOp)
-                expr.@target
-            else
-                GetPointerOp.new(expr)
-            end
-        end
-
-        def get_element_ptr (base, offset, field)
+        def get_element_ptr (base : DFGExpr, offset : DFGExpr, field : DFGExpr) : DFGExpr
             raise "NYI: GEP base is not a pointer" unless base.is_a?(GetPointerOp)
             raise "NYI: non-constant GEP offset" unless offset.is_a?(Constant)
             raise "NYI: non-constant GEP field" unless field.is_a?(Constant)
@@ -182,23 +267,55 @@ module Isekai
             return GetPointerOp.new(Field.new(key))
         end
 
-        def inspect_basic_block! (bb)
+        def get_meeting_point (a, b)
+            trav_a = BFSTraverser.new(a)
+            trav_b = BFSTraverser.new(b)
+            while true
+                p = trav_a.next!
+                return p if p && trav_b.seen? p
+
+                q = trav_b.next!
+                return q if q && trav_a.seen? q
+
+                return nil unless p || q
+            end
+        end
+
+        def inspect_basic_block_until (
+                bb : LibLLVM::BasicBlock,
+                precond : DFGExpr?,
+                terminator : LibLLVM::BasicBlock?)
+
+            while bb && bb != terminator
+                bb = inspect_basic_block(bb, precond)
+            end
+        end
+
+        def inspect_basic_block (
+                bb : LibLLVM::BasicBlock,
+                precond : DFGExpr?) : LibLLVM::BasicBlock?
+
+            if @inspected_blocks.includes?(bb)
+                raise "NYI: loop"
+            end
+            @inspected_blocks.add(bb)
+
             bb.instructions do |ins|
                 case LibLLVM_C.get_instruction_opcode(ins)
 
                 when .alloca?
                     #ty = LibLLVM_C.get_allocated_type(ins)
                     @locals[ins] = AllocaOp.new(@allocas.size)
-                    @allocas << Undefined.new()
+                    @allocas << make_undef_expr!
 
                 when .store?
                     src = LibLLVM_C.get_operand(ins, 0)
                     dst = LibLLVM_C.get_operand(ins, 1)
-                    store!(dst, load_expr(src))
+                    store(dst, load_expr(src), precond)
 
                 when .load?
                     src = LibLLVM_C.get_operand(ins, 0)
-                    @locals[ins] = make_deref_op!(load_expr(src))
+                    @locals[ins] = make_deref_op(load_expr(src))
 
                 when .get_element_ptr?
                     nops = LibLLVM_C.get_num_operands(ins)
@@ -216,9 +333,50 @@ module Isekai
                     right = LibLLVM_C.get_operand(ins, 1)
                     @locals[ins] = Add.new(load_expr(left), load_expr(right))
 
+                when .i_cmp?
+                    left = LibLLVM_C.get_operand(ins, 0)
+                    right = LibLLVM_C.get_operand(ins, 1)
+
+                    case LibLLVM_C.get_i_cmp_predicate(ins)
+                    when .int_eq?
+                        @locals[ins] = CmpEQ.new(load_expr(left), load_expr(right))
+                    when .int_ne?
+                        @locals[ins] = CmpNEQ.new(load_expr(left), load_expr(right))
+                    else
+                        raise "NYI: ICmp predicate"
+                    end
+
+                when .br?
+                    has_cond = LibLLVM_C.is_conditional(ins) != 0
+                    if has_cond
+                        raise "Unsupported" unless LibLLVM_C.get_num_successors(ins) == 2
+
+                        cond = load_expr(LibLLVM_C.get_condition(ins))
+                        if_true  = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 0))
+                        if_false = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 1))
+
+                        sink = get_meeting_point(if_true, if_false)
+
+                        inspect_basic_block_until(
+                            if_true,
+                            make_land_expr(precond, cond),
+                            sink)
+
+                        inspect_basic_block_until(
+                            if_false,
+                            make_land_expr(precond, LogicalNot.new(cond)),
+                            sink)
+
+                        return sink
+                    else
+                        raise "Unsupported" unless LibLLVM_C.get_num_successors(ins) == 1
+                        target = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 0))
+                        return target
+                    end
+
                 when .ret?
                     # We assume this is "ret void" as the function returns void.
-                    break
+                    return nil
 
                 else
                     repr = LibLLVM.slurp_string(LibLLVM_C.print_value_to_string(ins))
@@ -227,16 +385,16 @@ module Isekai
             end
         end
 
-        def gen_input_array (storage : Storage?, x : T.class) forall T
+        def gen_input_array (storage : Storage?)
             return nil unless storage
             arr = Array(DFGExpr).new
             (0...storage.@size).each do |i|
-                arr << T.new(StorageKey.new(storage, i))
+                arr << yield StorageKey.new(storage, i)
             end
             return arr
         end
 
-        def inspect_root_func! (func)
+        def inspect_root_func (func)
             func_ty = LibLLVM_C.type_of(func)
             if LibLLVM_C.get_type_kind(func_ty).pointer_type_kind?
                 func_ty = LibLLVM_C.get_element_type(func_ty)
@@ -261,25 +419,25 @@ module Isekai
 
             case func_nparams
             when 2
-                inspect_param!(true,  params[0], param_tys[0])
-                inspect_param!(false, params[1], param_tys[1])
+                inspect_param(true,  params[0], param_tys[0])
+                inspect_param(false, params[1], param_tys[1])
             when 3
-                inspect_param!(true,  params[0], param_tys[0])
-                inspect_param!(true,  params[1], param_tys[1])
-                inspect_param!(false, params[2], param_tys[2])
+                inspect_param(true,  params[0], param_tys[0])
+                inspect_param(true,  params[1], param_tys[1])
+                inspect_param(false, params[2], param_tys[2])
             else
                 raise "Function takes #{func_nparams} parameter(s), expected 2 or 3"
             end
 
-            @inputs = gen_input_array(@input_storage, Input)
-            @nizk_inputs = gen_input_array(@nizk_input_storage, NIZKInput)
+            @inputs      = gen_input_array @input_storage      { |key| Input.new(key)     }
+            @nizk_inputs = gen_input_array @nizk_input_storage { |key| NIZKInput.new(key) }
 
             output_storage = @output_storage.as(Storage)
             (0...output_storage.@size).each do |i|
-                @outputs << {StorageKey.new(output_storage, i), Undefined.new()}
+                @outputs << {StorageKey.new(output_storage, i), make_undef_expr!}
             end
 
-            inspect_basic_block!(func.entry_basic_block)
+            inspect_basic_block_until(func.entry_basic_block, nil, nil)
 
             (0...output_storage.@size).each do |i|
                 key, expr = @outputs[i][0], @outputs[i][1]
@@ -293,7 +451,7 @@ module Isekai
                 next if func.declaration?
                 raise "Unexpected function defined: #{func.name}" unless
                     func.name == "outsource"
-                inspect_root_func!(func)
+                inspect_root_func(func)
                 return {@inputs || [] of DFGExpr, @nizk_inputs, @outputs}
             end
 
