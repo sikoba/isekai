@@ -279,6 +279,60 @@ module Isekai
                     right = LibLLVM_C.get_operand(ins, 1)
                     @locals[ins] = Add.new(load_expr(left), load_expr(right))
 
+                when .sub?
+                    left = LibLLVM_C.get_operand(ins, 0)
+                    right = LibLLVM_C.get_operand(ins, 1)
+                    @locals[ins] = Subtract.new(load_expr(left), load_expr(right))
+
+                when .mul?
+                    left = LibLLVM_C.get_operand(ins, 0)
+                    right = LibLLVM_C.get_operand(ins, 1)
+                    @locals[ins] = Multiply.new(load_expr(left), load_expr(right))
+
+                when .s_div?
+                    left = LibLLVM_C.get_operand(ins, 0)
+                    right = LibLLVM_C.get_operand(ins, 1)
+                    @locals[ins] = Divide.new(load_expr(left), load_expr(right))
+
+                when .s_rem?
+                    left = LibLLVM_C.get_operand(ins, 0)
+                    right = LibLLVM_C.get_operand(ins, 1)
+                    @locals[ins] = Modulo.new(load_expr(left), load_expr(right))
+
+                when .shl?
+                    left = LibLLVM_C.get_operand(ins, 0)
+                    right = LibLLVM_C.get_operand(ins, 1)
+                    @locals[ins] = LeftShift.new(load_expr(left), load_expr(right), 32)
+
+                when .l_shr?
+                    left = LibLLVM_C.get_operand(ins, 0)
+                    right = LibLLVM_C.get_operand(ins, 1)
+                    @locals[ins] = RightShift.new(load_expr(left), load_expr(right), 32)
+
+                when .and?
+                    left = LibLLVM_C.get_operand(ins, 0)
+                    right = LibLLVM_C.get_operand(ins, 1)
+                    @locals[ins] = BitAnd.new(load_expr(left), load_expr(right))
+
+                when .or?
+                    left = LibLLVM_C.get_operand(ins, 0)
+                    right = LibLLVM_C.get_operand(ins, 1)
+                    @locals[ins] = BitOr.new(load_expr(left), load_expr(right))
+
+                when .xor?
+                    left = LibLLVM_C.get_operand(ins, 0)
+                    right = LibLLVM_C.get_operand(ins, 1)
+                    @locals[ins] = Xor.new(load_expr(left), load_expr(right))
+
+                when .select?
+                    pred = LibLLVM_C.get_operand(ins, 0)
+                    valtrue = LibLLVM_C.get_operand(ins, 1)
+                    valfalse = LibLLVM_C.get_operand(ins, 2)
+                    @locals[ins] = Conditional.new(
+                        load_expr(pred),
+                        load_expr(valtrue),
+                        load_expr(valfalse))
+
                 when .i_cmp?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
