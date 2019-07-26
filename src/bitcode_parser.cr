@@ -217,13 +217,13 @@ module Isekai
             trav_a = BFSTraverser.new(a)
             trav_b = BFSTraverser.new(b)
             while true
-                p = trav_a.next!
-                return p if p && trav_b.seen? p
+                x = trav_a.next!
+                return x if x && trav_b.seen? x
 
-                q = trav_b.next!
-                return q if q && trav_a.seen? q
+                y = trav_b.next!
+                return y if y && trav_a.seen? y
 
-                return nil unless p || q
+                return nil unless x || y
             end
         end
 
@@ -304,7 +304,7 @@ module Isekai
                     right = LibLLVM_C.get_operand(ins, 1)
                     @locals[ins] = LeftShift.new(load_expr(left), load_expr(right), 32)
 
-                when .l_shr?
+                when .a_shr?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
                     @locals[ins] = RightShift.new(load_expr(left), load_expr(right), 32)
@@ -332,6 +332,10 @@ module Isekai
                         load_expr(pred),
                         load_expr(valtrue),
                         load_expr(valfalse))
+
+                when .z_ext?
+                    target = LibLLVM_C.get_operand(ins, 0)
+                    @locals[ins] = load_expr(target)
 
                 when .i_cmp?
                     left = LibLLVM_C.get_operand(ins, 0)
