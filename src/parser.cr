@@ -207,15 +207,9 @@ module Isekai
                     # For every element in the input array, declare the Input/NIZKInput nodes
                     (0..(input_storage_ref).@type.sizeof-1).each do |idx|
                         sk = StorageKey.new(input_storage_ref.@storage, idx)
-                        if i == 0
-                            input = dfg(Input, sk)
-                            input_list << input
-                            symtab.assign(sk, input)
-                        else
-                            input = dfg(NIZKInput, sk)
-                            input_list << input
-                            symtab.assign(sk, input)
-                        end
+                        input = dfg(Field, sk)
+                        input_list << input
+                        symtab.assign(sk, input)
                     end
 
                     # Assign the input nodes to class members

@@ -64,6 +64,18 @@ class Field < DFGExpr
     def initialize(@key : StorageKey)
     end
 
+    def evaluate (collapser)
+        return collapser.get_input(@key)
+    end
+
+    def collapse_dependencies () : Array(DFGExpr)
+        return Array(DFGExpr).new()
+    end
+
+    def collapse_constants(collapser) : DFGExpr
+        return self
+    end
+
     def_equals @key
     def_hash @key
 end
@@ -520,32 +532,4 @@ class Negate < UnaryOp
     def_equals @expr, class_name
 end
 
-# Program input expression. The subclass for both NIZK and regular
-# input classes
-class InputBase < DFGExpr
-    def initialize(@storage_key : StorageKey)
-    end
-
-    def evaluate (collapser)
-        return collapser.get_input(@storage_key)
-    end
-
-    def collapse_dependencies () : Array(DFGExpr)
-        return Array(DFGExpr).new()
-    end
-
-    def collapse_constants(collapser) : DFGExpr
-        return self
-    end
 end
-
-# Regular program input expression. Passed as an argument to outsource method
-class Input < InputBase
-end
-
-# NIZK program input expression. Passed as an optional argument to outsource method
-class NIZKInput < InputBase
-end
-
-end
-
