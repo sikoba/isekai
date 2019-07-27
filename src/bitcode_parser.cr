@@ -213,14 +213,16 @@ module Isekai
             return GetPointerOp.new(Field.new(key))
         end
 
-        def get_meeting_point (a, b)
+        def get_meeting_point (a, b, junction)
             trav_a = BFSTraverser.new(a)
             trav_b = BFSTraverser.new(b)
             while true
                 x = trav_a.next!
+                return junction if x == junction
                 return x if x && trav_b.seen? x
 
                 y = trav_b.next!
+                return junction if y == junction
                 return y if y && trav_a.seen? y
 
                 return nil unless x || y
@@ -232,7 +234,8 @@ module Isekai
                 precond : DFGExpr?,
                 terminator : LibLLVM::BasicBlock?)
 
-            while bb && bb != terminator
+            while bb != terminator
+                raise "Unsupported" unless bb
                 bb = inspect_basic_block(bb, precond)
             end
         end
@@ -359,7 +362,10 @@ module Isekai
                         if_true  = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 0))
                         if_false = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 1))
 
-                        sink = get_meeting_point(if_true, if_false)
+                        sink = get_meeting_point(if_true, if_false, bb)
+                        if sink == bb
+                            raise "ELOOP"
+                        end
 
                         inspect_basic_block_until(
                             if_true,
