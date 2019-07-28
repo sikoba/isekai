@@ -81,17 +81,15 @@ module Isekai
 
         def self.select_reduce (
                 expr : DFGExpr,
-                chain : Array(Tuple(DFGExpr, Bool)),
-                chain_index : Int32 = 0) : DFGExpr
+                chain : Array(Tuple(DFGExpr, Bool))) : DFGExpr
 
-            if expr.is_a? Conditional && chain_index != chain.size
-                cond, flag = chain[chain_index][0], chain[chain_index][1]
-                if cond == expr.@cond
-                    if flag
-                        return select_reduce(expr.@valtrue, chain, chain_index + 1)
-                    else
-                        return select_reduce(expr.@valfalse, chain, chain_index + 1)
-                    end
+            chain.each do |(cond, flag)|
+                break unless expr.is_a? Conditional
+                break unless cond == expr.@cond
+                if flag
+                    expr = expr.@valtrue
+                else
+                    expr = expr.@valfalse
                 end
             end
             return expr
