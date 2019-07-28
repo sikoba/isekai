@@ -35,7 +35,7 @@ module Isekai
             when .ret?
                 # do nothing
             else
-                raise "NYI"
+                raise "NYI block terminator instruction (switch?)"
             end
 
             bb
@@ -48,15 +48,57 @@ module Isekai
 
     class BitcodeParser
 
-        def make_select_expr (cond : DFGExpr?, if_true : DFGExpr, if_false : DFGExpr) : DFGExpr
-            if cond
-                return Conditional.new(cond, if_true, if_false)
-            else
-                if_true
+        def self.select_make_chained (
+                chain : Array(Tuple(DFGExpr, Bool)),
+                valtrue : DFGExpr,
+                valfalse : DFGExpr)
+
+            result = valtrue
+            chain.reverse_each do |(cond, flag)|
+                if flag
+                    result = Conditional.new(cond, result, valfalse)
+                else
+                    result = Conditional.new(cond, valfalse, result)
+                end
             end
+            return result
         end
 
-        def make_deref_op (expr : DFGExpr) : DFGExpr
+        def self.select_insert (
+                old_expr : DFGExpr,
+                chain : Array(Tuple(DFGExpr, Bool)),
+                new_expr : DFGExpr) : DFGExpr
+
+            if old_expr.is_a? Conditional && !chain.empty?
+                cond, flag = chain[0][0], chain[0][1]
+                if cond == old_expr.@cond
+                    valtrue, valfalse = old_expr.@valtrue, old_expr.@valfalse
+                    if flag
+                        valtrue = select_insert(valtrue, chain[1..], new_expr)
+                    else
+                        valfalse = select_insert(valfalse, chain[1..], new_expr)
+                    end
+                    return Conditional.new(cond, valtrue, valfalse)
+                end
+            end
+            return select_make_chained(chain, new_expr, old_expr)
+        end
+
+        def self.select_reduce (expr : DFGExpr, chain : Array(Tuple(DFGExpr, Bool))) : DFGExpr
+            if expr.is_a? Conditional && !chain.empty?
+                cond, flag = chain[0][0], chain[0][1]
+                if cond == expr.@cond
+                    if flag
+                        return select_reduce(expr.@valtrue, chain[1..])
+                    else
+                        return select_reduce(expr.@valfalse, chain[1..])
+                    end
+                end
+            end
+            return expr
+        end
+
+        def self.make_deref_op (expr : DFGExpr) : DFGExpr
             if expr.is_a?(GetPointerOp)
                 expr.@target
             else
@@ -64,7 +106,7 @@ module Isekai
             end
         end
 
-        def make_getptr_op (expr : DFGExpr) : DFGExpr
+        def self.make_getptr_op (expr : DFGExpr) : DFGExpr
             if expr.is_a?(DerefOp)
                 expr.@target
             else
@@ -72,16 +114,17 @@ module Isekai
             end
         end
 
-        def make_land_expr (a : DFGExpr?, b : DFGExpr) : DFGExpr
-            if a
-                LogicalAnd.new(a, b)
-            else
-                b
-            end
+        def self.make_undef_expr! : DFGExpr
+            return Constant.new(0)
         end
 
-        def make_undef_expr! : DFGExpr
-            return Constant.new(0)
+        def self.make_input_array (storage : Storage?)
+            return nil unless storage
+            arr = Array(DFGExpr).new
+            (0...storage.@size).each do |i|
+                arr << Field.new(StorageKey.new(storage, i))
+            end
+            return arr
         end
 
         @inputs : Array(DFGExpr)?
@@ -97,6 +140,8 @@ module Isekai
         @output_storage : Storage?
 
         @inspected_blocks = Set(LibLLVM::BasicBlock).new
+
+        @chain = [] of Tuple(DFGExpr, Bool)
 
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
         end
@@ -162,16 +207,19 @@ module Isekai
             # TODO: collapse it properly
             case expr
             when .is_a?(AllocaOp)
-                expr = make_getptr_op(@allocas[expr.@idx])
+                expr = BitcodeParser.make_getptr_op(@allocas[expr.@idx])
             when .is_a?(Field)
                 if expr.@key.@storage == @output_storage
                     expr = @outputs[expr.@key.@idx][1]
                 end
             end
+
+            expr = BitcodeParser.select_reduce(expr, @chain)
+
             expr
         end
 
-        def store (dst, expr : DFGExpr, precond : DFGExpr?)
+        def store (dst, expr : DFGExpr)
             # TODO: collapse it properly
 
             dst_kind = LibLLVM_C.get_value_kind(dst)
@@ -181,16 +229,19 @@ module Isekai
             case dst_expr
 
             when .is_a?(AllocaOp)
-                prev_expr = @allocas[dst_expr.@idx]
-                @allocas[dst_expr.@idx] = make_select_expr(precond, expr, prev_expr)
+                old_expr = @allocas[dst_expr.@idx]
+                @allocas[dst_expr.@idx] = BitcodeParser.select_insert(old_expr, @chain, expr)
 
             when .is_a?(GetPointerOp)
                 target = dst_expr.@target
                 raise "NYI: cannot store at pointer to #{target}" unless target.is_a?(Field)
                 field = target.as(Field)
-                raise "NYI" unless field.@key.@storage == @output_storage
-                prev_expr = @outputs[field.@key.@idx][1]
-                @outputs[field.@key.@idx] = {field.@key, make_select_expr(precond, expr, prev_expr)}
+                raise "NYI: store in non-output struct" unless field.@key.@storage == @output_storage
+                old_expr = @outputs[field.@key.@idx][1]
+                @outputs[field.@key.@idx] = {
+                    field.@key,
+                    BitcodeParser.select_insert(old_expr, @chain, expr)
+                }
 
             else
                 raise "NYI: cannot store at #{dst_expr}"
@@ -213,6 +264,7 @@ module Isekai
             return GetPointerOp.new(Field.new(key))
         end
 
+        # TODO make this function static?
         def get_meeting_point (a, b, junction)
             trav_a = BFSTraverser.new(a)
             trav_b = BFSTraverser.new(b)
@@ -231,18 +283,15 @@ module Isekai
 
         def inspect_basic_block_until (
                 bb : LibLLVM::BasicBlock,
-                precond : DFGExpr?,
                 terminator : LibLLVM::BasicBlock?)
 
             while bb != terminator
-                raise "Unsupported" unless bb
-                bb = inspect_basic_block(bb, precond)
+                raise "terminator not found (end of function reached)" unless bb
+                bb = inspect_basic_block(bb)
             end
         end
 
-        def inspect_basic_block (
-                bb : LibLLVM::BasicBlock,
-                precond : DFGExpr?) : LibLLVM::BasicBlock?
+        def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
 
             if @inspected_blocks.includes?(bb)
                 raise "NYI: loop"
@@ -255,16 +304,16 @@ module Isekai
                 when .alloca?
                     #ty = LibLLVM_C.get_allocated_type(ins)
                     @locals[ins] = AllocaOp.new(@allocas.size)
-                    @allocas << make_undef_expr!
+                    @allocas << BitcodeParser.make_undef_expr!
 
                 when .store?
                     src = LibLLVM_C.get_operand(ins, 0)
                     dst = LibLLVM_C.get_operand(ins, 1)
-                    store(dst, load_expr(src), precond)
+                    store(dst, load_expr(src))
 
                 when .load?
                     src = LibLLVM_C.get_operand(ins, 0)
-                    @locals[ins] = make_deref_op(load_expr(src))
+                    @locals[ins] = BitcodeParser.make_deref_op(load_expr(src))
 
                 when .get_element_ptr?
                     nops = LibLLVM_C.get_num_operands(ins)
@@ -356,7 +405,7 @@ module Isekai
                 when .br?
                     has_cond = LibLLVM_C.is_conditional(ins) != 0
                     if has_cond
-                        raise "Unsupported" unless LibLLVM_C.get_num_successors(ins) == 2
+                        raise "Unsupported br form" unless LibLLVM_C.get_num_successors(ins) == 2
 
                         cond = load_expr(LibLLVM_C.get_condition(ins))
                         if_true  = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 0))
@@ -367,19 +416,17 @@ module Isekai
                             raise "ELOOP"
                         end
 
-                        inspect_basic_block_until(
-                            if_true,
-                            make_land_expr(precond, cond),
-                            sink)
+                        @chain << {cond, true}
+                        inspect_basic_block_until(if_true, sink)
+                        @chain.pop
 
-                        inspect_basic_block_until(
-                            if_false,
-                            make_land_expr(precond, LogicalNot.new(cond)),
-                            sink)
+                        @chain << {cond, false}
+                        inspect_basic_block_until(if_false, sink)
+                        @chain.pop
 
                         return sink
                     else
-                        raise "Unsupported" unless LibLLVM_C.get_num_successors(ins) == 1
+                        raise "Unsupported br form" unless LibLLVM_C.get_num_successors(ins) == 1
                         target = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 0))
                         return target
                     end
@@ -393,15 +440,6 @@ module Isekai
                     raise "Unsupported instruction: #{repr}"
                 end
             end
-        end
-
-        def gen_input_array (storage : Storage?)
-            return nil unless storage
-            arr = Array(DFGExpr).new
-            (0...storage.@size).each do |i|
-                arr << Field.new(StorageKey.new(storage, i))
-            end
-            return arr
         end
 
         def inspect_root_func (func)
@@ -439,15 +477,18 @@ module Isekai
                 raise "Function takes #{func_nparams} parameter(s), expected 2 or 3"
             end
 
-            @inputs      = gen_input_array @input_storage
-            @nizk_inputs = gen_input_array @nizk_input_storage
+            @inputs      = BitcodeParser.make_input_array @input_storage
+            @nizk_inputs = BitcodeParser.make_input_array @nizk_input_storage
 
             output_storage = @output_storage.as(Storage)
             (0...output_storage.@size).each do |i|
-                @outputs << {StorageKey.new(output_storage, i), make_undef_expr!}
+                @outputs << {
+                    StorageKey.new(output_storage, i),
+                    BitcodeParser.make_undef_expr!
+                }
             end
 
-            inspect_basic_block_until(func.entry_basic_block, nil, nil)
+            inspect_basic_block_until(func.entry_basic_block, nil)
         end
 
         def parse ()
