@@ -48,50 +48,49 @@ module Isekai
 
     class BitcodeParser
 
-        def self.select_make_chained (
+        def self.select_insert (
+                old_expr : DFGExpr,
+                new_expr : DFGExpr,
                 chain : Array(Tuple(DFGExpr, Bool)),
-                valtrue : DFGExpr,
-                valfalse : DFGExpr)
+                chain_index : Int32 = 0) : DFGExpr
 
-            result = valtrue
-            chain.reverse_each do |(cond, flag)|
+            if old_expr.is_a? Conditional && chain_index != chain.size
+                cond, flag = chain[chain_index][0], chain[chain_index][1]
+                if cond == old_expr.@cond
+                    valtrue, valfalse = old_expr.@valtrue, old_expr.@valfalse
+                    if flag
+                        valtrue = select_insert(valtrue, new_expr, chain, chain_index + 1)
+                    else
+                        valfalse = select_insert(valfalse, new_expr, chain, chain_index + 1)
+                    end
+                    return Conditional.new(cond, valtrue, valfalse)
+                end
+            end
+
+            result = new_expr
+            (chain_index...chain.size).reverse_each do |i|
+                cond, flag = chain[i][0], chain[i][1]
                 if flag
-                    result = Conditional.new(cond, result, valfalse)
+                    result = Conditional.new(cond, result, old_expr)
                 else
-                    result = Conditional.new(cond, valfalse, result)
+                    result = Conditional.new(cond, old_expr, result)
                 end
             end
             return result
         end
 
-        def self.select_insert (
-                old_expr : DFGExpr,
+        def self.select_reduce (
+                expr : DFGExpr,
                 chain : Array(Tuple(DFGExpr, Bool)),
-                new_expr : DFGExpr) : DFGExpr
+                chain_index : Int32 = 0) : DFGExpr
 
-            if old_expr.is_a? Conditional && !chain.empty?
-                cond, flag = chain[0][0], chain[0][1]
-                if cond == old_expr.@cond
-                    valtrue, valfalse = old_expr.@valtrue, old_expr.@valfalse
-                    if flag
-                        valtrue = select_insert(valtrue, chain[1..], new_expr)
-                    else
-                        valfalse = select_insert(valfalse, chain[1..], new_expr)
-                    end
-                    return Conditional.new(cond, valtrue, valfalse)
-                end
-            end
-            return select_make_chained(chain, new_expr, old_expr)
-        end
-
-        def self.select_reduce (expr : DFGExpr, chain : Array(Tuple(DFGExpr, Bool))) : DFGExpr
-            if expr.is_a? Conditional && !chain.empty?
-                cond, flag = chain[0][0], chain[0][1]
+            if expr.is_a? Conditional && chain_index != chain.size
+                cond, flag = chain[chain_index][0], chain[chain_index][1]
                 if cond == expr.@cond
                     if flag
-                        return select_reduce(expr.@valtrue, chain[1..])
+                        return select_reduce(expr.@valtrue, chain, chain_index + 1)
                     else
-                        return select_reduce(expr.@valfalse, chain[1..])
+                        return select_reduce(expr.@valfalse, chain, chain_index + 1)
                     end
                 end
             end
@@ -230,7 +229,7 @@ module Isekai
 
             when .is_a?(AllocaOp)
                 old_expr = @allocas[dst_expr.@idx]
-                @allocas[dst_expr.@idx] = BitcodeParser.select_insert(old_expr, @chain, expr)
+                @allocas[dst_expr.@idx] = BitcodeParser.select_insert(old_expr, expr, @chain)
 
             when .is_a?(GetPointerOp)
                 target = dst_expr.@target
@@ -240,7 +239,7 @@ module Isekai
                 old_expr = @outputs[field.@key.@idx][1]
                 @outputs[field.@key.@idx] = {
                     field.@key,
-                    BitcodeParser.select_insert(old_expr, @chain, expr)
+                    BitcodeParser.select_insert(old_expr, expr, @chain)
                 }
 
             else
