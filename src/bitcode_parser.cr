@@ -6,7 +6,7 @@ require "llvm-crystal/lib_llvm_c"
 
 module Isekai
 
-    class BFSTraverser
+    private class BFSTraverser
 
         def initialize (bb : LibLLVM::BasicBlock)
             @queue = [bb]
@@ -112,9 +112,9 @@ module Isekai
 
         private def make_deref_op (expr : DFGExpr) : DFGExpr
             case expr
-            when .is_a?(GetPointerOp)
+            when GetPointerOp
                 expr.@target
-            when .is_a?(AllocaOp)
+            when AllocaOp
                 @allocas[expr.@idx]
             else
                 DerefOp.new(expr)
@@ -150,7 +150,7 @@ module Isekai
             end
         end
 
-        private def inspect_param (is_input : Bool, ptr, ty)
+        private def inspect_param (ptr, ty, accept)
             raise "Function parameter is not a pointer" unless
                 LibLLVM_C.get_type_kind(ty).pointer_type_kind?
 
@@ -165,27 +165,24 @@ module Isekai
             s_name = String.new(LibLLVM_C.get_struct_name(s_ty))
             nelems = LibLLVM_C.count_struct_element_types(s_ty).to_i32
 
-            if is_input
-                case s_name
-                when "struct.Input"
-                    raise "Duplicate param type" if @input_storage
-                    st = Storage.new("Input", nelems)
-                    @input_storage = st
+            case s_name
+            when "struct.Input"
+                raise "Wrong position for #{s_name}* parameter" unless accept.includes? :input
+                st = Storage.new("Input", nelems)
+                @input_storage = st
 
-                when "struct.NzikInput" # sic
-                    raise "Duplicate param type" if @nizk_input_storage
-                    st = Storage.new("NzikInput", nelems)
-                    @nizk_input_storage = st
+            when "struct.NzikInput" # sic
+                raise "Wrong position for #{s_name}* parameter" unless accept.includes? :nizk_input
+                st = Storage.new("NzikInput", nelems)
+                @nizk_input_storage = st
 
-                else
-                    raise "Invalid param type: #{s_name} for input parameter"
-                end
-            else
-                raise "Invalid param type: #{s_name} for output parameter" unless
-                    s_name == "struct.Output"
-                raise "Duplicate param type" if @output_storage
+            when "struct.Output"
+                raise "Wrong position for #{s_name}* parameter" unless accept.includes? :output
                 st = Storage.new("Output", nelems)
                 @output_storage = st
+
+            else
+                raise "Unexpected parameter type: #{s_name}*"
             end
 
             @arguments[ptr] = GetPointerOp.new(Structure.new(st))
@@ -210,7 +207,7 @@ module Isekai
             expr = load_expr_preliminary(src)
             # TODO: collapse it properly
             case expr
-            when .is_a?(Field)
+            when Field
                 if expr.@key.@storage == @output_storage
                     expr = @outputs[expr.@key.@idx][1]
                 end
@@ -230,11 +227,11 @@ module Isekai
             dst_expr = @locals[dst]
             case dst_expr
 
-            when .is_a?(AllocaOp)
+            when AllocaOp
                 old_expr = @allocas[dst_expr.@idx]
                 @allocas[dst_expr.@idx] = with_chain_add_contition(old_expr, expr)
 
-            when .is_a?(GetPointerOp)
+            when GetPointerOp
                 target = dst_expr.@target
                 raise "NYI: cannot store at pointer to #{target}" unless target.is_a?(Field)
                 field = target.as(Field)
@@ -291,7 +288,7 @@ module Isekai
                 when .store?
                     src = LibLLVM_C.get_operand(ins, 0)
                     dst = LibLLVM_C.get_operand(ins, 1)
-                    store(dst, load_expr(src))
+                    store(dst: dst, expr: load_expr(src))
 
                 when .load?
                     src = LibLLVM_C.get_operand(ins, 0)
@@ -306,7 +303,9 @@ module Isekai
                     field = LibLLVM_C.get_operand(ins, 2)
 
                     @locals[ins] = get_element_ptr(
-                        load_expr(base), load_expr(offset), load_expr(field))
+                        base: load_expr(base),
+                        offset: load_expr(offset),
+                        field: load_expr(field))
 
                 when .add?
                     left = LibLLVM_C.get_operand(ins, 0)
@@ -393,17 +392,17 @@ module Isekai
                         if_true  = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 0))
                         if_false = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 1))
 
-                        sink = get_meeting_point(if_true, if_false, bb)
+                        sink = get_meeting_point(if_true, if_false, junction: bb)
                         if sink == bb
                             raise "ELOOP"
                         end
 
                         @chain << {cond, true}
-                        inspect_basic_block_until(if_true, sink)
+                        inspect_basic_block_until(if_true, terminator: sink)
                         @chain.pop
 
                         @chain << {cond, false}
-                        inspect_basic_block_until(if_false, sink)
+                        inspect_basic_block_until(if_false, terminator: sink)
                         @chain.pop
 
                         return sink
@@ -449,12 +448,12 @@ module Isekai
 
             case func_nparams
             when 2
-                inspect_param(true,  params[0], param_tys[0])
-                inspect_param(false, params[1], param_tys[1])
+                inspect_param(params[0], param_tys[0], accept: {:input, :nizk_input})
+                inspect_param(params[1], param_tys[1], accept: {:output})
             when 3
-                inspect_param(true,  params[0], param_tys[0])
-                inspect_param(true,  params[1], param_tys[1])
-                inspect_param(false, params[2], param_tys[2])
+                inspect_param(params[0], param_tys[0], accept: {:input})
+                inspect_param(params[1], param_tys[1], accept: {:nizk_input})
+                inspect_param(params[2], param_tys[2], accept: {:output})
             else
                 raise "Function takes #{func_nparams} parameter(s), expected 2 or 3"
             end
@@ -467,7 +466,7 @@ module Isekai
                 @outputs << {StorageKey.new(output_storage, i), make_undef_expr}
             end
 
-            inspect_basic_block_until(func.entry_basic_block, nil)
+            inspect_basic_block_until(func.entry_basic_block, terminator: nil)
         end
 
         def parse ()
