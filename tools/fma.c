@@ -11,5 +11,6 @@ struct Output {
 void
 outsource(struct Input *input, struct Output *output)
 {
-    output->x = input->a * input->b + input->c;
+    output->x = input->a * input->b;
+    output->x = output->x + input->c;
 }
