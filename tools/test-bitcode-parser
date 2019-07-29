@@ -15,6 +15,7 @@ ISEKAI=../isekai
 BC_FILE=test_bitcode.bc
 ARCI_BITCODE=test_out_bitcode.arci
 ARCI_C=test_out_c.arci
+TEMP_SRC=$(tempfile -s .c)
 
 Trace() {
     printf >&2 '>==> %s\n' "$*"
@@ -26,11 +27,13 @@ fix_ptrs() {
 }
 
 (
-    Trace clang -O0 -c -emit-llvm "$SRC" -o "$BC_FILE" || exit $?
+    Trace clang -DISEKAI_C_PARSER=0 -O0 -c -emit-llvm "$SRC" -o "$BC_FILE" || exit $?
 
     Trace "$ISEKAI" --arith="$ARCI_BITCODE" "$BC_FILE" || exit $?
 
-    Trace "$ISEKAI" --arith="$ARCI_C" "$SRC" || exit $?
+    Trace cpp -DISEKAI_C_PARSER=1 < "$SRC" > "$TEMP_SRC" || exit $?
+    sed '/^#/d' -i -- "$TEMP_SRC" || exit $?
+    Trace "$ISEKAI" --arith="$ARCI_C" "$TEMP_SRC" || exit $?
 
     fix_ptrs "$ARCI_BITCODE" || exit $?
 
@@ -45,7 +48,7 @@ fix_ptrs() {
 )
 ret=$?
 
-rm -f -- "$BC_FILE"
+rm -f -- "$BC_FILE" "$TEMP_SRC"
 if (( ret == 0 )); then
     rm -f -- "$ARCI_BITCODE" "$ARCI_BITCODE".in "$ARCI_C" "$ARCI_C".in
 fi
