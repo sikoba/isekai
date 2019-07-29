@@ -48,82 +48,6 @@ module Isekai
 
     class BitcodeParser
 
-        def self.select_insert (
-                old_expr : DFGExpr,
-                new_expr : DFGExpr,
-                chain : Array(Tuple(DFGExpr, Bool)),
-                chain_index : Int32 = 0) : DFGExpr
-
-            if old_expr.is_a? Conditional && chain_index != chain.size
-                cond, flag = chain[chain_index][0], chain[chain_index][1]
-                if cond == old_expr.@cond
-                    valtrue, valfalse = old_expr.@valtrue, old_expr.@valfalse
-                    if flag
-                        valtrue = select_insert(valtrue, new_expr, chain, chain_index + 1)
-                    else
-                        valfalse = select_insert(valfalse, new_expr, chain, chain_index + 1)
-                    end
-                    return Conditional.new(cond, valtrue, valfalse)
-                end
-            end
-
-            result = new_expr
-            (chain_index...chain.size).reverse_each do |i|
-                cond, flag = chain[i][0], chain[i][1]
-                if flag
-                    result = Conditional.new(cond, result, old_expr)
-                else
-                    result = Conditional.new(cond, old_expr, result)
-                end
-            end
-            return result
-        end
-
-        def self.select_reduce (
-                expr : DFGExpr,
-                chain : Array(Tuple(DFGExpr, Bool))) : DFGExpr
-
-            chain.each do |(cond, flag)|
-                break unless expr.is_a? Conditional
-                break unless cond == expr.@cond
-                if flag
-                    expr = expr.@valtrue
-                else
-                    expr = expr.@valfalse
-                end
-            end
-            return expr
-        end
-
-        def self.make_deref_op (expr : DFGExpr) : DFGExpr
-            if expr.is_a?(GetPointerOp)
-                expr.@target
-            else
-                DerefOp.new(expr)
-            end
-        end
-
-        def self.make_getptr_op (expr : DFGExpr) : DFGExpr
-            if expr.is_a?(DerefOp)
-                expr.@target
-            else
-                GetPointerOp.new(expr)
-            end
-        end
-
-        def self.make_undef_expr! : DFGExpr
-            return Constant.new(0)
-        end
-
-        def self.make_input_array (storage : Storage?)
-            return nil unless storage
-            arr = Array(DFGExpr).new
-            (0...storage.@size).each do |i|
-                arr << Field.new(StorageKey.new(storage, i))
-            end
-            return arr
-        end
-
         @inputs : Array(DFGExpr)?
         @nizk_inputs : Array(DFGExpr)?
         @outputs = [] of Tuple(StorageKey, DFGExpr)
@@ -143,7 +67,90 @@ module Isekai
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
         end
 
-        def inspect_param (is_input : Bool, ptr, ty)
+        private def with_chain_add_contition (
+                old_expr : DFGExpr,
+                new_expr : DFGExpr,
+                chain_index : Int32 = 0) : DFGExpr
+
+            if old_expr.is_a? Conditional && chain_index != @chain.size
+                cond, flag = @chain[chain_index][0], @chain[chain_index][1]
+                if cond == old_expr.@cond
+                    valtrue, valfalse = old_expr.@valtrue, old_expr.@valfalse
+                    if flag
+                        valtrue = with_chain_add_contition(valtrue, new_expr, chain_index + 1)
+                    else
+                        valfalse = with_chain_add_contition(valfalse, new_expr, chain_index + 1)
+                    end
+                    return Conditional.new(cond, valtrue, valfalse)
+                end
+            end
+
+            result = new_expr
+            (chain_index...@chain.size).reverse_each do |i|
+                cond, flag = @chain[i][0], @chain[i][1]
+                if flag
+                    result = Conditional.new(cond, result, old_expr)
+                else
+                    result = Conditional.new(cond, old_expr, result)
+                end
+            end
+            return result
+        end
+
+        private def with_chain_reduce (expr : DFGExpr) : DFGExpr
+            @chain.each do |(cond, flag)|
+                break unless expr.is_a? Conditional
+                break unless cond == expr.@cond
+                if flag
+                    expr = expr.@valtrue
+                else
+                    expr = expr.@valfalse
+                end
+            end
+            return expr
+        end
+
+        private def make_deref_op (expr : DFGExpr) : DFGExpr
+            case expr
+            when .is_a?(GetPointerOp)
+                expr.@target
+            when .is_a?(AllocaOp)
+                @allocas[expr.@idx]
+            else
+                DerefOp.new(expr)
+            end
+        end
+
+        private def make_undef_expr : DFGExpr
+            return Constant.new(0)
+        end
+
+        private def make_input_array (storage : Storage?)
+            return nil unless storage
+            arr = Array(DFGExpr).new
+            (0...storage.@size).each do |i|
+                arr << Field.new(StorageKey.new(storage, i))
+            end
+            return arr
+        end
+
+        private def get_meeting_point (a, b, junction)
+            trav_a = BFSTraverser.new(a)
+            trav_b = BFSTraverser.new(b)
+            while true
+                x = trav_a.next!
+                return junction if x == junction
+                return x if x && trav_b.seen? x
+
+                y = trav_b.next!
+                return junction if y == junction
+                return y if y && trav_a.seen? y
+
+                return nil unless x || y
+            end
+        end
+
+        private def inspect_param (is_input : Bool, ptr, ty)
             raise "Function parameter is not a pointer" unless
                 LibLLVM_C.get_type_kind(ty).pointer_type_kind?
 
@@ -184,7 +191,7 @@ module Isekai
             @arguments[ptr] = GetPointerOp.new(Structure.new(st))
         end
 
-        def load_expr_preliminary (src) : DFGExpr
+        private def load_expr_preliminary (src) : DFGExpr
             kind = LibLLVM_C.get_value_kind(src)
             case kind
             when .argument_value_kind?
@@ -199,24 +206,22 @@ module Isekai
             end
         end
 
-        def load_expr (src) : DFGExpr
+        private def load_expr (src) : DFGExpr
             expr = load_expr_preliminary(src)
             # TODO: collapse it properly
             case expr
-            when .is_a?(AllocaOp)
-                expr = BitcodeParser.make_getptr_op(@allocas[expr.@idx])
             when .is_a?(Field)
                 if expr.@key.@storage == @output_storage
                     expr = @outputs[expr.@key.@idx][1]
                 end
             end
 
-            expr = BitcodeParser.select_reduce(expr, @chain)
+            expr = with_chain_reduce(expr)
 
             expr
         end
 
-        def store (dst, expr : DFGExpr)
+        private def store (dst, expr : DFGExpr)
             # TODO: collapse it properly
 
             dst_kind = LibLLVM_C.get_value_kind(dst)
@@ -227,7 +232,7 @@ module Isekai
 
             when .is_a?(AllocaOp)
                 old_expr = @allocas[dst_expr.@idx]
-                @allocas[dst_expr.@idx] = BitcodeParser.select_insert(old_expr, expr, @chain)
+                @allocas[dst_expr.@idx] = with_chain_add_contition(old_expr, expr)
 
             when .is_a?(GetPointerOp)
                 target = dst_expr.@target
@@ -235,17 +240,14 @@ module Isekai
                 field = target.as(Field)
                 raise "NYI: store in non-output struct" unless field.@key.@storage == @output_storage
                 old_expr = @outputs[field.@key.@idx][1]
-                @outputs[field.@key.@idx] = {
-                    field.@key,
-                    BitcodeParser.select_insert(old_expr, expr, @chain)
-                }
+                @outputs[field.@key.@idx] = {field.@key, with_chain_add_contition(old_expr, expr)}
 
             else
                 raise "NYI: cannot store at #{dst_expr}"
             end
         end
 
-        def get_element_ptr (base : DFGExpr, offset : DFGExpr, field : DFGExpr) : DFGExpr
+        private def get_element_ptr (base : DFGExpr, offset : DFGExpr, field : DFGExpr) : DFGExpr
             raise "NYI: GEP base is not a pointer" unless base.is_a?(GetPointerOp)
             raise "NYI: non-constant GEP offset" unless offset.is_a?(Constant)
             raise "NYI: non-constant GEP field" unless field.is_a?(Constant)
@@ -261,24 +263,7 @@ module Isekai
             return GetPointerOp.new(Field.new(key))
         end
 
-        # TODO make this function static?
-        def get_meeting_point (a, b, junction)
-            trav_a = BFSTraverser.new(a)
-            trav_b = BFSTraverser.new(b)
-            while true
-                x = trav_a.next!
-                return junction if x == junction
-                return x if x && trav_b.seen? x
-
-                y = trav_b.next!
-                return junction if y == junction
-                return y if y && trav_a.seen? y
-
-                return nil unless x || y
-            end
-        end
-
-        def inspect_basic_block_until (
+        private def inspect_basic_block_until (
                 bb : LibLLVM::BasicBlock,
                 terminator : LibLLVM::BasicBlock?)
 
@@ -288,7 +273,7 @@ module Isekai
             end
         end
 
-        def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
+        private def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
 
             if @inspected_blocks.includes?(bb)
                 raise "NYI: loop"
@@ -301,7 +286,7 @@ module Isekai
                 when .alloca?
                     #ty = LibLLVM_C.get_allocated_type(ins)
                     @locals[ins] = AllocaOp.new(@allocas.size)
-                    @allocas << BitcodeParser.make_undef_expr!
+                    @allocas << make_undef_expr
 
                 when .store?
                     src = LibLLVM_C.get_operand(ins, 0)
@@ -310,7 +295,7 @@ module Isekai
 
                 when .load?
                     src = LibLLVM_C.get_operand(ins, 0)
-                    @locals[ins] = BitcodeParser.make_deref_op(load_expr(src))
+                    @locals[ins] = make_deref_op(load_expr(src))
 
                 when .get_element_ptr?
                     nops = LibLLVM_C.get_num_operands(ins)
@@ -439,7 +424,7 @@ module Isekai
             end
         end
 
-        def inspect_root_func (func)
+        private def inspect_root_func (func)
             func_ty = LibLLVM_C.type_of(func)
             if LibLLVM_C.get_type_kind(func_ty).pointer_type_kind?
                 func_ty = LibLLVM_C.get_element_type(func_ty)
@@ -474,15 +459,12 @@ module Isekai
                 raise "Function takes #{func_nparams} parameter(s), expected 2 or 3"
             end
 
-            @inputs      = BitcodeParser.make_input_array @input_storage
-            @nizk_inputs = BitcodeParser.make_input_array @nizk_input_storage
+            @inputs      = make_input_array @input_storage
+            @nizk_inputs = make_input_array @nizk_input_storage
 
             output_storage = @output_storage.as(Storage)
             (0...output_storage.@size).each do |i|
-                @outputs << {
-                    StorageKey.new(output_storage, i),
-                    BitcodeParser.make_undef_expr!
-                }
+                @outputs << {StorageKey.new(output_storage, i), make_undef_expr}
             end
 
             inspect_basic_block_until(func.entry_basic_block, nil)
