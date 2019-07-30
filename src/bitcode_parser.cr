@@ -67,7 +67,7 @@ module Isekai
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
         end
 
-        private def with_chain_add_contition (
+        private def with_chain_add_condition (
                 old_expr : DFGExpr,
                 new_expr : DFGExpr,
                 chain_index : Int32 = 0) : DFGExpr
@@ -77,9 +77,9 @@ module Isekai
                 if cond == old_expr.@cond
                     valtrue, valfalse = old_expr.@valtrue, old_expr.@valfalse
                     if flag
-                        valtrue = with_chain_add_contition(valtrue, new_expr, chain_index + 1)
+                        valtrue = with_chain_add_condition(valtrue, new_expr, chain_index + 1)
                     else
-                        valfalse = with_chain_add_contition(valfalse, new_expr, chain_index + 1)
+                        valfalse = with_chain_add_condition(valfalse, new_expr, chain_index + 1)
                     end
                     return Conditional.new(cond, valtrue, valfalse)
                 end
@@ -229,7 +229,7 @@ module Isekai
 
             when AllocaOp
                 old_expr = @allocas[dst_expr.@idx]
-                @allocas[dst_expr.@idx] = with_chain_add_contition(old_expr, expr)
+                @allocas[dst_expr.@idx] = with_chain_add_condition(old_expr, expr)
 
             when GetPointerOp
                 target = dst_expr.@target
@@ -237,7 +237,7 @@ module Isekai
                 field = target.as(Field)
                 raise "NYI: store in non-output struct" unless field.@key.@storage == @output_storage
                 old_expr = @outputs[field.@key.@idx][1]
-                @outputs[field.@key.@idx] = {field.@key, with_chain_add_contition(old_expr, expr)}
+                @outputs[field.@key.@idx] = {field.@key, with_chain_add_condition(old_expr, expr)}
 
             else
                 raise "NYI: cannot store at #{dst_expr}"
