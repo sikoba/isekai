@@ -107,6 +107,41 @@ class NegateReq < BusReq
     end
 end
 
+
+
+# Logical Not bus request.
+# This class has been moved from boolean operators where it was done using BitXorBus with -1 (all ones) and checking if all ones are set:
+	# AllOnesBus(BitNot(000)==111) = 1 :: Not(0)=1
+	# AllOnesBus(BitNot(010)==101) = 0 :: Not(2)=0
+    # (BitNot is just ConstantBitXorBus with neg1)
+# Now we simply do !a = 1-zeroP(a,0), using arithmetic wires
+# A pure boolean implementation as !a = 1-a would also make sense
+class LogicalNotReq < BusReq
+    def initialize(@reqfactory, @expr, @trace_type)
+    end
+
+    def natural_type()
+       return Constants::ARITHMETIC_TRACE
+    end
+
+	private def req
+        return make_req(@expr.as(UnaryOp).@expr, natural_type())
+    end
+
+	def natural_dependencies()
+        return [ req() ]
+    end
+
+	def natural_impl()
+		sub_bus = get_bus_from_req(req())
+        constant_zero =  @reqfactory.@board.get_zero_bus() 
+        @reqfactory.add_extra_bus(constant_zero)
+        zerop_bus = ArithmeticZeroPBus.new(board(), sub_bus, constant_zero)
+        @reqfactory.add_extra_bus(zerop_bus)
+        return zerop_bus
+    end
+end
+
 # Conditional bus - outputs arithmetic value based on the boolean condition.
 class ArithConditionalReq < BusReq
 	def natural_type()
@@ -198,6 +233,30 @@ class CmpEQReqArith < CmpReq
             zerop_bus = ArithmeticZeroPBus.new(board(), abus, bbus)
             @reqfactory.add_extra_bus(zerop_bus)
             return zerop_bus
+    end
+end
+
+# Not equal operator : a != b
+# We implement it doing 1- zeroPBus(a,b)
+# We should rather do simply ZP(a-b), because zeroPBus(a,b) is doing 1-ZP(a-b)
+# We could also do a !(a==b), but that would involve 2 ZP gates
+class CmpNEQReqArith < CmpReq
+    def initialize(reqfactory, expr, type)
+        super(reqfactory, expr, type)
+    end
+
+    def var_impl(abus : Bus, bbus : Bus)
+        zerop_bus = ArithmeticZeroPBus.new(board(), abus, bbus)
+        @reqfactory.add_extra_bus(zerop_bus)
+        neg_bus = ConstantNegBus.new(board(), -1, zerop_bus)
+        @reqfactory.add_extra_bus(neg_bus)
+        constant_one = ConstantArithmeticBus.new(board(), 1)  #@reqfactory.@board.get_one_bus()  is not working but I did not investigate why
+        @reqfactory.add_extra_bus(constant_one)
+        comment = "1 - CmpEQ #{typeof(@expr.as(BinaryOp))}"
+        plus1_bus = ArithAddBus.new(board(), comment, zerop_bus, constant_one)
+        @reqfactory.add_extra_bus(plus1_bus)
+        return plus1_bus
+     
     end
 end
 end

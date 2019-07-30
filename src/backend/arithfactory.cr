@@ -62,6 +62,8 @@ class ArithFactory < RequestFactory
 			result = CmpLEQReq.new(self, expr.as(CmpLEQ), type)
         when .is_a? CmpEQ
             result = CmpEQReqArith.new(self, expr.as(CmpEQ), type)
+        when .is_a? CmpNEQ
+            result = CmpNEQReqArith.new(self, expr.as(CmpNEQ), type)
 		when .is_a? Constant
 			result = ConstantReq.new(self, expr.as(Constant), type)
 		when .is_a? Add

@@ -115,9 +115,3 @@ bool Verify(char * setup, char * inputs, char * proof)
 	std::string p(proof);
 	return r1cs.Verify(ts, ins, p);
 }
-
-void ProofTest()
-{
-	R1CSUtils r1cs;
-	r1cs.ProofTest();	
-}

@@ -194,13 +194,7 @@ module Isekai
 
     class BitNotReq < NotFamily
         def natural_impl
-            return make_bitnot(get_bus_from_req(make_req(@expr, Constants::BOOLEAN_TRACE)))
-        end
-    end
-
-    class LogicalNotReq < NotFamily
-        def natural_impl
-            return make_logical_not(get_bus_from_req(make_req(@expr, Constants::BOOLEAN_TRACE)))
+            return make_bitnot(get_bus_from_req(make_req(@expr.as(UnaryOp).@expr, Constants::BOOLEAN_TRACE)))
         end
     end
 

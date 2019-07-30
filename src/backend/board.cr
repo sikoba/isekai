@@ -39,7 +39,7 @@ module Isekai
             @one_bus
         end
 
-        private def get_zero_bus
+        def get_zero_bus
             if bus = @zero_bus
                 return bus
             else

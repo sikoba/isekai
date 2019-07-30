@@ -229,6 +229,28 @@ class ConstantMultiplyBus < ArithmeticBus
     end
 end
 
+# Same as Multiply by constant but without 32 bits handle, to use with caution.
+class ConstantNegBus < ArithmeticBus
+    @active_bits : Int32
+
+	def initialize (@board, @value : Int64, @bus : Bus)
+        super(@board, Constants::MAJOR_LOGIC)
+        @active_bits = Isekai.ceillg2(@value) + @bus.get_active_bits()
+    end
+
+	def get_active_bits()
+        return @active_bits
+    end
+
+	def get_wire_count()
+        return 1
+    end
+
+	def get_field_ops()
+		return [ FieldConstMul.new("multiply-by-constant #{@value}", @value, @bus.get_trace(0), @wire_list.as(WireList)[0]) ]
+    end
+end
+
 # Conditional bus
 class ArithmeticConditionalBus < ArithmeticBus
     @active_bits : Int32
