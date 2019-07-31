@@ -61,7 +61,7 @@ module GraphUtils
     end
 
     class FastQueue(T)
-        def initialize (prealloc : Int32 = 0)
+        def initialize (prealloc : Int = 0)
             @queue = Array(T).new(prealloc)
             @queue_start = 0
         end
@@ -70,11 +70,11 @@ module GraphUtils
             return @queue_start == @queue.size
         end
 
-        def push! (elem)
+        def push (elem)
             @queue << elem
         end
 
-        def pop!
+        def shift
             res = @queue[@queue_start]
             @queue_start += 1
             return res
@@ -85,13 +85,13 @@ module GraphUtils
         tree = BfsTree.new(g.nvertices, source)
 
         queue = FastQueue(Int32).new(g.nvertices)
-        queue.push!(source)
+        queue.push(source)
         until queue.empty?
-            v = queue.pop!
+            v = queue.shift
             g.edges_from(v) do |w|
                 unless tree.distance_known?(w)
                     tree.set_parent!(child: w, parent: v)
-                    queue.push!(w)
+                    queue.push(w)
                 end
             end
         end

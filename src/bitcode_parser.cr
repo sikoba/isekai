@@ -20,7 +20,8 @@ module Isekai
             when .ret?
                 false
             else
-                raise "NYI block terminator instruction (switch?)"
+                repr = LibLLVM.slurp_string(LibLLVM_C.print_value_to_string(ins))
+                raise "Unsupported terminator instruction: #{repr}"
             end
         end
 
@@ -55,17 +56,17 @@ module Isekai
             return @sink
         end
 
-        def edges_from(v : Int32)
+        def edges_from (v : Int32)
             ControlFlowGraph.block_successors(@blocks[v]) do |bb|
                 yield @block2i[bb]
             end
         end
 
-        def block2i(bb : LibLLVM::BasicBlock)
+        def block2i (bb : LibLLVM::BasicBlock)
             return @block2i[bb]
         end
 
-        def i2block(i : Int32)
+        def i2block (i : Int32)
             return @blocks[i]
         end
     end
@@ -272,7 +273,7 @@ module Isekai
             raise "NYI: non-constant GEP offset" unless offset.is_a?(Constant)
             raise "NYI: non-constant GEP field" unless field.is_a?(Constant)
 
-            raise "NYI: GEP with non-zero offset" unless field.@value == 0
+            raise "NYI: GEP with non-zero offset" unless offset.@value == 0
 
             target = base.@target
             raise "NYI: GEP target is not a struct" unless target.is_a?(Structure)
