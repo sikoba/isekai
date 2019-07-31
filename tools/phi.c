@@ -13,11 +13,37 @@ outsource(struct Input *input, struct Output *output)
 {
 #if ISEKAI_C_PARSER
     if (input->a != 0) {
-        output->x = input->b;
+        if (input->b != 0) {
+            if (input->c != 0) {
+                output->x = 1;
+            } else {
+                output->x = 2;
+            }
+        } else {
+            if (input->c != 0) {
+                output->x = 3;
+            } else {
+                output->x = 4;
+            }
+        }
     } else {
-        output->x = input->c;
+        if (input->b != 0) {
+            if (input->c != 0) {
+                output->x = 5;
+            } else {
+                output->x = 6;
+            }
+        } else {
+            if (input->c != 0) {
+                output->x = 7;
+            } else {
+                output->x = 8;
+            }
+        }
     }
 #else
-    output->x = input->a ? input->b : input->c;
+    output->x = input->a
+        ? (input->b ? (input->c ? 1 : 2) : (input->c ? 3 : 4))
+        : (input->b ? (input->c ? 5 : 6) : (input->c ? 7 : 8));
 #endif
 }
