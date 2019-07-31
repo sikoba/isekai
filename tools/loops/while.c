@@ -11,10 +11,20 @@ outsource(struct Input *input, struct Output *output)
 {
     int a = input->a;
 #if ISEKAI_C_PARSER
-    // do nothing
+
+#   define BEGIN    if (a != 9) { a = a + 1;
+#   define END      }
+
+    BEGIN
+        BEGIN
+            BEGIN
+            END
+        END
+    END
+
 #else
-    while (a) {
-        --a;
+    while (a != 9) {
+        ++a;
     }
 #endif
     output->x = a + 5;

@@ -1,5 +1,6 @@
 struct Input {
     int a;
+    int i;
 };
 
 struct Output {
@@ -10,10 +11,21 @@ void
 outsource(struct Input *input, struct Output *output)
 {
     int a = input->a;
+
 #if ISEKAI_C_PARSER
-    // do nothing
+    int i = input->i;
+#   define BEGIN    if (i != 128) { a = a + a; i = i + 1;
+#   define END      }
+
+    BEGIN
+        BEGIN
+            BEGIN
+            END
+        END
+    END
+
 #else
-    for (int i = 0; i != 4; ++i) {
+    for (int i = input->i; i != 128; ++i) {
         a += a;
     }
 #endif

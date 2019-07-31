@@ -73,6 +73,22 @@ module Isekai
 
     class BitcodeParser
 
+        private struct UnrollCtl
+            def initialize (@block : LibLLVM::BasicBlock, @counter : Int32)
+                raise "Invalid counter: #{counter} <= 0" if @counter <= 0
+            end
+
+            def copy_decr_counter
+                return nil if @counter == 1
+                return UnrollCtl.new(@block, @counter - 1)
+            end
+
+            def self.maybe_new (block : LibLLVM::BasicBlock, counter : Int32)
+                return nil if counter <= 0
+                return UnrollCtl.new(block, counter)
+            end
+        end
+
         @inputs : Array(DFGExpr)?
         @nizk_inputs : Array(DFGExpr)?
         @outputs = [] of Tuple(StorageKey, DFGExpr)
@@ -88,6 +104,7 @@ module Isekai
         @cfg : ControlFlowGraph?
         @bfs_tree : GraphUtils::BfsTree?
         @chain = [] of Tuple(DFGExpr, Bool)
+        @unroll = [] of UnrollCtl
 
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
         end
@@ -427,28 +444,40 @@ module Isekai
                     branches.each { |target| produce_phi_copies(from: bb, to: target) }
 
                     if has_cond
-                        cond     = load_expr(LibLLVM_C.get_condition(ins))
                         raise "Unsupported br form" unless nbranches == 2
+                        cond = load_expr(LibLLVM_C.get_condition(ins))
                         if_true, if_false = branches
 
                         sink, is_loop = get_meeting_point(if_true, if_false, junction: bb)
                         if is_loop
                             case
-                            when sink == if_true  then loop_branch = if_false
-                            when sink == if_false then loop_branch = if_true
+                            when sink == if_true  then to_loop = if_false
+                            when sink == if_false then to_loop = if_true
                             else raise "Unsupported loop"
                             end
 
-                            puts "Loop, ignoring..."
-                        else
-                            @chain << {cond, true}
-                            inspect_basic_block_until(if_true, terminator: sink)
-                            @chain.pop
-
-                            @chain << {cond, false}
-                            inspect_basic_block_until(if_false, terminator: sink)
-                            @chain.pop
+                            ctl = @unroll.last?
+                            if ctl && ctl.@block == to_loop
+                                unless ctl = ctl.copy_decr_counter
+                                    @unroll.pop
+                                    return sink
+                                end
+                                @unroll[-1] = ctl
+                            else
+                                unless ctl = UnrollCtl.maybe_new(to_loop, @loop_sanity_limit)
+                                    return sink
+                                end
+                                @unroll << ctl
+                            end
                         end
+
+                        @chain << {cond, true}
+                        inspect_basic_block_until(if_true, terminator: sink)
+                        @chain.pop
+
+                        @chain << {cond, false}
+                        inspect_basic_block_until(if_false, terminator: sink)
+                        @chain.pop
 
                         return sink
                     else

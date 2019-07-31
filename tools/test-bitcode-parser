@@ -11,8 +11,8 @@ case "$1" in
 /*) SRC=$1 ;;
 *)  SRC=$opwd/$1 ;;
 esac
-CLANG=${CLANG:-clang}
-ISEKAI=../isekai
+CLANG=( ${CLANG:-clang} )
+ISEKAI=( ../isekai --loop-sanity-limit=3 )
 BC_FILE=test_bitcode.bc
 ARCI_BITCODE=test_out_bitcode.arci
 ARCI_C=test_out_c.arci
@@ -28,13 +28,13 @@ fix_ptrs() {
 }
 
 (
-    Trace "$CLANG" -DISEKAI_C_PARSER=0 -O0 -c -emit-llvm "$SRC" -o "$BC_FILE" || exit $?
+    Trace "${CLANG[@]}" -DISEKAI_C_PARSER=0 -O0 -c -emit-llvm "$SRC" -o "$BC_FILE" || exit $?
 
-    Trace "$ISEKAI" --arith="$ARCI_BITCODE" "$BC_FILE" || exit $?
+    Trace "${ISEKAI[@]}" --arith="$ARCI_BITCODE" "$BC_FILE" || exit $?
 
-    Trace "$CLANG" -E -DISEKAI_C_PARSER=1 "$SRC" -o "$TEMP_SRC" || exit $?
+    Trace "${CLANG[@]}" -E -DISEKAI_C_PARSER=1 "$SRC" -o "$TEMP_SRC" || exit $?
     sed '/^#/d' -i -- "$TEMP_SRC" || exit $?
-    Trace "$ISEKAI" --arith="$ARCI_C" "$TEMP_SRC" || exit $?
+    Trace "${ISEKAI[@]}" --arith="$ARCI_C" "$TEMP_SRC" || exit $?
 
     fix_ptrs "$ARCI_BITCODE" || exit $?
 
