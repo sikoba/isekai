@@ -1,48 +1,72 @@
 require "./dfg"
 require "./frontend/symbol_table_key"
 require "./frontend/storage"
+require "./graph_utils"
 require "llvm-crystal/lib_llvm"
 require "llvm-crystal/lib_llvm_c"
 
 module Isekai
 
-    private class BFSTraverser
+    private class ControlFlowGraph
 
-        def initialize (bb : LibLLVM::BasicBlock)
-            @queue = [bb]
-            @queue_start = 0
-            @seen = Set{bb}
-        end
-
-        private def maybe_add (bb : LibLLVM::BasicBlock)
-            return if @seen.includes? bb
-            @seen.add(bb)
-            @queue << bb
-        end
-
-        def next!
-            return nil if @queue_start == @queue.size
-            bb = @queue[@queue_start]
-            @queue_start += 1
-
+        def self.block_successors (bb : LibLLVM::BasicBlock)
             ins = bb.last_instruction
             case LibLLVM_C.get_instruction_opcode(ins)
             when .br?
                 (0...LibLLVM_C.get_num_successors(ins)).each do |i|
-                    maybe_add(LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, i)))
+                    yield LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, i))
                 end
-
+                true
             when .ret?
-                # do nothing
+                false
             else
                 raise "NYI block terminator instruction (switch?)"
             end
-
-            bb
         end
 
-        def seen? (bb : LibLLVM::BasicBlock)
-            @seen.includes? bb
+        @blocks = [] of LibLLVM::BasicBlock
+        @block2i = {} of LibLLVM::BasicBlock => Int32
+        @sink : Int32 = -1
+
+        private def visit (bb : LibLLVM::BasicBlock)
+            return if @block2i[bb]?
+
+            idx = @blocks.size
+            @blocks << bb
+            @block2i[bb] = idx
+
+            has_succ = ControlFlowGraph.block_successors(bb) { |succ| visit(succ) }
+            unless has_succ
+                raise "Multiple sinks" unless @sink == -1
+                @sink = idx
+            end
+        end
+
+        def initialize (entry : LibLLVM::BasicBlock)
+            visit(entry)
+            raise "No sink" if @sink == -1
+        end
+
+        def nvertices
+            return @blocks.size
+        end
+
+        def sink
+            return @sink
+        end
+
+        def edges_from(v : Int32)
+            ControlFlowGraph.block_successors(@blocks[v]) do |bb|
+                yield @block2i[bb]
+            end
+        end
+
+        def block2i(bb : LibLLVM::BasicBlock)
+            return @block2i[bb]
+        end
+
+        def i2block(i : Int32)
+            return @blocks[i]
         end
     end
 
@@ -61,10 +85,17 @@ module Isekai
         @output_storage : Storage?
 
         @inspected_blocks = Set(LibLLVM::BasicBlock).new
-
+        @cfg : ControlFlowGraph?
+        @bfs_tree : GraphUtils::BfsTree?
         @chain = [] of Tuple(DFGExpr, Bool)
 
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
+        end
+
+        private def init_graphs(entry : LibLLVM::BasicBlock)
+            @cfg = cfg = ControlFlowGraph.new(entry)
+            inv = GraphUtils.invert_graph(cfg)
+            @bfs_tree = GraphUtils.build_bfs_tree(inv, cfg.sink)
         end
 
         private def with_chain_add_condition (
@@ -135,19 +166,12 @@ module Isekai
         end
 
         private def get_meeting_point (a, b, junction)
-            trav_a = BFSTraverser.new(a)
-            trav_b = BFSTraverser.new(b)
-            while true
-                x = trav_a.next!
-                return junction if x == junction
-                return x if x && trav_b.seen? x
-
-                y = trav_b.next!
-                return junction if y == junction
-                return y if y && trav_a.seen? y
-
-                return nil unless x || y
-            end
+            raise "@cfg not initialized" unless cfg = @cfg
+            raise "@bfs_tree not initialized" unless bfs_tree = @bfs_tree
+            lca, j_on_path = GraphUtils.tree_lca(
+                bfs_tree,
+                cfg.block2i(a), cfg.block2i(b), cfg.block2i(junction))
+            return {cfg.i2block(lca), j_on_path}
         end
 
         private def inspect_param (ptr, ty, accept)
@@ -234,10 +258,9 @@ module Isekai
             when GetPointerOp
                 target = dst_expr.@target
                 raise "NYI: cannot store at pointer to #{target}" unless target.is_a?(Field)
-                field = target.as(Field)
-                raise "NYI: store in non-output struct" unless field.@key.@storage == @output_storage
-                old_expr = @outputs[field.@key.@idx][1]
-                @outputs[field.@key.@idx] = {field.@key, with_chain_add_condition(old_expr, expr)}
+                raise "NYI: store in non-output struct" unless target.@key.@storage == @output_storage
+                old_expr = @outputs[target.@key.@idx][1]
+                @outputs[target.@key.@idx] = {target.@key, with_chain_add_condition(old_expr, expr)}
 
             else
                 raise "NYI: cannot store at #{dst_expr}"
@@ -249,14 +272,12 @@ module Isekai
             raise "NYI: non-constant GEP offset" unless offset.is_a?(Constant)
             raise "NYI: non-constant GEP field" unless field.is_a?(Constant)
 
-            raise "NYI: GEP with non-zero offset" unless offset.as(Constant).@value == 0
+            raise "NYI: GEP with non-zero offset" unless field.@value == 0
 
-            target = base.as(GetPointerOp).@target
+            target = base.@target
             raise "NYI: GEP target is not a struct" unless target.is_a?(Structure)
 
-            key = StorageKey.new(
-                target.as(Structure).@storage,
-                field.as(Constant).@value)
+            key = StorageKey.new(target.@storage, field.@value)
             return GetPointerOp.new(Field.new(key))
         end
 
@@ -392,18 +413,19 @@ module Isekai
                         if_true  = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 0))
                         if_false = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 1))
 
-                        sink = get_meeting_point(if_true, if_false, junction: bb)
-                        if sink == bb
-                            raise "ELOOP"
+                        sink, is_loop = get_meeting_point(if_true, if_false, junction: bb)
+                        if is_loop
+                            raise "Unsupported loop" unless sink == if_true || sink == if_false
+                            puts "Loop, ignoring..."
+                        else
+                            @chain << {cond, true}
+                            inspect_basic_block_until(if_true, terminator: sink)
+                            @chain.pop
+
+                            @chain << {cond, false}
+                            inspect_basic_block_until(if_false, terminator: sink)
+                            @chain.pop
                         end
-
-                        @chain << {cond, true}
-                        inspect_basic_block_until(if_true, terminator: sink)
-                        @chain.pop
-
-                        @chain << {cond, false}
-                        inspect_basic_block_until(if_false, terminator: sink)
-                        @chain.pop
 
                         return sink
                     else
@@ -466,7 +488,9 @@ module Isekai
                 @outputs << {StorageKey.new(output_storage, i), make_undef_expr}
             end
 
-            inspect_basic_block_until(func.entry_basic_block, terminator: nil)
+            entry = func.entry_basic_block
+            init_graphs(entry)
+            inspect_basic_block_until(entry, terminator: nil)
         end
 
         def parse ()
