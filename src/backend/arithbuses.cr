@@ -479,9 +479,7 @@ class ConstantBitXorBus < ConstantBitXorBusBase
         return 2
     end
 
-	def invert_field_op(comment : String, in_wire : Wire, wires : Wire)
-        minus_wire = wires[0]
-        xor_wire = wires[1]
+	def invert_field_op(comment : String, in_wire : Wire, minus_wire : Wire, xor_wire : Wire)
 		return [
 			FieldConstMul.new(comment, -1, in_wire, minus_wire),
 			FieldAdd.new(comment,
@@ -646,7 +644,7 @@ class OrFamilyBus < BinaryBooleanBus
 
 	def get_field_ops()
 		cmds = Array(FieldOp).new()
-		(0..get_trace_count()).each do |i|
+        (0..get_trace_count()-1).each do |i|
 			comment = "#{@c_name} bit @{i} "
 			# (a+b)-k(ab)
 			aplusb = @wire_list.as(WireList)[i*4]
@@ -682,7 +680,7 @@ class ArithBitOrBus < OrFamilyBus
 end
 
 class ArithXorBus < OrFamilyBus
-	def initialize (@board, bus_left, bus_right)
+    def initialize (@board, bus_left, bus_right)
         super(@board, bus_left, bus_right, -2, "xor")
     end
 end
