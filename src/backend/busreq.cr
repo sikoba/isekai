@@ -318,8 +318,8 @@ module Isekai
                 board(), const_expr.@value, variable_bus)
         end
 
-        def var_impl (*busses)
-            return @reqfactory.get_BitAndBus_class().new(board(), *busses)
+        def var_impl (abus : Bus, bbus : Bus)
+            return @reqfactory.get_XorBus_class().new(board(), abus, bbus)
         end
     end
 

@@ -63,7 +63,7 @@ class BooleanFactory < RequestFactory
     end
 
     def get_XorBus_class()
-        return XorBus
+        raise "unimplemented"
     end
 
     def get_ConstantBitXorBus_class()
