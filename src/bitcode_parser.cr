@@ -29,14 +29,14 @@ module Isekai
         @block2i = {} of LibLLVM::BasicBlock => Int32
         @sink : Int32 = -1
 
-        private def visit (bb : LibLLVM::BasicBlock)
+        private def discover (bb : LibLLVM::BasicBlock)
             return if @block2i[bb]?
 
             idx = @blocks.size
             @blocks << bb
             @block2i[bb] = idx
 
-            has_succ = ControlFlowGraph.block_successors(bb) { |succ| visit(succ) }
+            has_succ = ControlFlowGraph.block_successors(bb) { |succ| discover(succ) }
             unless has_succ
                 raise "Multiple sinks" unless @sink == -1
                 @sink = idx
@@ -44,7 +44,7 @@ module Isekai
         end
 
         def initialize (entry : LibLLVM::BasicBlock)
-            visit(entry)
+            discover(entry)
             raise "No sink" if @sink == -1
         end
 
@@ -85,7 +85,6 @@ module Isekai
         @nizk_input_storage : Storage?
         @output_storage : Storage?
 
-        @inspected_blocks = Set(LibLLVM::BasicBlock).new
         @cfg : ControlFlowGraph?
         @bfs_tree : GraphUtils::BfsTree?
         @chain = [] of Tuple(DFGExpr, Bool)
@@ -159,7 +158,7 @@ module Isekai
 
         private def make_input_array (storage : Storage?)
             return nil unless storage
-            arr = Array(DFGExpr).new
+            arr = Array(DFGExpr).new(storage.@size)
             (0...storage.@size).each do |i|
                 arr << Field.new(StorageKey.new(storage, i))
             end
@@ -292,12 +291,22 @@ module Isekai
             end
         end
 
-        private def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
+        private def get_phi_value (ins) : DFGExpr
+            return @locals[ins]? || make_undef_expr
+        end
 
-            if @inspected_blocks.includes?(bb)
-                raise "NYI: loop"
+        private def produce_phi_copies (from : LibLLVM::BasicBlock, to : LibLLVM::BasicBlock)
+            to.instructions do |ins|
+                break unless LibLLVM_C.get_instruction_opcode(ins).phi?
+                (0...LibLLVM_C.count_incoming(ins)).each do |i|
+                    next unless from.to_unsafe == LibLLVM_C.get_incoming_block(ins, i)
+                    expr = load_expr(LibLLVM_C.get_incoming_value(ins, i))
+                    @locals[ins] = with_chain_add_condition(get_phi_value(ins), expr)
+                end
             end
-            @inspected_blocks.add(bb)
+        end
+
+        private def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
 
             bb.instructions do |ins|
                 case LibLLVM_C.get_instruction_opcode(ins)
@@ -315,6 +324,9 @@ module Isekai
                 when .load?
                     src = LibLLVM_C.get_operand(ins, 0)
                     @locals[ins] = make_deref_op(load_expr(src))
+
+                when .phi?
+                    @locals[ins] = get_phi_value(ins)
 
                 when .get_element_ptr?
                     nops = LibLLVM_C.get_num_operands(ins)
@@ -406,17 +418,27 @@ module Isekai
                     end
 
                 when .br?
+                    nbranches = LibLLVM_C.get_num_successors(ins)
+                    branches = Array(LibLLVM::BasicBlock).new(nbranches) do |i|
+                        LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, i))
+                    end
                     has_cond = LibLLVM_C.is_conditional(ins) != 0
-                    if has_cond
-                        raise "Unsupported br form" unless LibLLVM_C.get_num_successors(ins) == 2
 
-                        cond = load_expr(LibLLVM_C.get_condition(ins))
-                        if_true  = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 0))
-                        if_false = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 1))
+                    branches.each { |target| produce_phi_copies(from: bb, to: target) }
+
+                    if has_cond
+                        cond     = load_expr(LibLLVM_C.get_condition(ins))
+                        raise "Unsupported br form" unless nbranches == 2
+                        if_true, if_false = branches
 
                         sink, is_loop = get_meeting_point(if_true, if_false, junction: bb)
                         if is_loop
-                            raise "Unsupported loop" unless sink == if_true || sink == if_false
+                            case
+                            when sink == if_true  then loop_branch = if_false
+                            when sink == if_false then loop_branch = if_true
+                            else raise "Unsupported loop"
+                            end
+
                             puts "Loop, ignoring..."
                         else
                             @chain << {cond, true}
@@ -430,9 +452,8 @@ module Isekai
 
                         return sink
                     else
-                        raise "Unsupported br form" unless LibLLVM_C.get_num_successors(ins) == 1
-                        target = LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, 0))
-                        return target
+                        raise "Unsupported br form" unless nbranches == 1
+                        return branches[0]
                     end
 
                 when .ret?
@@ -489,9 +510,8 @@ module Isekai
                 @outputs << {StorageKey.new(output_storage, i), make_undef_expr}
             end
 
-            entry = func.entry_basic_block
-            init_graphs(entry)
-            inspect_basic_block_until(entry, terminator: nil)
+            init_graphs(func.entry_basic_block)
+            inspect_basic_block_until(func.entry_basic_block, terminator: nil)
         end
 
         def parse ()
