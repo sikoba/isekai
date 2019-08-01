@@ -74,8 +74,8 @@ module Isekai
     class BitcodeParser
 
         private struct UnrollCtl
-            def self.bool2i(b)
-                if b
+            private macro bool2i (b)
+                if {{ b }}
                     1
                 else
                     0
@@ -91,7 +91,7 @@ module Isekai
 
             def initialize (@block : LibLLVM::BasicBlock, @limit : Int32, is_dynamic : Bool)
                 @counter = 1
-                @n_dynamic_iters = UnrollCtl.bool2i(is_dynamic)
+                @n_dynamic_iters = bool2i(is_dynamic)
             end
 
             def iteration (is_dynamic : Bool)
@@ -99,7 +99,7 @@ module Isekai
                     @block,
                     @limit,
                     @counter + 1,
-                    @n_dynamic_iters + UnrollCtl.bool2i(is_dynamic))
+                    @n_dynamic_iters + bool2i(is_dynamic))
             end
         end
 
@@ -127,7 +127,7 @@ module Isekai
             @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(@input_file))
         end
 
-        private def init_graphs(entry : LibLLVM::BasicBlock)
+        private def init_graphs (entry : LibLLVM::BasicBlock)
             @cfg = cfg = ControlFlowGraph.new(entry)
             inv = GraphUtils.invert_graph(cfg)
             @bfs_tree = GraphUtils.build_bfs_tree(inv, cfg.sink)
@@ -438,13 +438,17 @@ module Isekai
                 when .call?
                     raise "Unsupported function call (not _unroll_hint)" unless
                         (uhf = @unroll_hint_func) && LibLLVM_C.get_called_value(ins) == uhf
+
                     raise "_unroll_hint must be called with 1 argument" unless
                         LibLLVM_C.get_num_arg_operands(ins) == 1
+
                     arg = LibLLVM_C.get_operand(ins, 0)
                     raise "_unroll_hint argument is not constant" unless
                         LibLLVM_C.get_value_kind(arg).constant_int_value_kind?
+
                     value = LibLLVM_C.const_int_get_s_ext_value(arg).to_i32
                     raise "_unroll_hint argument is out of bounds" if value < 0
+
                     @loop_sanity_limit = value
 
                 when .z_ext?

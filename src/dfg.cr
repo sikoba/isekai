@@ -2,10 +2,15 @@ require "./frontend/types.cr"
 require "./frontend/storage.cr"
 require "./dfgoperator"
 
-
+private macro bool2i (b)
+    if {{ b }}
+        1
+    else
+        0
+    end
+end
 
 module Isekai
-
 
 # Internal expression node. All internal state expressions
 # are instances of this class
@@ -438,11 +443,7 @@ class CmpLEQ < BinaryOp
     end
 
     def self.eval_with (left, right)
-        if left <= right
-            1
-        else
-            0
-        end
+        bool2i(left <= right)
     end
 end
 
@@ -461,11 +462,7 @@ class CmpEQ < BinaryOp
     end
 
     def self.eval_with (left, right)
-        if left == right
-            1
-        else
-            0
-        end
+        bool2i(left == right)
     end
 end
 
@@ -484,11 +481,7 @@ class CmpNEQ < BinaryOp
     end
 
     def self.eval_with (left, right)
-        if left != right
-            1
-        else
-            0
-        end
+        bool2i(left != right)
     end
 end
 
