@@ -12,9 +12,6 @@ module Isekai
 class DFGExpr < SymbolTableValue
     #add_object_helpers
 
-    def extra_args()
-    end
-
     def collapse_dependencies()
         raise "Undefined dependencies collapsing on #{self.class}"
     end
@@ -26,11 +23,6 @@ class DFGExpr < SymbolTableValue
     def evaluate(collapser)
         raise "Undefined method evaluate on #{self.class}"
     end
-
-    def class_name
-        return self.class.name
-    end
-
 end
 
 # The void type - result of an expression that yields no value
@@ -212,14 +204,14 @@ class Conditional < Op
         end
     end
 
-    def_equals @cond, @valtrue, @valfalse 
+    def_equals @cond, @valtrue, @valfalse
 end
-  
+
 
 # Binary operation. Perform `@op` on two operands `@left` and `@right`
 class BinaryOp < Op
     #add_object_helpers
-    def initialize (@op : String, @left : DFGExpr, @right : DFGExpr)
+    def initialize (@op : ::Symbol, @left : DFGExpr, @right : DFGExpr)
     end
 
     def set_operands(left, right)
@@ -295,7 +287,11 @@ end
 class Add < BinaryMath
     #add_object_helpers
     def initialize (@left, @right)
-        super("+", OperatorAdd.new, 0, @left, @right)
+        super(:plus, OperatorAdd.new, 0, @left, @right)
+    end
+
+    def self.eval_with (left, right)
+        left + right
     end
 end
 
@@ -303,7 +299,11 @@ end
 class Multiply < BinaryMath
     #add_object_helpers
     def initialize (@left, @right)
-        super("*", OperatorMul.new, 1, @left, @right)
+        super(:multiply, OperatorMul.new, 1, @left, @right)
+    end
+
+    def self.eval_with (left, right)
+        left * right
     end
 end
 
@@ -311,7 +311,11 @@ end
 # Subtract operation
 class Subtract < BinaryMath
     def initialize (@left, @right)
-        super("+", OperatorSub.new, 0, @left, @right)
+        super(:minus, OperatorSub.new, 0, @left, @right)
+    end
+
+    def self.eval_with (left, right)
+        left - right
     end
 end
 
@@ -319,63 +323,91 @@ end
 # Divide operation
 class Divide < BinaryMath
     def initialize (@left, @right)
-        super("/", OperatorDiv.new, 1, @left, @right)
+        super(:divide, OperatorDiv.new, 1, @left, @right)
+    end
+
+    def self.eval_with (left, right)
+        left / right
     end
 end
 
 # Modulo operation
 class Modulo < BinaryMath
     def initialize (@left, @right)
-        super("%", OperatorMod.new, 1, @left, @right)
+        super(:modulo, OperatorMod.new, 1, @left, @right)
+    end
+
+    def self.eval_with (left, right)
+        left % right
     end
 end
 
 # Exclusive OR operation
 class Xor < BinaryMath
     def initialize (@left, @right)
-        super("^", OperatorXor.new, 1, @left, @right)
+        super(:bitxor, OperatorXor.new, 1, @left, @right)
+    end
+
+    def self.eval_with (left, right)
+        left ^ right
     end
 end
 
 # Left shift operation
 class LeftShift < BinaryMath
     def initialize (@left, @right, @bit_width : Int32)
-        super("<<", LeftShiftOp.new(@bit_width), 0, @left, @right)
+        super(:lshift, LeftShiftOp.new(@bit_width), 0, @left, @right)
+    end
+
+    def self.eval_with (left, right, bit_width : Int32)
+        left << right
     end
 end
 
 # Right shift operation
 class RightShift < BinaryMath
     def initialize (@left, @right, @bit_width : Int32)
-        super(">>", RightShiftOp.new(@bit_width), 0, @left, @right)
+        super(:rshift, RightShiftOp.new(@bit_width), 0, @left, @right)
+    end
+
+    def self.eval_with (left, right, bit_width : Int32)
+        left >> right
     end
 end
 
 # bitwise-or operation
 class BitOr < BinaryMath
     def initialize (@left, @right)
-        super("|", OperatorBor.new, 0, @left, @right)
+        super(:bitor, OperatorBor.new, 0, @left, @right)
+    end
+
+    def self.eval_with (left, right)
+        left | right
     end
 end
 
 # bitwise-and operation
 class BitAnd < BinaryMath
     def initialize (@left, @right)
-        super("&", OperatorBAnd.new, nil, @left, @right)
+        super(:bitand, OperatorBAnd.new, nil, @left, @right)
+    end
+
+    def self.eval_with (left, right)
+        left & right
     end
 end
 
 # Logical And operation
 class LogicalAnd < BinaryMath
     def initialize (@left, @right)
-        super("^", LogicalAndOp.new, nil, @left, @right)
+        super(:land, LogicalAndOp.new, nil, @left, @right)
     end
 end
 
 # Less-than compare operation
 class CmpLT < BinaryOp
     def initialize (@left, @right)
-        super("<", @left, @right)
+        super(:lt, @left, @right)
     end
 
     def evaluate(collapser)
@@ -385,12 +417,16 @@ class CmpLT < BinaryOp
             raise NonconstantExpression.new("can't evaluate #{@left} >= #{@right}")
         end
     end
+
+    def self.eval_with (left, right)
+        left < right
+    end
 end
 
 # Less-than-or-equal compare operation
 class CmpLEQ < BinaryOp
     def initialize (@left, @right)
-        super("<=", @left, @right)
+        super(:leq, @left, @right)
     end
 
     def evaluate(collapser)
@@ -401,12 +437,19 @@ class CmpLEQ < BinaryOp
         end
     end
 
+    def self.eval_with (left, right)
+        if left <= right
+            1
+        else
+            0
+        end
+    end
 end
 
 # Equal compare operation
 class CmpEQ < BinaryOp
     def initialize (@left, @right)
-        super("==", @left, @right)
+        super(:eq, @left, @right)
     end
 
     def evaluate(collapser)
@@ -416,12 +459,20 @@ class CmpEQ < BinaryOp
             raise NonconstantExpression.new("can't evaluate #{@left} == #{@right}")
         end
     end
+
+    def self.eval_with (left, right)
+        if left == right
+            1
+        else
+            0
+        end
+    end
 end
 
 # Not-equal compare operation
 class CmpNEQ < BinaryOp
     def initialize (@left, @right)
-        super("!=", @left, @right)
+        super(:neq, @left, @right)
     end
 
     def evaluate(collapser)
@@ -429,6 +480,14 @@ class CmpNEQ < BinaryOp
             return collapser.lookup(@left).as(Constant).@value != collapser.lookup(@right).as(Constant).@value
         rescue
             raise NonconstantExpression.new("can't evaluate #{@left} != #{@right}")
+        end
+    end
+
+    def self.eval_with (left, right)
+        if left != right
+            1
+        else
+            0
         end
     end
 end
@@ -467,11 +526,10 @@ end
 class UnaryOp < Op
     #add_object_helpers
 
-    @op : (String)?
     @expr : (Isekai::DFGExpr)?
     setter expr : DFGExpr
 
-    def initialize (@op : String, @expr : DFGExpr)
+    def initialize (@op : ::Symbol, @expr : DFGExpr)
     end
 
     def collapse_dependencies() : Array(DFGExpr)
@@ -493,12 +551,14 @@ class UnaryOp < Op
         end
     end
 
+    def_equals @op, @expr
+    def_hash @op, @expr
 end
 
 # Logical-Not unary operation
 class LogicalNot < UnaryOp
-	def initialize (@expr)
-		super("Not", @expr)
+    def initialize (@expr)
+        super(:lnot, @expr)
     end
 
     def evaluate (collapser)
@@ -509,8 +569,8 @@ end
 # Bitwise-Not unary operation
 class BitNot < UnaryOp
     # TODO - handle bit widths here
-	def initialize(@expr)#, @bit_width)
-		super("BitNot", @expr)
+    def initialize(@expr)#, @bit_width)
+        super(:bitnot, @expr)
     end
 
     def evaluate(collapser)
@@ -520,16 +580,45 @@ end
 
 # Negate unary operation
 class Negate < UnaryOp
-	def initialize(@expr)
-		super("Negate", @expr)
+    def initialize(@expr)
+        super(:negate, @expr)
     end
 
     def evaluate(collapser)
-        return -collapser.lookup(@expr).as(Constant).@value  
+        return -collapser.lookup(@expr).as(Constant).@value
     end
 
-    def_hash @expr, class_name
-    def_equals @expr, class_name
+    def self.eval_with (value)
+        return -value
+    end
+end
+
+def self.dfg_make_binary (klass, left, right, *args)
+    if left.is_a? Constant && right.is_a? Constant
+        Constant.new(klass.eval_with(left.@value, right.@value, *args))
+    else
+        klass.new(left, right, *args)
+    end
+end
+
+def self.dfg_make_unary (klass, operand)
+    if operand.is_a? Constant
+        Constant.new(klass.eval_with(operand))
+    else
+        klass.new(operand)
+    end
+end
+
+def self.dfg_make_conditional (cond, valtrue, valfalse)
+    if cond.is_a? Constant
+        if cond.@value != 0
+            valtrue
+        else
+            valfalse
+        end
+    else
+        Conditional.new(cond, valtrue, valfalse)
+    end
 end
 
 end

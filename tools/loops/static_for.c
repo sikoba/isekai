@@ -12,14 +12,7 @@ outsource(struct Input *input, struct Output *output)
 {
     int a = input->a;
 
-#if ISEKAI_C_PARSER
-    int _unroll = 22;
-#else
-    extern void _unroll_hint(unsigned);
-    _unroll_hint(22);
-#endif
-
-    for (int i = 0; i != 22; i = i + 1) {
+    for (int i = 0; i != 10; i = i + 1) {
         a = a | (a + 1);
     }
 

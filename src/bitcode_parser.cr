@@ -74,7 +74,32 @@ module Isekai
     class BitcodeParser
 
         private struct UnrollCtl
-            def initialize (@block : LibLLVM::BasicBlock, @counter : Int32, @limit : Int32)
+            def self.bool2i(b)
+                if b
+                    1
+                else
+                    0
+                end
+            end
+
+            def initialize (
+                    @block : LibLLVM::BasicBlock,
+                    @limit : Int32,
+                    @counter : Int32,
+                    @n_dynamic_iters : Int32)
+            end
+
+            def initialize (@block : LibLLVM::BasicBlock, @limit : Int32, is_dynamic : Bool)
+                @counter = 1
+                @n_dynamic_iters = UnrollCtl.bool2i(is_dynamic)
+            end
+
+            def iteration (is_dynamic : Bool)
+                return UnrollCtl.new(
+                    @block,
+                    @limit,
+                    @counter + 1,
+                    @n_dynamic_iters + UnrollCtl.bool2i(is_dynamic))
             end
         end
 
@@ -354,58 +379,58 @@ module Isekai
                 when .add?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Add.new(load_expr(left), load_expr(right))
+                    @locals[ins] = Isekai.dfg_make_binary(Add, load_expr(left), load_expr(right))
 
                 when .sub?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Subtract.new(load_expr(left), load_expr(right))
+                    @locals[ins] = Isekai.dfg_make_binary(Subtract, load_expr(left), load_expr(right))
 
                 when .mul?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Multiply.new(load_expr(left), load_expr(right))
+                    @locals[ins] = Isekai.dfg_make_binary(Multiply, load_expr(left), load_expr(right))
 
                 when .s_div?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Divide.new(load_expr(left), load_expr(right))
+                    @locals[ins] = Isekai.dfg_make_binary(Divide, load_expr(left), load_expr(right))
 
                 when .s_rem?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Modulo.new(load_expr(left), load_expr(right))
+                    @locals[ins] = Isekai.dfg_make_binary(Modulo, load_expr(left), load_expr(right))
 
                 when .shl?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = LeftShift.new(load_expr(left), load_expr(right), 32)
+                    @locals[ins] = Isekai.dfg_make_binary(LeftShift, load_expr(left), load_expr(right), 32)
 
                 when .a_shr?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = RightShift.new(load_expr(left), load_expr(right), 32)
+                    @locals[ins] = Isekai.dfg_make_binary(RightShift, load_expr(left), load_expr(right), 32)
 
                 when .and?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = BitAnd.new(load_expr(left), load_expr(right))
+                    @locals[ins] = Isekai.dfg_make_binary(BitAnd, load_expr(left), load_expr(right))
 
                 when .or?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = BitOr.new(load_expr(left), load_expr(right))
+                    @locals[ins] = Isekai.dfg_make_binary(BitOr, load_expr(left), load_expr(right))
 
                 when .xor?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Xor.new(load_expr(left), load_expr(right))
+                    @locals[ins] = Isekai.dfg_make_binary(Xor, load_expr(left), load_expr(right))
 
                 when .select?
                     pred = LibLLVM_C.get_operand(ins, 0)
                     valtrue = LibLLVM_C.get_operand(ins, 1)
                     valfalse = LibLLVM_C.get_operand(ins, 2)
-                    @locals[ins] = Conditional.new(
+                    @locals[ins] = Isekai.dfg_make_conditional(
                         load_expr(pred),
                         load_expr(valtrue),
                         load_expr(valfalse))
@@ -433,9 +458,9 @@ module Isekai
 
                     case LibLLVM_C.get_i_cmp_predicate(ins)
                     when .int_eq?
-                        @locals[ins] = CmpEQ.new(load_expr(left), load_expr(right))
+                        @locals[ins] = Isekai.dfg_make_binary(CmpEQ, load_expr(left), load_expr(right))
                     when .int_ne?
-                        @locals[ins] = CmpNEQ.new(load_expr(left), load_expr(right))
+                        @locals[ins] = Isekai.dfg_make_binary(CmpNEQ, load_expr(left), load_expr(right))
                     else
                         raise "NYI: ICmp predicate"
                     end
@@ -454,46 +479,60 @@ module Isekai
                         cond = load_expr(LibLLVM_C.get_condition(ins))
                         if_true, if_false = branches
 
+                        if cond.is_a? Constant
+                            if cond.@value != 0
+                                static_branch = if_true
+                            else
+                                static_branch = if_false
+                            end
+                        end
+
                         sink, is_loop = get_meeting_point(if_true, if_false, junction: bb)
                         if is_loop
-                            case
-                            when sink == if_true  then to_loop = if_false
-                            when sink == if_false then to_loop = if_true
-                            else raise "Unsupported loop"
+                            if sink == if_true
+                                to_loop = if_false
+                            elsif sink == if_false
+                                to_loop = if_true
+                            else
+                                raise "Unsupported loop"
                             end
 
                             if !@unroll.empty? && @unroll[-1].@block == sink
                                 ctl = @unroll[-1]
-                                if ctl.@counter == ctl.@limit
-                                    {% if true %}
-                                        @chain.pop(ctl.@counter)
-                                    {% end %}
+                                if ctl.@counter == ctl.@limit || static_branch == sink
+                                    # Stop generating iterations
+                                    raise "Statically infinite loop" if static_branch == to_loop
+                                    @chain.pop(ctl.@n_dynamic_iters)
                                     @unroll.pop
                                     return sink
+                                else
+                                    # Generate another iteration
+                                    @unroll[-1] = ctl.iteration(is_dynamic: !static_branch)
                                 end
-                                @unroll[-1] = UnrollCtl.new(sink, ctl.@counter + 1, ctl.@limit)
                             else
-                                if @loop_sanity_limit <= 0
+                                if @loop_sanity_limit <= 0 || static_branch == sink
+                                    raise "Statically infinite loop" if static_branch == to_loop
                                     return sink
                                 end
-                                @unroll << UnrollCtl.new(sink, 1, @loop_sanity_limit)
+                                # New loop, start the unroll
+                                @unroll << UnrollCtl.new(sink, @loop_sanity_limit, is_dynamic: !static_branch)
                             end
 
-                            {% if true %}
-                                @chain << {cond, to_loop == if_true}
-                                return to_loop
-                            {% end %}
+                            @chain << {cond, to_loop == if_true} unless static_branch
+                            return to_loop
+                        else
+                            return static_branch if static_branch
+
+                            @chain << {cond, true}
+                            inspect_basic_block_until(if_true, terminator: sink)
+                            @chain.pop
+
+                            @chain << {cond, false}
+                            inspect_basic_block_until(if_false, terminator: sink)
+                            @chain.pop
+
+                            return sink
                         end
-
-                        @chain << {cond, true}
-                        inspect_basic_block_until(if_true, terminator: sink)
-                        @chain.pop
-
-                        @chain << {cond, false}
-                        inspect_basic_block_until(if_false, terminator: sink)
-                        @chain.pop
-
-                        return sink
                     else
                         raise "Unsupported br form" unless nbranches == 1
                         return branches[0]
