@@ -12,7 +12,7 @@ case "$1" in
 *)  SRC=$opwd/$1 ;;
 esac
 CLANG=( ${CLANG:-clang} )
-ISEKAI=( ../isekai --loop-sanity-limit=10 )
+ISEKAI=( ../isekai )
 BC_FILE=test_bitcode.bc
 ARCI_BITCODE=test_out_bitcode.arci
 ARCI_C=test_out_c.arci
