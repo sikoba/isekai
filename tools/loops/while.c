@@ -12,19 +12,17 @@ outsource(struct Input *input, struct Output *output)
     int a = input->a;
 #if ISEKAI_C_PARSER
 
+#   include "repeat.h"
+
 #   define BEGIN    if (a != 9) { a = a + 1;
 #   define END      }
 
-    BEGIN
-        BEGIN
-            BEGIN
-            END
-        END
-    END
+    REP_99(BEGIN)
+    REP_99(END)
 
 #else
     extern void _unroll_hint(unsigned);
-    _unroll_hint(3);
+    _unroll_hint(99);
 
     while (a != 9) {
         ++a;

@@ -7,6 +7,8 @@ void outsource(struct Input *input, struct Output *output)
     int b = input->b;
 #if ISEKAI_C_PARSER
 
+#   include "repeat.h"
+
 #   define BEGIN   int tmp_ = 0; \
                    if (a != 77) { \
                        tmp_ = (b != 128); \
@@ -17,16 +19,12 @@ void outsource(struct Input *input, struct Output *output)
 
 #   define END     }
 
-    BEGIN
-        BEGIN
-            BEGIN
-            END
-        END
-    END
+    REP_10(BEGIN)
+    REP_10(END)
 
 #else
     extern void _unroll_hint(unsigned);
-    _unroll_hint(3);
+    _unroll_hint(10);
 
     while (a != 77 && b++ != 128) {
         a++;
