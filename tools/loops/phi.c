@@ -25,6 +25,9 @@ void outsource(struct Input *input, struct Output *output)
     END
 
 #else
+    extern void _unroll_hint(unsigned);
+    _unroll_hint(3);
+
     while (a != 77 && b++ != 128) {
         a++;
     }

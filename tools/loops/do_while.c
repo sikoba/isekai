@@ -19,6 +19,9 @@ outsource(struct Input *input, struct Output *output)
     END   END   END   END
 
 #else
+    extern void _unroll_hint(unsigned);
+    _unroll_hint(3);
+
     do {
         ++a;
     } while (a != 48);

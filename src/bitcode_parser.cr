@@ -95,6 +95,7 @@ module Isekai
         @cfg : ControlFlowGraph?
         @bfs_tree : GraphUtils::BfsTree?
         @chain = [] of Tuple(DFGExpr, Bool)
+        @unroll_hint_func : LibLLVM_C::ValueRef?
         @unroll = [] of UnrollCtl
 
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
@@ -409,7 +410,20 @@ module Isekai
                         load_expr(valtrue),
                         load_expr(valfalse))
 
+                when .call?
+                    raise "Unsupported function call (not _unroll_hint)" unless
+                        (uhf = @unroll_hint_func) && LibLLVM_C.get_called_value(ins) == uhf
+                    raise "_unroll_hint must be called with 1 argument" unless
+                        LibLLVM_C.get_num_arg_operands(ins) == 1
+                    arg = LibLLVM_C.get_operand(ins, 0)
+                    raise "_unroll_hint argument is not constant" unless
+                        LibLLVM_C.get_value_kind(arg).constant_int_value_kind?
+                    value = LibLLVM_C.const_int_get_s_ext_value(arg).to_i32
+                    raise "_unroll_hint argument is out of bounds" if value < 0
+                    @loop_sanity_limit = value
+
                 when .z_ext?
+                    # TODO
                     target = LibLLVM_C.get_operand(ins, 0)
                     @locals[ins] = load_expr(target)
 
@@ -451,10 +465,10 @@ module Isekai
                             if !@unroll.empty? && @unroll[-1].@block == sink
                                 ctl = @unroll[-1]
                                 if ctl.@counter == @loop_sanity_limit
-                                    @unroll.pop
-                                    {% if false %}
-                                        @chain.pop(@loop_sanity_limit)
+                                    {% if true %}
+                                        @chain.pop(ctl.@counter)
                                     {% end %}
+                                    @unroll.pop
                                     return sink
                                 end
                                 @unroll[-1] = UnrollCtl.new(sink, ctl.@counter + 1)
@@ -465,7 +479,7 @@ module Isekai
                                 @unroll << UnrollCtl.new(sink, 1)
                             end
 
-                            {% if false %}
+                            {% if true %}
                                 @chain << {cond, to_loop == if_true}
                                 return to_loop
                             {% end %}
@@ -544,6 +558,11 @@ module Isekai
         end
 
         def parse ()
+            @ir_module.functions do |func|
+                if func.declaration? && func.name == "_unroll_hint"
+                    @unroll_hint_func = func.to_unsafe
+                end
+            end
             @ir_module.functions do |func|
                 next if func.declaration?
                 raise "Unexpected function defined: #{func.name}" unless

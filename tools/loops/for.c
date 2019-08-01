@@ -25,6 +25,9 @@ outsource(struct Input *input, struct Output *output)
     END
 
 #else
+     extern void _unroll_hint(unsigned);
+    _unroll_hint(3);
+
     for (int i = input->i; i != 128; ++i) {
         a += a;
     }
