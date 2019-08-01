@@ -74,7 +74,7 @@ module Isekai
     class BitcodeParser
 
         private struct UnrollCtl
-            def initialize (@block : LibLLVM::BasicBlock, @counter : Int32)
+            def initialize (@block : LibLLVM::BasicBlock, @counter : Int32, @limit : Int32)
             end
         end
 
@@ -464,19 +464,19 @@ module Isekai
 
                             if !@unroll.empty? && @unroll[-1].@block == sink
                                 ctl = @unroll[-1]
-                                if ctl.@counter == @loop_sanity_limit
+                                if ctl.@counter == ctl.@limit
                                     {% if true %}
                                         @chain.pop(ctl.@counter)
                                     {% end %}
                                     @unroll.pop
                                     return sink
                                 end
-                                @unroll[-1] = UnrollCtl.new(sink, ctl.@counter + 1)
+                                @unroll[-1] = UnrollCtl.new(sink, ctl.@counter + 1, ctl.@limit)
                             else
                                 if @loop_sanity_limit <= 0
                                     return sink
                                 end
-                                @unroll << UnrollCtl.new(sink, 1)
+                                @unroll << UnrollCtl.new(sink, 1, @loop_sanity_limit)
                             end
 
                             {% if true %}
