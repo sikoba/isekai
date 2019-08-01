@@ -75,19 +75,10 @@ module Isekai
 
         private struct UnrollCtl
             def initialize (@block : LibLLVM::BasicBlock, @counter : Int32)
-                raise "Invalid counter: #{counter} <= 0" if @counter <= 0
-            end
-
-            def copy_decr_counter
-                return nil if @counter == 1
-                return UnrollCtl.new(@block, @counter - 1)
-            end
-
-            def self.maybe_new (block : LibLLVM::BasicBlock, counter : Int32)
-                return nil if counter <= 0
-                return UnrollCtl.new(block, counter)
             end
         end
+
+        @ir_module : LibLLVM::IrModule
 
         @inputs : Array(DFGExpr)?
         @nizk_inputs : Array(DFGExpr)?
@@ -107,6 +98,7 @@ module Isekai
         @unroll = [] of UnrollCtl
 
         def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
+            @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(@input_file))
         end
 
         private def init_graphs(entry : LibLLVM::BasicBlock)
@@ -456,19 +448,27 @@ module Isekai
                             else raise "Unsupported loop"
                             end
 
-                            ctl = @unroll.last?
-                            if ctl && ctl.@block == to_loop
-                                unless ctl = ctl.copy_decr_counter
+                            if !@unroll.empty? && @unroll[-1].@block == sink
+                                ctl = @unroll[-1]
+                                if ctl.@counter == @loop_sanity_limit
                                     @unroll.pop
+                                    {% if false %}
+                                        @chain.pop(@loop_sanity_limit)
+                                    {% end %}
                                     return sink
                                 end
-                                @unroll[-1] = ctl
+                                @unroll[-1] = UnrollCtl.new(sink, ctl.@counter + 1)
                             else
-                                unless ctl = UnrollCtl.maybe_new(to_loop, @loop_sanity_limit)
+                                if @loop_sanity_limit <= 0
                                     return sink
                                 end
-                                @unroll << ctl
+                                @unroll << UnrollCtl.new(sink, 1)
                             end
+
+                            {% if false %}
+                                @chain << {cond, to_loop == if_true}
+                                return to_loop
+                            {% end %}
                         end
 
                         @chain << {cond, true}
@@ -544,8 +544,7 @@ module Isekai
         end
 
         def parse ()
-            module_ = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(@input_file))
-            module_.functions do |func|
+            @ir_module.functions do |func|
                 next if func.declaration?
                 raise "Unexpected function defined: #{func.name}" unless
                     func.name == "outsource"

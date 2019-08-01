@@ -15,14 +15,8 @@ outsource(struct Input *input, struct Output *output)
 #   define BEGIN    a = a + 1; if (a != 48) {
 #   define END      }
 
-    BEGIN
-        BEGIN
-            BEGIN
-                BEGIN
-                END
-            END
-        END
-    END
+    BEGIN BEGIN BEGIN BEGIN
+    END   END   END   END
 
 #else
     do {
