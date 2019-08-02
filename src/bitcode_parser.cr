@@ -12,6 +12,13 @@ private def collect_successors(ins)
     end
 end
 
+private def get_case_value(ins, i)
+    val = LibLLVM_C.get_operand(ins, i * 2)
+    raise "Case value is not an integer constant" unless
+        LibLLVM_C.get_value_kind(val).constant_int_value_kind?
+    return LibLLVM_C.const_int_get_s_ext_value(val).to_i32
+end
+
 private class ControlFlowGraph
 
     @blocks = [] of LibLLVM::BasicBlock
@@ -259,22 +266,17 @@ module Isekai
 
         private def load_expr (src) : DFGExpr
             expr = load_expr_preliminary(src)
-            # TODO: collapse it properly
             case expr
             when Field
                 if expr.@key.@storage == @output_storage
                     expr = @outputs[expr.@key.@idx][1]
                 end
             end
-
             expr = with_chain_reduce(expr)
-
-            expr
+            return expr
         end
 
         private def store (dst, expr : DFGExpr)
-            # TODO: collapse it properly
-
             dst_kind = LibLLVM_C.get_value_kind(dst)
             raise "NYI: unsupported dst kind: #{dst_kind}" unless dst_kind.instruction_value_kind?
 
@@ -334,12 +336,6 @@ module Isekai
                     @locals[ins] = with_chain_add_condition(get_phi_value(ins), expr)
                 end
             end
-        end
-
-        private def load_const (val)
-            raise "Not a constant" unless
-                LibLLVM_C.get_value_kind(val).constant_int_value_kind?
-            return LibLLVM_C.const_int_get_s_ext_value(val)
         end
 
         private def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
@@ -439,11 +435,14 @@ module Isekai
                 when .call?
                     raise "Unsupported function call (not _unroll_hint)" unless
                         (uhf = @unroll_hint_func) && LibLLVM_C.get_called_value(ins) == uhf
-
                     raise "_unroll_hint must be called with 1 argument" unless
                         LibLLVM_C.get_num_arg_operands(ins) == 1
+                    arg = LibLLVM_C.get_operand(ins, 0)
 
-                    value = load_const(LibLLVM_C.get_operand(ins, 0)).to_i32
+                    raise "_unroll_hint argument is not an integer constant" unless
+                        LibLLVM_C.get_value_kind(arg).constant_int_value_kind?
+
+                    value = LibLLVM_C.const_int_get_s_ext_value(arg).to_i32
                     raise "_unroll_hint argument is out of bounds" if value < 0
 
                     @loop_sanity_limit = value
@@ -542,7 +541,12 @@ module Isekai
 
                     arg = load_expr(LibLLVM_C.get_operand(ins, 0))
                     if arg.is_a? Constant
-                        static_value = arg.@value
+                        (1...successors.size).each do |i|
+                            if get_case_value(ins, i).to_i32 == arg.@value
+                                return successors[i]
+                            end
+                        end
+                        return successors[0]
                     end
 
                     sink = successors[0]
@@ -553,12 +557,7 @@ module Isekai
 
                     # inspect each case
                     (1...successors.size).each do |i|
-                        value = load_const(LibLLVM_C.get_operand(ins, i * 2)).to_i32
-                        if static_value
-                            return successors[i] if static_value == value
-                            next
-                        end
-
+                        value = get_case_value(ins, i).to_i32
                         cond = Isekai.dfg_make_binary(CmpEQ, arg, Constant.new(value))
 
                         @chain << {cond, true}
@@ -568,7 +567,6 @@ module Isekai
                     end
 
                     # inspect the default case
-                    return successors[0] if static_value
                     inspect_basic_block_until(successors[0], terminator: sink)
                     @chain.pop(successors.size - 1)
 
