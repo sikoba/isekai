@@ -5,71 +5,66 @@ require "./graph_utils"
 require "llvm-crystal/lib_llvm"
 require "llvm-crystal/lib_llvm_c"
 
-module Isekai
+private def collect_successors(ins)
+    n = LibLLVM_C.get_num_successors(ins)
+    return Array(LibLLVM::BasicBlock).new(n) do |i|
+        LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, i))
+    end
+end
 
-    private class ControlFlowGraph
+private class ControlFlowGraph
 
-        def self.block_successors (bb : LibLLVM::BasicBlock)
-            ins = bb.last_instruction
-            case LibLLVM_C.get_instruction_opcode(ins)
-            when .br?
-                (0...LibLLVM_C.get_num_successors(ins)).each do |i|
-                    yield LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, i))
-                end
-                true
-            when .ret?
-                false
-            else
-                repr = LibLLVM.slurp_string(LibLLVM_C.print_value_to_string(ins))
-                raise "Unsupported terminator instruction: #{repr}"
-            end
+    @blocks = [] of LibLLVM::BasicBlock
+    @block2i = {} of LibLLVM::BasicBlock => Int32
+    @sink : Int32 = -1
+
+    private def discover (bb : LibLLVM::BasicBlock)
+        return if @block2i[bb]?
+
+        idx = @blocks.size
+        @blocks << bb
+        @block2i[bb] = idx
+
+        has_succ = false
+        bb.successors do |succ|
+            has_succ = true
+            discover(succ)
         end
-
-        @blocks = [] of LibLLVM::BasicBlock
-        @block2i = {} of LibLLVM::BasicBlock => Int32
-        @sink : Int32 = -1
-
-        private def discover (bb : LibLLVM::BasicBlock)
-            return if @block2i[bb]?
-
-            idx = @blocks.size
-            @blocks << bb
-            @block2i[bb] = idx
-
-            has_succ = ControlFlowGraph.block_successors(bb) { |succ| discover(succ) }
-            unless has_succ
-                raise "Multiple sinks" unless @sink == -1
-                @sink = idx
-            end
-        end
-
-        def initialize (entry : LibLLVM::BasicBlock)
-            discover(entry)
-            raise "No sink" if @sink == -1
-        end
-
-        def nvertices
-            return @blocks.size
-        end
-
-        def sink
-            return @sink
-        end
-
-        def edges_from (v : Int32)
-            ControlFlowGraph.block_successors(@blocks[v]) do |bb|
-                yield @block2i[bb]
-            end
-        end
-
-        def block2i (bb : LibLLVM::BasicBlock)
-            return @block2i[bb]
-        end
-
-        def i2block (i : Int32)
-            return @blocks[i]
+        unless has_succ
+            raise "Multiple sinks" unless @sink == -1
+            @sink = idx
         end
     end
+
+    def initialize (entry : LibLLVM::BasicBlock)
+        discover(entry)
+        raise "No sink" if @sink == -1
+    end
+
+    def nvertices
+        return @blocks.size
+    end
+
+    def sink
+        return @sink
+    end
+
+    def edges_from (v : Int32)
+        @blocks[v].successors do |bb|
+            yield @block2i[bb]
+        end
+    end
+
+    def block2i (bb : LibLLVM::BasicBlock)
+        return @block2i[bb]
+    end
+
+    def i2block (i : Int32)
+        return @blocks[i]
+    end
+end
+
+module Isekai
 
     class BitcodeParser
 
@@ -82,24 +77,26 @@ module Isekai
                 end
             end
 
-            def initialize (
-                    @block : LibLLVM::BasicBlock,
-                    @limit : Int32,
-                    @counter : Int32,
-                    @n_dynamic_iters : Int32)
-            end
+            @counter : Int32
+            @n_dynamic_iters : Int32
 
             def initialize (@block : LibLLVM::BasicBlock, @limit : Int32, is_dynamic : Bool)
                 @counter = 1
                 @n_dynamic_iters = bool2i(is_dynamic)
             end
 
+            def n_dynamic_iters
+                @n_dynamic_iters
+            end
+
+            def done?
+                return @counter == @limit
+            end
+
             def iteration (is_dynamic : Bool)
-                return UnrollCtl.new(
-                    @block,
-                    @limit,
-                    @counter + 1,
-                    @n_dynamic_iters + bool2i(is_dynamic))
+                @counter += 1
+                @n_dynamic_iters += bool2i(is_dynamic)
+                return self
             end
         end
 
@@ -470,18 +467,14 @@ module Isekai
                     end
 
                 when .br?
-                    nbranches = LibLLVM_C.get_num_successors(ins)
-                    branches = Array(LibLLVM::BasicBlock).new(nbranches) do |i|
-                        LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, i))
-                    end
-                    has_cond = LibLLVM_C.is_conditional(ins) != 0
+                    successors = collect_successors(ins)
+                    successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
 
-                    branches.each { |target| produce_phi_copies(from: bb, to: target) }
-
-                    if has_cond
-                        raise "Unsupported br form" unless nbranches == 2
+                    if LibLLVM_C.is_conditional(ins) != 0
+                        # This is a conditional branch...
+                        raise "Unsupported br form" unless successors.size == 2
                         cond = load_expr(LibLLVM_C.get_condition(ins))
-                        if_true, if_false = branches
+                        if_true, if_false = successors
 
                         if cond.is_a? Constant
                             if cond.@value != 0
@@ -503,10 +496,10 @@ module Isekai
 
                             if !@unroll.empty? && @unroll[-1].@block == sink
                                 ctl = @unroll[-1]
-                                if ctl.@counter == ctl.@limit || static_branch == sink
+                                if ctl.done? || static_branch == sink
                                     # Stop generating iterations
                                     raise "Statically infinite loop" if static_branch == to_loop
-                                    @chain.pop(ctl.@n_dynamic_iters)
+                                    @chain.pop(ctl.n_dynamic_iters)
                                     @unroll.pop
                                     return sink
                                 else
@@ -538,9 +531,15 @@ module Isekai
                             return sink
                         end
                     else
-                        raise "Unsupported br form" unless nbranches == 1
-                        return branches[0]
+                        # This is an unconditional branch.
+                        raise "Unsupported br form" unless successors.size == 1
+                        return successors[0]
                     end
+
+                when .switch?
+                    successors = collect_successors(ins)
+                    successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
+                    raise "NYI: switch"
 
                 when .ret?
                     # We assume this is "ret void" as the function returns void.
