@@ -190,11 +190,9 @@ module Isekai
 
         private def make_input_array (storage : Storage?)
             return nil unless storage
-            arr = Array(DFGExpr).new(storage.@size)
-            (0...storage.@size).each do |i|
-                arr << Field.new(StorageKey.new(storage, i))
+            return Array(DFGExpr).new(storage.@size) do |i|
+                Field.new(StorageKey.new(storage, i))
             end
-            return arr
         end
 
         private def get_meeting_point (a, b, junction)
@@ -338,6 +336,12 @@ module Isekai
             end
         end
 
+        private def load_const (val)
+            raise "Not a constant" unless
+                LibLLVM_C.get_value_kind(val).constant_int_value_kind?
+            return LibLLVM_C.const_int_get_s_ext_value(val)
+        end
+
         private def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
 
             bb.instructions do |ins|
@@ -439,11 +443,7 @@ module Isekai
                     raise "_unroll_hint must be called with 1 argument" unless
                         LibLLVM_C.get_num_arg_operands(ins) == 1
 
-                    arg = LibLLVM_C.get_operand(ins, 0)
-                    raise "_unroll_hint argument is not constant" unless
-                        LibLLVM_C.get_value_kind(arg).constant_int_value_kind?
-
-                    value = LibLLVM_C.const_int_get_s_ext_value(arg).to_i32
+                    value = load_const(LibLLVM_C.get_operand(ins, 0)).to_i32
                     raise "_unroll_hint argument is out of bounds" if value < 0
 
                     @loop_sanity_limit = value
@@ -491,7 +491,7 @@ module Isekai
                             elsif sink == if_false
                                 to_loop = if_true
                             else
-                                raise "Unsupported loop"
+                                raise "Unsupported control flow pattern"
                             end
 
                             if !@unroll.empty? && @unroll[-1].@block == sink
@@ -539,7 +539,40 @@ module Isekai
                 when .switch?
                     successors = collect_successors(ins)
                     successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
-                    raise "NYI: switch"
+
+                    arg = load_expr(LibLLVM_C.get_operand(ins, 0))
+                    if arg.is_a? Constant
+                        static_value = arg.@value
+                    end
+
+                    sink = successors[0]
+                    (1...successors.size).each do |i|
+                        sink, is_loop = get_meeting_point(sink, successors[i], junction: bb)
+                        raise "Unsupported control flow pattern" if is_loop
+                    end
+
+                    # inspect each case
+                    (1...successors.size).each do |i|
+                        value = load_const(LibLLVM_C.get_operand(ins, i * 2)).to_i32
+                        if static_value
+                            return successors[i] if static_value == value
+                            next
+                        end
+
+                        cond = Isekai.dfg_make_binary(CmpEQ, arg, Constant.new(value))
+
+                        @chain << {cond, true}
+                        inspect_basic_block_until(successors[i], terminator: sink)
+                        @chain.pop
+                        @chain << {cond, false}
+                    end
+
+                    # inspect the default case
+                    return successors[0] if static_value
+                    inspect_basic_block_until(successors[0], terminator: sink)
+                    @chain.pop(successors.size - 1)
+
+                    return sink
 
                 when .ret?
                     # We assume this is "ret void" as the function returns void.
@@ -591,8 +624,8 @@ module Isekai
             @nizk_inputs = make_input_array @nizk_input_storage
 
             output_storage = @output_storage.as(Storage)
-            (0...output_storage.@size).each do |i|
-                @outputs << {StorageKey.new(output_storage, i), make_undef_expr}
+            @outputs = Array(Tuple(StorageKey, DFGExpr)).new(output_storage.@size) do |i|
+                {StorageKey.new(output_storage, i), make_undef_expr}
             end
 
             init_graphs(func.entry_basic_block)
