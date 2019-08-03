@@ -5,6 +5,7 @@ require "./graph_utils"
 require "llvm-crystal/lib_llvm"
 require "llvm-crystal/lib_llvm_c"
 
+# Assuming 'ins' is a terminator instruction, returns its successors as an array.
 private def collect_successors(ins)
     n = LibLLVM_C.get_num_successors(ins)
     return Array(LibLLVM::BasicBlock).new(n) do |i|
@@ -12,25 +13,28 @@ private def collect_successors(ins)
     end
 end
 
+# Assuming 'ins' is a switch instruction, returns the value (as an integer) of the case with
+# number 'i' (1-based if we only consider 'case' statements without 'default', 0-based if we
+# consider all the successors, of which the zeroth is the default).
 private def get_case_value(ins, i)
     val = LibLLVM_C.get_operand(ins, i * 2)
     raise "Case value is not an integer constant" unless
         LibLLVM_C.get_value_kind(val).constant_int_value_kind?
-    return LibLLVM_C.const_int_get_s_ext_value(val).to_i32
+    return LibLLVM_C.const_int_get_s_ext_value(val)
 end
 
 private class ControlFlowGraph
 
     @blocks = [] of LibLLVM::BasicBlock
-    @block2i = {} of LibLLVM::BasicBlock => Int32
+    @block2idx = {} of LibLLVM::BasicBlock => Int32
     @sink : Int32 = -1
 
     private def discover (bb : LibLLVM::BasicBlock)
-        return if @block2i[bb]?
+        return if @block2idx[bb]?
 
         idx = @blocks.size
         @blocks << bb
-        @block2i[bb] = idx
+        @block2idx[bb] = idx
 
         has_succ = false
         bb.successors do |succ|
@@ -58,16 +62,16 @@ private class ControlFlowGraph
 
     def edges_from (v : Int32)
         @blocks[v].successors do |bb|
-            yield @block2i[bb]
+            yield @block2idx[bb]
         end
     end
 
-    def block2i (bb : LibLLVM::BasicBlock)
-        return @block2i[bb]
+    def block_to_idx (bb : LibLLVM::BasicBlock)
+        return @block2idx[bb]
     end
 
-    def i2block (i : Int32)
-        return @blocks[i]
+    def idx_to_block (idx : Int32)
+        return @blocks[idx]
     end
 end
 
@@ -107,8 +111,6 @@ module Isekai
             end
         end
 
-        @ir_module : LibLLVM::IrModule
-
         @inputs : Array(DFGExpr)?
         @nizk_inputs : Array(DFGExpr)?
         @outputs = [] of Tuple(StorageKey, DFGExpr)
@@ -123,12 +125,16 @@ module Isekai
 
         @cfg : ControlFlowGraph?
         @bfs_tree : GraphUtils::BfsTree?
-        @chain = [] of Tuple(DFGExpr, Bool)
-        @unroll_hint_func : LibLLVM_C::ValueRef?
-        @unroll = [] of UnrollCtl
 
-        def initialize (@input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
-            @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(@input_file))
+        @chain = [] of Tuple(DFGExpr, Bool)
+        @unroll_ctls = [] of UnrollCtl
+
+        @unroll_hint_func : LibLLVM_C::ValueRef? = nil
+
+        @ir_module : LibLLVM::IrModule
+
+        def initialize (input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
+            @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
         end
 
         private def init_graphs (entry : LibLLVM::BasicBlock)
@@ -207,8 +213,8 @@ module Isekai
             raise "@bfs_tree not initialized" unless bfs_tree = @bfs_tree
             lca, j_on_path = GraphUtils.tree_lca(
                 bfs_tree,
-                cfg.block2i(a), cfg.block2i(b), cfg.block2i(junction))
-            return {cfg.i2block(lca), j_on_path}
+                cfg.block_to_idx(a), cfg.block_to_idx(b), cfg.block_to_idx(junction))
+            return {cfg.idx_to_block(lca), j_on_path}
         end
 
         private def inspect_param (ptr, ty, accept)
@@ -493,17 +499,17 @@ module Isekai
                                 raise "Unsupported control flow pattern"
                             end
 
-                            if !@unroll.empty? && @unroll[-1].@block == sink
-                                ctl = @unroll[-1]
+                            if !@unroll_ctls.empty? && @unroll_ctls[-1].@block == sink
+                                ctl = @unroll_ctls[-1]
                                 if ctl.done? || static_branch == sink
                                     # Stop generating iterations
                                     raise "Statically infinite loop" if static_branch == to_loop
                                     @chain.pop(ctl.n_dynamic_iters)
-                                    @unroll.pop
+                                    @unroll_ctls.pop
                                     return sink
                                 else
                                     # Generate another iteration
-                                    @unroll[-1] = ctl.iteration(is_dynamic: !static_branch)
+                                    @unroll_ctls[-1] = ctl.iteration(is_dynamic: !static_branch)
                                 end
                             else
                                 if @loop_sanity_limit <= 0 || static_branch == sink
@@ -511,7 +517,8 @@ module Isekai
                                     return sink
                                 end
                                 # New loop, start the unroll
-                                @unroll << UnrollCtl.new(sink, @loop_sanity_limit, is_dynamic: !static_branch)
+                                @unroll_ctls << UnrollCtl.new(
+                                    sink, @loop_sanity_limit, is_dynamic: !static_branch)
                             end
 
                             @chain << {cond, to_loop == if_true} unless static_branch
@@ -539,6 +546,12 @@ module Isekai
                     successors = collect_successors(ins)
                     successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
 
+                    sink = successors[0]
+                    (1...successors.size).each do |i|
+                        sink, is_loop = get_meeting_point(sink, successors[i], junction: bb)
+                        raise "Unsupported control flow pattern" if is_loop
+                    end
+
                     arg = load_expr(LibLLVM_C.get_operand(ins, 0))
                     if arg.is_a? Constant
                         (1...successors.size).each do |i|
@@ -549,16 +562,10 @@ module Isekai
                         return successors[0]
                     end
 
-                    sink = successors[0]
-                    (1...successors.size).each do |i|
-                        sink, is_loop = get_meeting_point(sink, successors[i], junction: bb)
-                        raise "Unsupported control flow pattern" if is_loop
-                    end
-
                     # inspect each case
                     (1...successors.size).each do |i|
-                        value = get_case_value(ins, i).to_i32
-                        cond = Isekai.dfg_make_binary(CmpEQ, arg, Constant.new(value))
+                        value = get_case_value(ins, i)
+                        cond = Isekai.dfg_make_binary(CmpEQ, arg, Constant.new(value.to_i32))
 
                         @chain << {cond, true}
                         inspect_basic_block_until(successors[i], terminator: sink)
