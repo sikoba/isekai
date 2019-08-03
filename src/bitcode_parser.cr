@@ -150,7 +150,7 @@ module Isekai
 
             if old_expr.is_a? Conditional && chain_index != @chain.size
                 cond, flag = @chain[chain_index][0], @chain[chain_index][1]
-                if cond === old_expr.@cond
+                if cond.same?(old_expr.@cond)
                     valtrue, valfalse = old_expr.@valtrue, old_expr.@valfalse
                     if flag
                         valtrue = with_chain_add_condition(valtrue, new_expr, chain_index + 1)
@@ -176,7 +176,7 @@ module Isekai
         private def with_chain_reduce (expr : DFGExpr) : DFGExpr
             @chain.each do |(cond, flag)|
                 break unless expr.is_a? Conditional
-                break unless cond === expr.@cond
+                break unless cond.same?(expr.@cond)
                 if flag
                     expr = expr.@valtrue
                 else
@@ -491,9 +491,10 @@ module Isekai
 
                         sink, is_loop = get_meeting_point(if_true, if_false, junction: bb)
                         if is_loop
-                            if sink == if_true
+                            case sink
+                            when if_true
                                 to_loop = if_false
-                            elsif sink == if_false
+                            when if_false
                                 to_loop = if_true
                             else
                                 raise "Unsupported control flow pattern"
