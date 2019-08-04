@@ -38,7 +38,7 @@ class ArithFactory < RequestFactory
     end
 
     private def get_nizk_input_storage!
-        arr = @circuit_nizk_inputs || [] of DFGExpr
+        return nil unless arr = @circuit_nizk_inputs
         return nil if arr.empty?
         return arr[0].as(Field).@key.@storage
     end

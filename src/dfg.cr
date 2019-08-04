@@ -2,14 +2,6 @@ require "./frontend/types.cr"
 require "./frontend/storage.cr"
 require "./dfgoperator"
 
-private macro bool2i (b)
-    if {{ b }}
-        1
-    else
-        0
-    end
-end
-
 module Isekai
 
 # Internal expression node. All internal state expressions
@@ -443,7 +435,7 @@ class CmpLEQ < BinaryOp
     end
 
     def self.eval_with (left, right)
-        bool2i(left <= right)
+        (left <= right) ? 1 : 0
     end
 end
 
@@ -462,7 +454,7 @@ class CmpEQ < BinaryOp
     end
 
     def self.eval_with (left, right)
-        bool2i(left == right)
+        (left == right) ? 1 : 0
     end
 end
 
@@ -481,7 +473,7 @@ class CmpNEQ < BinaryOp
     end
 
     def self.eval_with (left, right)
-        bool2i(left != right)
+        (left != right) ? 1 : 0
     end
 end
 
@@ -594,21 +586,17 @@ def self.dfg_make_binary (klass, left, right, *args)
     end
 end
 
-def self.dfg_make_unary (klass, operand)
+def self.dfg_make_unary (klass, operand, *args)
     if operand.is_a? Constant
-        Constant.new(klass.eval_with(operand))
+        Constant.new(klass.eval_with(operand, *args))
     else
-        klass.new(operand)
+        klass.new(operand, *args)
     end
 end
 
 def self.dfg_make_conditional (cond, valtrue, valfalse)
     if cond.is_a? Constant
-        if cond.@value != 0
-            valtrue
-        else
-            valfalse
-        end
+        (cond.@value != 0) ? valtrue : valfalse
     else
         Conditional.new(cond, valtrue, valfalse)
     end

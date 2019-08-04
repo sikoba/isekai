@@ -14,8 +14,10 @@ private def collect_successors(ins)
 end
 
 # Assuming 'ins' is a switch instruction, returns the value (as an integer) of the case with
-# number 'i' (1-based if we only consider 'case' statements without 'default', 0-based if we
-# consider all the successors, of which the zeroth is the default).
+# number 'i'.
+#
+# 'i' is 1-based if we only consider 'case' statements without 'default', and 0-based if we consider
+# all the successors, of which the zeroth is the default (thus 'i == 0' is not allowed).
 private def get_case_value(ins, i)
     val = LibLLVM_C.get_operand(ins, i * 2)
     raise "Case value is not an integer constant" unless
@@ -56,7 +58,7 @@ private class ControlFlowGraph
         return @blocks.size
     end
 
-    def sink
+    def sink_idx
         return @sink
     end
 
@@ -80,20 +82,12 @@ module Isekai
     class BitcodeParser
 
         private struct UnrollCtl
-            private macro bool2i (b)
-                if {{ b }}
-                    1
-                else
-                    0
-                end
-            end
-
             @counter : Int32
             @n_dynamic_iters : Int32
 
             def initialize (@block : LibLLVM::BasicBlock, @limit : Int32, is_dynamic : Bool)
                 @counter = 1
-                @n_dynamic_iters = bool2i(is_dynamic)
+                @n_dynamic_iters = is_dynamic ? 1 : 0
             end
 
             def n_dynamic_iters
@@ -106,7 +100,7 @@ module Isekai
 
             def iteration (is_dynamic : Bool)
                 @counter += 1
-                @n_dynamic_iters += bool2i(is_dynamic)
+                @n_dynamic_iters += is_dynamic ? 1 : 0
                 return self
             end
         end
@@ -140,7 +134,7 @@ module Isekai
         private def init_graphs (entry : LibLLVM::BasicBlock)
             @cfg = cfg = ControlFlowGraph.new(entry)
             inv = GraphUtils.invert_graph(cfg)
-            @bfs_tree = GraphUtils.build_bfs_tree(inv, cfg.sink)
+            @bfs_tree = GraphUtils.build_bfs_tree(inv, cfg.sink_idx)
         end
 
         private def with_chain_add_condition (
@@ -177,11 +171,7 @@ module Isekai
             @chain.each do |(cond, flag)|
                 break unless expr.is_a? Conditional
                 break unless cond.same?(expr.@cond)
-                if flag
-                    expr = expr.@valtrue
-                else
-                    expr = expr.@valfalse
-                end
+                expr = flag ? expr.@valtrue : expr.@valfalse
             end
             return expr
         end
@@ -482,11 +472,7 @@ module Isekai
                         if_true, if_false = successors
 
                         if cond.is_a? Constant
-                            if cond.@value != 0
-                                static_branch = if_true
-                            else
-                                static_branch = if_false
-                            end
+                            static_branch = (cond.@value != 0) ? if_true : if_false
                         end
 
                         sink, is_loop = get_meeting_point(if_true, if_false, junction: bb)
@@ -500,7 +486,7 @@ module Isekai
                                 raise "Unsupported control flow pattern"
                             end
 
-                            if !@unroll_ctls.empty? && @unroll_ctls[-1].@block == sink
+                            if !@unroll_ctls.empty? && @unroll_ctls[-1].@block == bb
                                 ctl = @unroll_ctls[-1]
                                 if ctl.done? || static_branch == sink
                                     # Stop generating iterations
@@ -519,7 +505,7 @@ module Isekai
                                 end
                                 # New loop, start the unroll
                                 @unroll_ctls << UnrollCtl.new(
-                                    sink, @loop_sanity_limit, is_dynamic: !static_branch)
+                                    bb, @loop_sanity_limit, is_dynamic: !static_branch)
                             end
 
                             @chain << {cond, to_loop == if_true} unless static_branch
@@ -641,6 +627,7 @@ module Isekai
         def parse ()
             @ir_module.functions do |func|
                 if func.declaration? && func.name == "_unroll_hint"
+                    # TODO check declaration signature
                     @unroll_hint_func = func.to_unsafe
                 end
             end

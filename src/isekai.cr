@@ -53,9 +53,10 @@ module Isekai
 
         def initialize (@filename : String)
             @kind =
-                if filename.ends_with? ".c"
+                case filename
+                when .ends_with? ".c"
                     Kind::C
-                elsif filename.ends_with? ".bc"
+                when .ends_with? ".bc"
                     Kind::Bitcode
                 else
                     Kind::Arith
