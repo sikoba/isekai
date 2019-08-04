@@ -14,15 +14,32 @@ private def collect_successors(ins)
 end
 
 # Assuming 'ins' is a switch instruction, returns the value (as an integer) of the case with
-# number 'i'.
-#
-# 'i' is 1-based if we only consider 'case' statements without 'default', and 0-based if we consider
-# all the successors, of which the zeroth is the default (thus 'i == 0' is not allowed).
+# number 'i'. 'i' is 1-based if we only consider 'case' statements without 'default', and 0-based if
+# we consider all the successors, of which the zeroth is the default (thus 'i == 0' is not allowed).
 private def get_case_value(ins, i)
     val = LibLLVM_C.get_operand(ins, i * 2)
     raise "Case value is not an integer constant" unless
         LibLLVM_C.get_value_kind(val).constant_int_value_kind?
     return LibLLVM_C.const_int_get_s_ext_value(val)
+end
+
+private def inspect_signature (func)
+    func_ty = LibLLVM_C.type_of(func)
+    if LibLLVM_C.get_type_kind(func_ty).pointer_type_kind?
+        func_ty = LibLLVM_C.get_element_type(func_ty)
+    end
+
+    raise "Functions with variable arguments are not supported" unless
+        LibLLVM_C.is_function_var_arg(func_ty) == 0
+
+    ret_type = LibLLVM_C.get_return_type(func_ty)
+    nparams = LibLLVM_C.count_params(func)
+    params = Array(LibLLVM_C::ValueRef).build(nparams) do |buffer|
+        LibLLVM_C.get_params(func, buffer)
+        nparams
+    end
+
+    yield ret_type, params
 end
 
 private class ControlFlowGraph
@@ -104,6 +121,8 @@ module Isekai
                 return self
             end
         end
+
+        UNDEFINED_EXPR = Constant.new(0)
 
         @inputs : Array(DFGExpr)?
         @nizk_inputs : Array(DFGExpr)?
@@ -187,10 +206,6 @@ module Isekai
             end
         end
 
-        private def make_undef_expr : DFGExpr
-            return Constant.new(0)
-        end
-
         private def make_input_array (storage : Storage?)
             return nil unless storage
             return Array(DFGExpr).new(storage.@size) do |i|
@@ -207,16 +222,17 @@ module Isekai
             return {cfg.idx_to_block(lca), j_on_path}
         end
 
-        private def inspect_param (ptr, ty, accept)
-            raise "Function parameter is not a pointer" unless
+        private def inspect_outsource_param (ptr, accept)
+            ty = LibLLVM_C.type_of(ptr)
+            raise "outsource() parameter is not a pointer" unless
                 LibLLVM_C.get_type_kind(ty).pointer_type_kind?
 
             s_ty = LibLLVM_C.get_element_type(ty)
 
-            raise "Function parameter is a pointer to non-struct" unless
+            raise "outsource() parameter is a pointer to non-struct" unless
                 LibLLVM_C.get_type_kind(s_ty).struct_type_kind?
 
-            raise "Function parameter is a pointer to an incomplete struct" unless
+            raise "outsource() parameter is a pointer to an incomplete struct" unless
                 LibLLVM_C.is_opaque_struct(s_ty) == 0
 
             s_name = String.new(LibLLVM_C.get_struct_name(s_ty))
@@ -245,30 +261,29 @@ module Isekai
             @arguments[ptr] = GetPointerOp.new(Structure.new(st))
         end
 
-        private def load_expr_preliminary (src) : DFGExpr
+        private def load_expr (src) : DFGExpr
             kind = LibLLVM_C.get_value_kind(src)
             case kind
             when .argument_value_kind?
-                 @arguments[src]
+                expr = @arguments[src]
             when .instruction_value_kind?
                 # this is a reference to a local value created by 'src' instruction
-                @locals[src]
+                expr = @locals[src]
             when .constant_int_value_kind?
-                Constant.new(LibLLVM_C.const_int_get_s_ext_value(src).to_i32)
+                expr = Constant.new(LibLLVM_C.const_int_get_s_ext_value(src).to_i32)
             else
                 raise "NYI: unsupported value kind: #{kind}"
             end
-        end
 
-        private def load_expr (src) : DFGExpr
-            expr = load_expr_preliminary(src)
             case expr
             when Field
                 if expr.@key.@storage == @output_storage
                     expr = @outputs[expr.@key.@idx][1]
                 end
             end
+
             expr = with_chain_reduce(expr)
+
             return expr
         end
 
@@ -320,7 +335,7 @@ module Isekai
         end
 
         private def get_phi_value (ins) : DFGExpr
-            return @locals[ins]? || make_undef_expr
+            return @locals[ins]? || UNDEFINED_EXPR
         end
 
         private def produce_phi_copies (from : LibLLVM::BasicBlock, to : LibLLVM::BasicBlock)
@@ -342,7 +357,7 @@ module Isekai
                 when .alloca?
                     #ty = LibLLVM_C.get_allocated_type(ins)
                     @locals[ins] = AllocaOp.new(@allocas.size)
-                    @allocas << make_undef_expr
+                    @allocas << UNDEFINED_EXPR
 
                 when .store?
                     src = LibLLVM_C.get_operand(ins, 0)
@@ -429,17 +444,17 @@ module Isekai
                         load_expr(valfalse))
 
                 when .call?
-                    raise "Unsupported function call (not _unroll_hint)" unless
+                    raise "Unsupported function call (not _unroll_hint())" unless
                         (uhf = @unroll_hint_func) && LibLLVM_C.get_called_value(ins) == uhf
-                    raise "_unroll_hint must be called with 1 argument" unless
+                    raise "_unroll_hint() must be called with 1 argument" unless
                         LibLLVM_C.get_num_arg_operands(ins) == 1
                     arg = LibLLVM_C.get_operand(ins, 0)
 
-                    raise "_unroll_hint argument is not an integer constant" unless
+                    raise "_unroll_hint() argument is not an integer constant" unless
                         LibLLVM_C.get_value_kind(arg).constant_int_value_kind?
 
                     value = LibLLVM_C.const_int_get_s_ext_value(arg).to_i32
-                    raise "_unroll_hint argument is out of bounds" if value < 0
+                    raise "_unroll_hint() argument is out of bounds" if value < 0
 
                     @loop_sanity_limit = value
 
@@ -562,6 +577,7 @@ module Isekai
 
                     # inspect the default case
                     inspect_basic_block_until(successors[0], terminator: sink)
+
                     @chain.pop(successors.size - 1)
 
                     return sink
@@ -577,39 +593,23 @@ module Isekai
             end
         end
 
-        private def inspect_root_func (func)
-            func_ty = LibLLVM_C.type_of(func)
-            if LibLLVM_C.get_type_kind(func_ty).pointer_type_kind?
-                func_ty = LibLLVM_C.get_element_type(func_ty)
-            end
+        private def inspect_outsource_func (func)
+            inspect_signature(func) do |ret_type, params|
 
-            raise "Function return type is not void" unless
-                LibLLVM_C.get_type_kind(LibLLVM_C.get_return_type(func_ty)).void_type_kind?
+                raise "outsource() return type is not void" unless
+                    LibLLVM_C.get_type_kind(ret_type).void_type_kind?
 
-            func_nparams = LibLLVM_C.count_params(func)
-            raise "Number of types != number of params" unless
-                LibLLVM_C.count_param_types(func_ty) == func_nparams
-
-            param_tys = Array(LibLLVM_C::TypeRef).build(func_nparams) do |buffer|
-                LibLLVM_C.get_param_types(func_ty, buffer)
-                func_nparams
-            end
-
-            params = Array(LibLLVM_C::ValueRef).build(func_nparams) do |buffer|
-                LibLLVM_C.get_params(func, buffer)
-                func_nparams
-            end
-
-            case func_nparams
-            when 2
-                inspect_param(params[0], param_tys[0], accept: {:input, :nizk_input})
-                inspect_param(params[1], param_tys[1], accept: {:output})
-            when 3
-                inspect_param(params[0], param_tys[0], accept: {:input})
-                inspect_param(params[1], param_tys[1], accept: {:nizk_input})
-                inspect_param(params[2], param_tys[2], accept: {:output})
-            else
-                raise "Function takes #{func_nparams} parameter(s), expected 2 or 3"
+                case params.size
+                when 2
+                    inspect_outsource_param(params[0], accept: {:input, :nizk_input})
+                    inspect_outsource_param(params[1], accept: {:output})
+                when 3
+                    inspect_outsource_param(params[0], accept: {:input})
+                    inspect_outsource_param(params[1], accept: {:nizk_input})
+                    inspect_outsource_param(params[2], accept: {:output})
+                else
+                    raise "outsource() takes #{params.size} parameter(s), expected 2 or 3"
+                end
             end
 
             @inputs      = make_input_array @input_storage
@@ -617,25 +617,41 @@ module Isekai
 
             output_storage = @output_storage.as(Storage)
             @outputs = Array(Tuple(StorageKey, DFGExpr)).new(output_storage.@size) do |i|
-                {StorageKey.new(output_storage, i), make_undef_expr}
+                {StorageKey.new(output_storage, i), UNDEFINED_EXPR}
             end
 
             init_graphs(func.entry_basic_block)
             inspect_basic_block_until(func.entry_basic_block, terminator: nil)
         end
 
+        private def inspect_unroll_hint_func (func)
+            inspect_signature(func) do |ret_type, params|
+
+                raise "_unroll_hint() return type is not void" unless
+                    LibLLVM_C.get_type_kind(ret_type).void_type_kind?
+
+                raise "_unroll_hint() takes #{params.size} parameters, expected 1" unless
+                    params.size == 1
+
+                ty = LibLLVM_C.type_of(params[0])
+                raise "_unroll_hint() parameter has non-integer type" unless
+                    LibLLVM_C.get_type_kind(ty).integer_type_kind?
+            end
+
+            @unroll_hint_func = func.to_unsafe
+        end
+
         def parse ()
             @ir_module.functions do |func|
                 if func.declaration? && func.name == "_unroll_hint"
-                    # TODO check declaration signature
-                    @unroll_hint_func = func.to_unsafe
+                    inspect_unroll_hint_func(func)
                 end
             end
             @ir_module.functions do |func|
                 next if func.declaration?
                 raise "Unexpected function defined: #{func.name}" unless
                     func.name == "outsource"
-                inspect_root_func(func)
+                inspect_outsource_func(func)
                 return {@inputs || [] of DFGExpr, @nizk_inputs, @outputs}
             end
 
