@@ -6,7 +6,7 @@ module Isekai
     end
 
     class LeftShiftOp < DFGOperator
-        def initialize (@bitwidth : Int32)
+        def initialize ()
         end
 
         def evaluate (left : T, right : T) forall T
@@ -15,7 +15,7 @@ module Isekai
     end
 
     class RightShiftOp < DFGOperator
-        def initialize (@bitwidth : Int32)
+        def initialize ()
         end
 
         def evaluate (left : T, right : T) forall T

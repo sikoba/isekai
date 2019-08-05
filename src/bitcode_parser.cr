@@ -32,14 +32,14 @@ private def inspect_signature (func)
     raise "Functions with variable arguments are not supported" unless
         LibLLVM_C.is_function_var_arg(func_ty) == 0
 
-    ret_type = LibLLVM_C.get_return_type(func_ty)
+    ret_ty = LibLLVM_C.get_return_type(func_ty)
     nparams = LibLLVM_C.count_params(func)
     params = Array(LibLLVM_C::ValueRef).build(nparams) do |buffer|
         LibLLVM_C.get_params(func, buffer)
         nparams
     end
 
-    yield ret_type, params
+    yield ret_ty, params
 end
 
 private class ControlFlowGraph
@@ -122,6 +122,12 @@ module Isekai
             end
         end
 
+        private class BadOutsourceParam < Exception
+        end
+
+        private class BadOutsourceParamPosition < Exception
+        end
+
         UNDEFINED_EXPR = Constant.new(0)
 
         @inputs : Array(DFGExpr)?
@@ -197,12 +203,12 @@ module Isekai
 
         private def make_deref_op (expr : DFGExpr) : DFGExpr
             case expr
-            when GetPointerOp
+            when GetPointer
                 expr.@target
-            when AllocaOp
+            when Alloca
                 @allocas[expr.@idx]
             else
-                DerefOp.new(expr)
+                Deref.new(expr)
             end
         end
 
@@ -224,15 +230,15 @@ module Isekai
 
         private def inspect_outsource_param (ptr, accept)
             ty = LibLLVM_C.type_of(ptr)
-            raise "outsource() parameter is not a pointer" unless
+            raise BadOutsourceParam.new("is not a pointer") unless
                 LibLLVM_C.get_type_kind(ty).pointer_type_kind?
 
             s_ty = LibLLVM_C.get_element_type(ty)
 
-            raise "outsource() parameter is a pointer to non-struct" unless
+            raise BadOutsourceParam.new("is a pointer to non-struct") unless
                 LibLLVM_C.get_type_kind(s_ty).struct_type_kind?
 
-            raise "outsource() parameter is a pointer to an incomplete struct" unless
+            raise BadOutsourceParam.new("is a pointer to an incomplete struct") unless
                 LibLLVM_C.is_opaque_struct(s_ty) == 0
 
             s_name = String.new(LibLLVM_C.get_struct_name(s_ty))
@@ -240,25 +246,25 @@ module Isekai
 
             case s_name
             when "struct.Input"
-                raise "Wrong position for #{s_name}* parameter" unless accept.includes? :input
+                raise BadOutsourceParamPosition.new(s_name) unless accept.includes? :input
                 st = Storage.new("Input", nelems)
                 @input_storage = st
 
             when "struct.NzikInput" # sic
-                raise "Wrong position for #{s_name}* parameter" unless accept.includes? :nizk_input
+                raise BadOutsourceParamPosition.new(s_name) unless accept.includes? :nizk_input
                 st = Storage.new("NzikInput", nelems)
                 @nizk_input_storage = st
 
             when "struct.Output"
-                raise "Wrong position for #{s_name}* parameter" unless accept.includes? :output
+                raise BadOutsourceParamPosition.new(s_name) unless accept.includes? :output
                 st = Storage.new("Output", nelems)
                 @output_storage = st
 
             else
-                raise "Unexpected parameter type: #{s_name}*"
+                raise BadOutsourceParam.new("unexpected struct name: #{s_name}")
             end
 
-            @arguments[ptr] = GetPointerOp.new(Structure.new(st))
+            @arguments[ptr] = GetPointer.new(Structure.new(st))
         end
 
         private def load_expr (src) : DFGExpr
@@ -294,11 +300,11 @@ module Isekai
             dst_expr = @locals[dst]
             case dst_expr
 
-            when AllocaOp
+            when Alloca
                 old_expr = @allocas[dst_expr.@idx]
                 @allocas[dst_expr.@idx] = with_chain_add_condition(old_expr, expr)
 
-            when GetPointerOp
+            when GetPointer
                 target = dst_expr.@target
                 raise "NYI: cannot store at pointer to #{target}" unless target.is_a?(Field)
                 raise "NYI: store in non-output struct" unless target.@key.@storage == @output_storage
@@ -311,7 +317,7 @@ module Isekai
         end
 
         private def get_element_ptr (base : DFGExpr, offset : DFGExpr, field : DFGExpr) : DFGExpr
-            raise "NYI: GEP base is not a pointer" unless base.is_a?(GetPointerOp)
+            raise "NYI: GEP base is not a pointer" unless base.is_a?(GetPointer)
             raise "NYI: non-constant GEP offset" unless offset.is_a?(Constant)
             raise "NYI: non-constant GEP field" unless field.is_a?(Constant)
 
@@ -321,7 +327,7 @@ module Isekai
             raise "NYI: GEP target is not a struct" unless target.is_a?(Structure)
 
             key = StorageKey.new(target.@storage, field.@value)
-            return GetPointerOp.new(Field.new(key))
+            return GetPointer.new(Field.new(key))
         end
 
         private def inspect_basic_block_until (
@@ -356,7 +362,7 @@ module Isekai
 
                 when .alloca?
                     #ty = LibLLVM_C.get_allocated_type(ins)
-                    @locals[ins] = AllocaOp.new(@allocas.size)
+                    @locals[ins] = Alloca.new(@allocas.size)
                     @allocas << UNDEFINED_EXPR
 
                 when .store?
@@ -412,12 +418,12 @@ module Isekai
                 when .shl?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(LeftShift, load_expr(left), load_expr(right), 32)
+                    @locals[ins] = Isekai.dfg_make_binary(LeftShift, load_expr(left), load_expr(right))
 
                 when .a_shr?
                     left = LibLLVM_C.get_operand(ins, 0)
                     right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(RightShift, load_expr(left), load_expr(right), 32)
+                    @locals[ins] = Isekai.dfg_make_binary(RightShift, load_expr(left), load_expr(right))
 
                 when .and?
                     left = LibLLVM_C.get_operand(ins, 0)
@@ -445,18 +451,14 @@ module Isekai
 
                 when .call?
                     raise "Unsupported function call (not _unroll_hint())" unless
-                        (uhf = @unroll_hint_func) && LibLLVM_C.get_called_value(ins) == uhf
+                        LibLLVM_C.get_called_value(ins) == @unroll_hint_func
                     raise "_unroll_hint() must be called with 1 argument" unless
                         LibLLVM_C.get_num_arg_operands(ins) == 1
-                    arg = LibLLVM_C.get_operand(ins, 0)
-
-                    raise "_unroll_hint() argument is not an integer constant" unless
-                        LibLLVM_C.get_value_kind(arg).constant_int_value_kind?
-
-                    value = LibLLVM_C.const_int_get_s_ext_value(arg).to_i32
-                    raise "_unroll_hint() argument is out of bounds" if value < 0
-
-                    @loop_sanity_limit = value
+                    arg = load_expr(LibLLVM_C.get_operand(ins, 0))
+                    raise "_unroll_hint() argument is not constant" unless
+                        arg.is_a? Constant
+                    raise "_unroll_hint() argument is out of bounds" if arg.@value < 0
+                    @loop_sanity_limit = arg.@value
 
                 when .z_ext?
                     # TODO
@@ -594,10 +596,10 @@ module Isekai
         end
 
         private def inspect_outsource_func (func)
-            inspect_signature(func) do |ret_type, params|
+            inspect_signature(func) do |ret_ty, params|
 
                 raise "outsource() return type is not void" unless
-                    LibLLVM_C.get_type_kind(ret_type).void_type_kind?
+                    LibLLVM_C.get_type_kind(ret_ty).void_type_kind?
 
                 case params.size
                 when 2
@@ -625,10 +627,10 @@ module Isekai
         end
 
         private def inspect_unroll_hint_func (func)
-            inspect_signature(func) do |ret_type, params|
+            inspect_signature(func) do |ret_ty, params|
 
                 raise "_unroll_hint() return type is not void" unless
-                    LibLLVM_C.get_type_kind(ret_type).void_type_kind?
+                    LibLLVM_C.get_type_kind(ret_ty).void_type_kind?
 
                 raise "_unroll_hint() takes #{params.size} parameters, expected 1" unless
                     params.size == 1

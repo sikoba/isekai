@@ -2,6 +2,44 @@ require "./frontend/types.cr"
 require "./frontend/storage.cr"
 require "./dfgoperator"
 
+private macro def_simplify_left(**kwargs)
+    def self.simplify_left(const, right)
+        {% for key, value in kwargs %}
+            {% if key == :identity %}
+                if const.@value == {{ value }}
+                    return right
+                end
+            {% elsif key == :const %}
+                if const.@value == {{ value[:match] }}
+                    return Constant.new( {{ value[:result] }} )
+                end
+            {% else %}
+                {% raise "Invalid keyword argument" %}
+            {% end %}
+        {% end %}
+        return self.new(const, right)
+    end
+end
+
+private macro def_simplify_right(**kwargs)
+    def self.simplify_right(left, const)
+        {% for key, value in kwargs %}
+            {% if key == :identity %}
+                if const.@value == {{ value }}
+                    return left
+                end
+            {% elsif key == :const %}
+                if const.@value == {{ value[:match] }}
+                    return Constant.new( {{ value[:result] }} )
+                end
+            {% else %}
+                {% raise "Invalid keyword argument" %}
+            {% end %}
+        {% end %}
+        return self.new(left, const)
+    end
+end
+
 module Isekai
 
 # Internal expression node. All internal state expressions
@@ -49,7 +87,12 @@ class Structure < DFGExpr
     end
 end
 
-class Field < DFGExpr
+# Abstract operation
+class Op < DFGExpr
+    #add_object_helpers
+end
+
+class Field < Op
     def initialize(@key : StorageKey)
     end
 
@@ -69,22 +112,17 @@ class Field < DFGExpr
     def_hash @key
 end
 
-# Abstract operation
-class Op < DFGExpr
-    #add_object_helpers
-end
-
-class AllocaOp < Op
+class Alloca < DFGExpr
     def initialize(@idx : Int32)
     end
 end
 
-class DerefOp < Op
+class Deref < DFGExpr
     def initialize(@target : DFGExpr)
     end
 end
 
-class GetPointerOp < Op
+class GetPointer < DFGExpr
     def initialize(@target : DFGExpr)
     end
 end
@@ -290,6 +328,9 @@ class Add < BinaryMath
     def self.eval_with (left, right)
         left + right
     end
+
+    def_simplify_left identity: 0
+    def_simplify_right identity: 0
 end
 
 # Multiply operation
@@ -302,6 +343,9 @@ class Multiply < BinaryMath
     def self.eval_with (left, right)
         left * right
     end
+
+    def_simplify_left identity: 1, const: {match: 0, result: 0}
+    def_simplify_right identity: 1, const: {match: 0, result: 0}
 end
 
 
@@ -314,8 +358,10 @@ class Subtract < BinaryMath
     def self.eval_with (left, right)
         left - right
     end
-end
 
+    def_simplify_left
+    def_simplify_right identity: 0
+end
 
 # Divide operation
 class Divide < BinaryMath
@@ -326,6 +372,11 @@ class Divide < BinaryMath
     def self.eval_with (left, right)
         left / right
     end
+
+    # 0 / x = 0
+    def_simplify_left const: {match: 0, result: 0}
+    # x / 1 = x
+    def_simplify_right identity: 1
 end
 
 # Modulo operation
@@ -337,39 +388,57 @@ class Modulo < BinaryMath
     def self.eval_with (left, right)
         left % right
     end
+
+    # 0 % x = 0
+    def_simplify_left const: {match: 0, result: 0}
+    # x % 1 = 0
+    def_simplify_right const: {match: 1, result: 0}
 end
 
 # Exclusive OR operation
 class Xor < BinaryMath
     def initialize (@left, @right)
-        super(:bitxor, OperatorXor.new, 1, @left, @right)
+        super(:bitxor, OperatorXor.new, 0, @left, @right)
     end
 
     def self.eval_with (left, right)
         left ^ right
     end
+
+    def_simplify_left identity: 0
+    def_simplify_right identity: 0
 end
 
 # Left shift operation
 class LeftShift < BinaryMath
-    def initialize (@left, @right, @bit_width : Int32)
-        super(:lshift, LeftShiftOp.new(@bit_width), 0, @left, @right)
+    def initialize (@left, @right)
+        super(:lshift, LeftShiftOp.new, 0, @left, @right)
     end
 
-    def self.eval_with (left, right, bit_width : Int32)
+    def self.eval_with (left, right)
         left << right
     end
+
+    # 0 << x = 0
+    def_simplify_left const: {match: 0, result: 0}
+    # x << 0 = x
+    def_simplify_right identity: 0
 end
 
 # Right shift operation
 class RightShift < BinaryMath
-    def initialize (@left, @right, @bit_width : Int32)
-        super(:rshift, RightShiftOp.new(@bit_width), 0, @left, @right)
+    def initialize (@left, @right)
+        super(:rshift, RightShiftOp.new, 0, @left, @right)
     end
 
-    def self.eval_with (left, right, bit_width : Int32)
+    def self.eval_with (left, right)
         left >> right
     end
+
+    # 0 >> x = 0
+    def_simplify_left const: {match: 0, result: 0}
+    # x >> 0 = x
+    def_simplify_right identity: 0
 end
 
 # bitwise-or operation
@@ -381,6 +450,9 @@ class BitOr < BinaryMath
     def self.eval_with (left, right)
         left | right
     end
+
+    def_simplify_left identity: 0
+    def_simplify_right identity: 0
 end
 
 # bitwise-and operation
@@ -392,6 +464,9 @@ class BitAnd < BinaryMath
     def self.eval_with (left, right)
         left & right
     end
+
+    def_simplify_left const: {match: 0, result: 0}
+    def_simplify_right const: {match: 0, result: 0}
 end
 
 # Logical And operation
@@ -418,6 +493,9 @@ class CmpLT < BinaryOp
     def self.eval_with (left, right)
         left < right
     end
+
+    def_simplify_left
+    def_simplify_right
 end
 
 # Less-than-or-equal compare operation
@@ -437,6 +515,9 @@ class CmpLEQ < BinaryOp
     def self.eval_with (left, right)
         (left <= right) ? 1 : 0
     end
+
+    def_simplify_left
+    def_simplify_right
 end
 
 # Equal compare operation
@@ -456,6 +537,9 @@ class CmpEQ < BinaryOp
     def self.eval_with (left, right)
         (left == right) ? 1 : 0
     end
+
+    def_simplify_left
+    def_simplify_right
 end
 
 # Not-equal compare operation
@@ -475,6 +559,9 @@ class CmpNEQ < BinaryOp
     def self.eval_with (left, right)
         (left != right) ? 1 : 0
     end
+
+    def_simplify_left
+    def_simplify_right
 end
 
 # Greater-than compare operation
@@ -558,6 +645,10 @@ class BitNot < UnaryOp
         super(:bitnot, @expr)
     end
 
+    def self.eval_with (value)
+        ~value
+    end
+
     def evaluate(collapser)
         #return (~collapser.lookup(@expr) & @bit_width.get_neg1()
     end
@@ -578,19 +669,25 @@ class Negate < UnaryOp
     end
 end
 
-def self.dfg_make_binary (klass, left, right, *args)
-    if left.is_a? Constant && right.is_a? Constant
-        Constant.new(klass.eval_with(left.@value, right.@value, *args))
+def self.dfg_make_binary (klass, left, right)
+    if left.is_a? Constant
+        if right.is_a? Constant
+            Constant.new(klass.eval_with(left.@value, right.@value))
+        else
+            klass.simplify_left(left, right)
+        end
+    elsif right.is_a? Constant
+        klass.simplify_right(left, right)
     else
-        klass.new(left, right, *args)
+        klass.new(left, right)
     end
 end
 
-def self.dfg_make_unary (klass, operand, *args)
+def self.dfg_make_unary (klass, operand)
     if operand.is_a? Constant
-        Constant.new(klass.eval_with(operand, *args))
+        Constant.new(klass.eval_with(operand))
     else
-        klass.new(operand, *args)
+        klass.new(operand)
     end
 end
 

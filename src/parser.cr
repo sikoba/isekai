@@ -687,9 +687,9 @@ module Isekai
                     when "^"
                         dfg_expr = dfg(Xor, left_state.expr, right_state.expr)
                     when "<<"
-                        dfg_expr = dfg(LeftShift, left_state.expr, right_state.expr, @bit_width)
+                        dfg_expr = dfg(LeftShift, left_state.expr, right_state.expr)
                     when ">>"
-                        dfg_expr = dfg(RightShift, left_state.expr, right_state.expr, @bit_width)
+                        dfg_expr = dfg(RightShift, left_state.expr, right_state.expr)
                     when "|"
                         dfg_expr = dfg(BitOr, left_state.expr, right_state.expr)
                     when "&"
