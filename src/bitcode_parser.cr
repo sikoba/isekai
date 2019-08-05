@@ -340,6 +340,7 @@ module Isekai
             end
         end
 
+        @[AlwaysInline]
         private def get_phi_value (ins) : DFGExpr
             return @locals[ins]? || UNDEFINED_EXPR
         end
@@ -355,9 +356,23 @@ module Isekai
             end
         end
 
-        private def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
+        @[AlwaysInline]
+        private def set_binary(ins, klass)
+            left = load_expr(LibLLVM_C.get_operand(ins, 0))
+            right = load_expr(LibLLVM_C.get_operand(ins, 1))
+            @locals[ins] = Isekai.dfg_make_binary(klass, left, right)
+        end
 
+        @[AlwaysInline]
+        private def set_binary_swapped(ins, klass)
+            left = load_expr(LibLLVM_C.get_operand(ins, 1))
+            right = load_expr(LibLLVM_C.get_operand(ins, 0))
+            @locals[ins] = Isekai.dfg_make_binary(klass, left, right)
+        end
+
+        private def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
             bb.instructions do |ins|
+
                 case LibLLVM_C.get_instruction_opcode(ins)
 
                 when .alloca?
@@ -381,73 +396,61 @@ module Isekai
                     nops = LibLLVM_C.get_num_operands(ins)
                     raise "Not supported yet: #{nops}-arg GEP" unless nops == 3
 
-                    base = LibLLVM_C.get_operand(ins, 0)
-                    offset = LibLLVM_C.get_operand(ins, 1)
-                    field = LibLLVM_C.get_operand(ins, 2)
+                    base = load_expr(LibLLVM_C.get_operand(ins, 0))
+                    offset = load_expr(LibLLVM_C.get_operand(ins, 1))
+                    field = load_expr(LibLLVM_C.get_operand(ins, 2))
+                    @locals[ins] = get_element_ptr(base: base, offset: offset, field: field)
 
-                    @locals[ins] = get_element_ptr(
-                        base: load_expr(base),
-                        offset: load_expr(offset),
-                        field: load_expr(field))
+                when .add?   then set_binary(ins, Add)
+                when .sub?   then set_binary(ins, Subtract)
+                when .mul?   then set_binary(ins, Multiply)
+                when .and?   then set_binary(ins, BitAnd)
+                when .or?    then set_binary(ins, BitOr)
+                when .xor?   then set_binary(ins, Xor)
+                when .shl?   then set_binary(ins, LeftShift)
 
-                when .add?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(Add, load_expr(left), load_expr(right))
+                # TODO: is 'RightShift' signed or unsigned?
+                when .a_shr? then set_binary(ins, RightShift)
+                when .l_shr? then set_binary(ins, RightShift)
 
-                when .sub?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(Subtract, load_expr(left), load_expr(right))
+                # TODO: is 'Divide' signed or unsigned?
+                when .s_div? then set_binary(ins, Divide)
+                when .u_div? then set_binary(ins, Divide)
 
-                when .mul?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(Multiply, load_expr(left), load_expr(right))
+                # TODO: is 'Modulo' signed or unsigned?
+                when .s_rem? then set_binary(ins, Modulo)
+                when .u_rem? then set_binary(ins, Modulo)
 
-                when .s_div?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(Divide, load_expr(left), load_expr(right))
+                when .i_cmp?
+                    case LibLLVM_C.get_i_cmp_predicate(ins)
 
-                when .s_rem?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(Modulo, load_expr(left), load_expr(right))
+                    when .int_eq? then set_binary(ins, CmpEQ)
+                    when .int_ne? then set_binary(ins, CmpNEQ)
 
-                when .shl?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(LeftShift, load_expr(left), load_expr(right))
+                    # TODO: is 'CmpLT' signed or unsigned?
+                    when .int_slt? then set_binary(ins, CmpLT)
+                    when .int_ult? then set_binary(ins, CmpLT)
 
-                when .a_shr?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(RightShift, load_expr(left), load_expr(right))
+                    # TODO: is 'CmpLEQ' signed or unsigned?
+                    when .int_ule? then set_binary(ins, CmpLEQ)
+                    when .int_sle? then set_binary(ins, CmpLEQ)
 
-                when .and?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(BitAnd, load_expr(left), load_expr(right))
+                    # TODO: is 'CmpLT' signed or unsigned?
+                    when .int_ugt? then set_binary_swapped(ins, CmpLT)
+                    when .int_sgt? then set_binary_swapped(ins, CmpLT)
 
-                when .or?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(BitOr, load_expr(left), load_expr(right))
+                    # TODO: is 'CmpLEQ' signed or unsigned?
+                    when .int_uge? then set_binary_swapped(ins, CmpLEQ)
+                    when .int_sge? then set_binary_swapped(ins, CmpLEQ)
 
-                when .xor?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-                    @locals[ins] = Isekai.dfg_make_binary(Xor, load_expr(left), load_expr(right))
+                    else raise "NYI: ICmp predicate (signed comparison?)"
+                    end
 
                 when .select?
-                    pred = LibLLVM_C.get_operand(ins, 0)
-                    valtrue = LibLLVM_C.get_operand(ins, 1)
-                    valfalse = LibLLVM_C.get_operand(ins, 2)
-                    @locals[ins] = Isekai.dfg_make_conditional(
-                        load_expr(pred),
-                        load_expr(valtrue),
-                        load_expr(valfalse))
+                    pred = load_expr(LibLLVM_C.get_operand(ins, 0))
+                    val_true = load_expr(LibLLVM_C.get_operand(ins, 1))
+                    val_false = load_expr(LibLLVM_C.get_operand(ins, 2))
+                    @locals[ins] = Isekai.dfg_make_conditional(pred, val_true, val_false)
 
                 when .call?
                     raise "Unsupported function call (not _unroll_hint())" unless
@@ -462,21 +465,8 @@ module Isekai
 
                 when .z_ext?
                     # TODO
-                    target = LibLLVM_C.get_operand(ins, 0)
-                    @locals[ins] = load_expr(target)
-
-                when .i_cmp?
-                    left = LibLLVM_C.get_operand(ins, 0)
-                    right = LibLLVM_C.get_operand(ins, 1)
-
-                    case LibLLVM_C.get_i_cmp_predicate(ins)
-                    when .int_eq?
-                        @locals[ins] = Isekai.dfg_make_binary(CmpEQ, load_expr(left), load_expr(right))
-                    when .int_ne?
-                        @locals[ins] = Isekai.dfg_make_binary(CmpNEQ, load_expr(left), load_expr(right))
-                    else
-                        raise "NYI: ICmp predicate"
-                    end
+                    target = load_expr(LibLLVM_C.get_operand(ins, 0))
+                    @locals[ins] = target
 
                 when .br?
                     successors = collect_successors(ins)

@@ -491,7 +491,7 @@ class CmpLT < BinaryOp
     end
 
     def self.eval_with (left, right)
-        left < right
+        (left < right) ? 1 : 0
     end
 
     def_simplify_left
