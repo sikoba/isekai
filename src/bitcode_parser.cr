@@ -245,17 +245,17 @@ module Isekai
             nelems = LibLLVM_C.count_struct_element_types(s_ty).to_i32
 
             case s_name
-            when "struct.Input"
+            when .ends_with? ".Input"
                 raise BadOutsourceParamPosition.new(s_name) unless accept.includes? :input
                 st = Storage.new("Input", nelems)
                 @input_storage = st
 
-            when "struct.NzikInput" # sic
+            when .ends_with? ".NzikInput" # sic
                 raise BadOutsourceParamPosition.new(s_name) unless accept.includes? :nizk_input
                 st = Storage.new("NzikInput", nelems)
                 @nizk_input_storage = st
 
-            when "struct.Output"
+            when .ends_with? ".Output"
                 raise BadOutsourceParamPosition.new(s_name) unless accept.includes? :output
                 st = Storage.new("Output", nelems)
                 @output_storage = st
