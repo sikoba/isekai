@@ -46,7 +46,7 @@ private class ControlFlowGraph
 
     @blocks = [] of LibLLVM::BasicBlock
     @block2idx = {} of LibLLVM::BasicBlock => Int32
-    @sink : Int32 = -1
+    @final_idx : Int32 = -1
 
     private def discover (bb : LibLLVM::BasicBlock)
         return if @block2idx[bb]?
@@ -61,22 +61,22 @@ private class ControlFlowGraph
             discover(succ)
         end
         unless has_succ
-            raise "Multiple sinks" unless @sink == -1
-            @sink = idx
+            raise "Multiple final blocks" unless @final_idx == -1
+            @final_idx = idx
         end
     end
 
     def initialize (entry : LibLLVM::BasicBlock)
         discover(entry)
-        raise "No sink" if @sink == -1
+        raise "No final block" if @final_idx == -1
     end
 
     def nvertices
         return @blocks.size
     end
 
-    def sink_idx
-        return @sink
+    def final_block_idx
+        return @final_idx
     end
 
     def edges_from (v : Int32)
@@ -159,7 +159,7 @@ module Isekai
         private def init_graphs (entry : LibLLVM::BasicBlock)
             @cfg = cfg = ControlFlowGraph.new(entry)
             inv = GraphUtils.invert_graph(cfg)
-            @bfs_tree = GraphUtils.build_bfs_tree(inv, cfg.sink_idx)
+            @bfs_tree = GraphUtils.build_bfs_tree(inv, cfg.final_block_idx)
         end
 
         private def with_chain_add_condition (
