@@ -13,7 +13,7 @@ module GraphUtils
         end
 
         def edges_from (v : Int32)
-            @edges[v]
+            return @edges[v]
         end
     end
 
@@ -45,6 +45,7 @@ module GraphUtils
         def set_parent! (child : Int32, parent : Int32)
             @parents[child] = parent
             @dist[child] = @dist[parent] + 1
+            self
         end
 
         def nvertices

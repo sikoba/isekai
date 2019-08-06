@@ -2,6 +2,7 @@ require "./dfg"
 require "./frontend/symbol_table_key"
 require "./frontend/storage"
 require "./graph_utils"
+require "./containers"
 require "llvm-crystal/lib_llvm"
 require "llvm-crystal/lib_llvm_c"
 
@@ -16,7 +17,6 @@ private def get_case_value(ins, i)
 end
 
 private class ControlFlowGraph
-
     @blocks = [] of LibLLVM::BasicBlock
     @block2idx = {} of LibLLVM::BasicBlock => Int32
     @final_idx : Int32 = -1
@@ -68,45 +68,25 @@ end
 module Isekai
 
     private class Preprocessor
-        private class Multiset(T)
-            def initialize ()
-                @hash = Hash(T, Int32).new(default_value: 0)
-            end
-
-            def includes? (x)
-                @hash.has_key? x
-            end
-
-            def add (x)
-                @hash[x] += 1
-                self
-            end
-
-            def delete (x)
-                if (@hash[x] -= 1) == 0
-                    @hash.delete x
-                end
-                self
-            end
-        end
-
         private class InvalidGraph < Exception
         end
 
-        @cur_sinks = Multiset(LibLLVM::BasicBlock).new
-        @memorized = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
+        @cur_sinks = Containers::Multiset(LibLLVM::BasicBlock).new
         @cfg : ControlFlowGraph
         @bfs_tree : GraphUtils::BfsTree
+        # junction => {sink, is_loop}
+        @data = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
 
-        private def calc_meeting_point (bb_a, bb_b, junction)
-            a = @cfg.block_to_idx(bb_a)
-            b = @cfg.block_to_idx(bb_b)
-            j = @cfg.block_to_idx(junction)
-            lca, j_on_path = GraphUtils.tree_lca(@bfs_tree, a, b, j)
-            return {@cfg.idx_to_block(lca), j_on_path}
+        private def calc_meeting_point (a, b, junction)
+            lca, is_loop = GraphUtils.tree_lca(
+                @bfs_tree,
+                @cfg.block_to_idx(a),
+                @cfg.block_to_idx(b),
+                @cfg.block_to_idx(junction))
+            return {@cfg.idx_to_block(lca), is_loop}
         end
 
-        private def inspect_until (bb, terminator : LibLLVM::BasicBlock?)
+        private def inspect_until (bb : LibLLVM::BasicBlock, terminator : LibLLVM::BasicBlock?)
             while bb != terminator
                 raise InvalidGraph.new unless bb
                 bb = inspect(bb)
@@ -121,8 +101,7 @@ module Isekai
 
             case LibLLVM_C.get_instruction_opcode(ins)
             when .br?
-                if LibLLVM_C.is_conditional(ins) != 0
-                    # This is a conditional branch...
+                if ins.conditional?
                     if_true, if_false = successors
 
                     sink, is_loop = calc_meeting_point(if_true, if_false, junction: bb)
@@ -154,10 +133,9 @@ module Isekai
                         end
                     end
 
-                    @memorized[bb] = {sink, is_loop}
+                    @data[bb] = {sink, is_loop}
                     return sink
                 else
-                    # This is an unconditional branch.
                     return successors[0]
                 end
 
@@ -174,11 +152,14 @@ module Isekai
                 end
                 inspect_until(successors[0], terminator: sink)
 
-                @memorized[bb] = {sink, false}
+                @data[bb] = {sink, false}
                 return sink
 
             when .ret?
                 return nil
+
+            else
+                raise "Unsupported terminator instruction: #{ins.to_s}"
             end
         end
 
@@ -189,8 +170,8 @@ module Isekai
             inspect_until(entry, terminator: nil)
         end
 
-        def sink_and_loop_flag (bb) : {LibLLVM::BasicBlock, Bool}
-            return @memorized[bb]
+        def data
+            return @data
         end
     end
 
@@ -220,18 +201,6 @@ module Isekai
             end
         end
 
-        private class BadOutsourceParam < Exception
-        end
-
-        private class BadOutsourceParamPosition < Exception
-        end
-
-        UNDEFINED_EXPR = Constant.new(0)
-
-        @inputs : Array(DFGExpr)?
-        @nizk_inputs : Array(DFGExpr)?
-        @outputs = [] of Tuple(StorageKey, DFGExpr)
-
         private struct World
             @hash = {} of LibLLVM_C::ValueRef => DFGExpr
 
@@ -260,7 +229,19 @@ module Isekai
             end
         end
 
-        @arguments = {} of LibLLVM_C::ValueRef => DFGExpr
+        private class BadOutsourceParam < Exception
+        end
+
+        private class BadOutsourceParamPosition < Exception
+        end
+
+        UNDEFINED_EXPR = Constant.new(0)
+
+        @inputs : Array(DFGExpr)?
+        @nizk_inputs : Array(DFGExpr)?
+        @outputs = [] of Tuple(StorageKey, DFGExpr)
+
+        @arguments = World.new
         @locals = World.new
         @allocas = [] of DFGExpr
 
@@ -268,7 +249,7 @@ module Isekai
         @nizk_input_storage : Storage?
         @output_storage : Storage?
 
-        @preproc : Preprocessor?
+        @preproc_data = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
 
         @chain = [] of Tuple(DFGExpr, Bool)
         @unroll_ctls = [] of UnrollCtl
@@ -278,11 +259,6 @@ module Isekai
 
         def initialize (input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
             @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
-        end
-
-        private def sink_and_loop_flag (bb)
-            raise "@preproc was not initialized" unless preproc = @preproc
-            return preproc.sink_and_loop_flag(bb)
         end
 
         private def with_chain_add_condition (
@@ -342,8 +318,8 @@ module Isekai
             end
         end
 
-        private def inspect_outsource_param (ptr, accept)
-            ty = LibLLVM_C.type_of(ptr)
+        private def inspect_outsource_param (value, accept)
+            ty = LibLLVM_C.type_of(value)
             raise BadOutsourceParam.new("is not a pointer") unless
                 LibLLVM_C.get_type_kind(ty).pointer_type_kind?
 
@@ -378,7 +354,7 @@ module Isekai
                 raise BadOutsourceParam.new("unexpected struct name: #{s_name}")
             end
 
-            @arguments[ptr] = GetPointer.new(Structure.new(st))
+            @arguments[value] = GetPointer.new(Structure.new(st))
         end
 
         private def load_expr (src) : DFGExpr
@@ -462,17 +438,11 @@ module Isekai
         private def produce_phi_copies (from : LibLLVM::BasicBlock, to : LibLLVM::BasicBlock)
             to.instructions.each do |ins|
                 break unless LibLLVM_C.get_instruction_opcode(ins).phi?
-
                 ins.incoming.each do |(block, value)|
                     next unless block == from
-                    @locals[ins] = with_chain_add_condition(get_phi_value(ins), load_expr(value))
+                    old_expr = get_phi_value(ins)
+                    @locals[ins] = with_chain_add_condition(old_expr, load_expr(value))
                 end
-
-                #(0...LibLLVM_C.count_incoming(ins)).each do |i|
-                #    next unless from.to_unsafe == LibLLVM_C.get_incoming_block(ins, i)
-                #    expr = load_expr(LibLLVM_C.get_incoming_value(ins, i))
-                #    @locals[ins] = with_chain_add_condition(get_phi_value(ins), expr)
-                #end
             end
         end
 
@@ -490,7 +460,7 @@ module Isekai
             @locals[ins] = Isekai.dfg_make_binary(klass, left, right)
         end
 
-        private def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
+        private def inspect_basic_block (bb) : LibLLVM::BasicBlock?
             bb.instructions.each do |ins|
 
                 case LibLLVM_C.get_instruction_opcode(ins)
@@ -577,10 +547,12 @@ module Isekai
                         LibLLVM_C.get_called_value(ins) == @unroll_hint_func
                     raise "_unroll_hint() must be called with 1 argument" unless
                         LibLLVM_C.get_num_arg_operands(ins) == 1
+
                     arg = load_expr(LibLLVM_C.get_operand(ins, 0))
-                    raise "_unroll_hint() argument is not constant" unless
-                        arg.is_a? Constant
+
+                    raise "_unroll_hint() argument is not constant" unless arg.is_a? Constant
                     raise "_unroll_hint() argument is out of bounds" if arg.@value < 0
+
                     @loop_sanity_limit = arg.@value
 
                 when .z_ext?
@@ -592,8 +564,7 @@ module Isekai
                     successors = ins.successors.to_a
                     successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
 
-                    if LibLLVM_C.is_conditional(ins) != 0
-                        # This is a conditional branch...
+                    if ins.conditional?
                         cond = load_expr(LibLLVM_C.get_condition(ins))
                         if_true, if_false = successors
 
@@ -601,7 +572,7 @@ module Isekai
                             static_branch = (cond.@value != 0) ? if_true : if_false
                         end
 
-                        sink, is_loop = sink_and_loop_flag(bb)
+                        sink, is_loop = @preproc_data[bb]
                         if is_loop
                             to_loop = (sink == if_true) ? if_false : if_true
 
@@ -643,7 +614,6 @@ module Isekai
                             return sink
                         end
                     else
-                        # This is an unconditional branch.
                         return successors[0]
                     end
 
@@ -661,7 +631,7 @@ module Isekai
                         return successors[0]
                     end
 
-                    sink, _ = sink_and_loop_flag(bb)
+                    sink, _ = @preproc_data[bb]
                     # inspect each case
                     (1...successors.size).each do |i|
                         value = get_case_value(ins, i)
@@ -683,30 +653,29 @@ module Isekai
                     return nil
 
                 else
-                    repr = LibLLVM.slurp_string(LibLLVM_C.print_value_to_string(ins))
-                    raise "Unsupported instruction: #{repr}"
+                    raise "Unsupported instruction: #{ins.to_s}"
                 end
             end
         end
 
         private def inspect_outsource_func (func)
-            sig = func.signature
+            ret_ty, params, is_var_arg = func.signature
 
             raise "outsource() return type is not void" unless
-                LibLLVM_C.get_type_kind(sig.@ret_ty).void_type_kind?
+                LibLLVM_C.get_type_kind(ret_ty).void_type_kind?
 
-            raise "outsource() is a var arg function" if sig.@is_var_arg
+            raise "outsource() is a var arg function" if is_var_arg
 
-            case sig.@params.size
+            case params.size
             when 2
-                inspect_outsource_param(sig.@params[0], accept: {:input, :nizk_input})
-                inspect_outsource_param(sig.@params[1], accept: {:output})
+                inspect_outsource_param(params[0], accept: {:input, :nizk_input})
+                inspect_outsource_param(params[1], accept: {:output})
             when 3
-                inspect_outsource_param(sig.@params[0], accept: {:input})
-                inspect_outsource_param(sig.@params[1], accept: {:nizk_input})
-                inspect_outsource_param(sig.@params[2], accept: {:output})
+                inspect_outsource_param(params[0], accept: {:input})
+                inspect_outsource_param(params[1], accept: {:nizk_input})
+                inspect_outsource_param(params[2], accept: {:output})
             else
-                raise "outsource() takes #{sig.@params.size} parameter(s), expected 2 or 3"
+                raise "outsource() takes #{params.size} parameter(s), expected 2 or 3"
             end
 
             @inputs      = make_input_array @input_storage
@@ -717,22 +686,22 @@ module Isekai
                 {StorageKey.new(output_storage, i), UNDEFINED_EXPR}
             end
 
-            @preproc = Preprocessor.new(func.entry_basic_block)
+            @preproc_data = Preprocessor.new(func.entry_basic_block).data
             inspect_basic_block_until(func.entry_basic_block, terminator: nil)
         end
 
         private def inspect_unroll_hint_func (func)
-            sig = func.signature
+            ret_ty, params, is_var_arg = func.signature
 
             raise "_unroll_hint() return type is not void" unless
-                LibLLVM_C.get_type_kind(sig.@ret_ty).void_type_kind?
+                LibLLVM_C.get_type_kind(ret_ty).void_type_kind?
 
-            raise "_unroll_hint() is a var arg function" if sig.@is_var_arg
+            raise "_unroll_hint() is a var arg function" if is_var_arg
 
-            raise "_unroll_hint() takes #{sig.@params.size} parameters, expected 1" unless
-                sig.@params.size == 1
+            raise "_unroll_hint() takes #{params.size} parameters, expected 1" unless
+                params.size == 1
 
-            ty = LibLLVM_C.type_of(sig.@params[0])
+            ty = LibLLVM_C.type_of(params[0])
             raise "_unroll_hint() parameter has non-integer type" unless
                 LibLLVM_C.get_type_kind(ty).integer_type_kind?
 
@@ -747,8 +716,7 @@ module Isekai
             end
             @ir_module.functions.each do |func|
                 next if func.declaration?
-                raise "Unexpected function defined: #{func.name}" unless
-                    func.name == "outsource"
+                raise "Unexpected function defined: #{func.name}" unless func.name == "outsource"
                 inspect_outsource_func(func)
                 return {@inputs || [] of DFGExpr, @nizk_inputs, @outputs}
             end
