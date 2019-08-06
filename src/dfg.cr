@@ -352,7 +352,7 @@ end
 # Subtract operation
 class Subtract < BinaryMath
     def initialize (@left, @right)
-        super(:minus, OperatorSub.new, 0, @left, @right)
+        super(:minus, OperatorSub.new, nil, @left, @right)
     end
 
     def self.eval_with (left, right)
@@ -366,7 +366,7 @@ end
 # Divide operation
 class Divide < BinaryMath
     def initialize (@left, @right)
-        super(:divide, OperatorDiv.new, 1, @left, @right)
+        super(:divide, OperatorDiv.new, nil, @left, @right)
     end
 
     def self.eval_with (left, right)
@@ -382,7 +382,7 @@ end
 # Modulo operation
 class Modulo < BinaryMath
     def initialize (@left, @right)
-        super(:modulo, OperatorMod.new, 1, @left, @right)
+        super(:modulo, OperatorMod.new, nil, @left, @right)
     end
 
     def self.eval_with (left, right)
@@ -412,7 +412,7 @@ end
 # Left shift operation
 class LeftShift < BinaryMath
     def initialize (@left, @right)
-        super(:lshift, LeftShiftOp.new, 0, @left, @right)
+        super(:lshift, LeftShiftOp.new, nil, @left, @right)
     end
 
     def self.eval_with (left, right)
@@ -428,7 +428,7 @@ end
 # Right shift operation
 class RightShift < BinaryMath
     def initialize (@left, @right)
-        super(:rshift, RightShiftOp.new, 0, @left, @right)
+        super(:rshift, RightShiftOp.new, nil, @left, @right)
     end
 
     def self.eval_with (left, right)
