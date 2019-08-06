@@ -13,14 +13,14 @@ module GraphUtils
         end
 
         def edges_from (v : Int32)
-            @edges[v].each { |w| yield w }
+            @edges[v]
         end
     end
 
     def self.invert_graph (g)
         res = IncidenceList.new(g.nvertices)
         (0...g.nvertices).each do |i|
-            g.edges_from(i) do |j|
+            g.edges_from(i).each do |j|
                 res.add_edge!(j, i)
             end
         end
@@ -72,6 +72,7 @@ module GraphUtils
 
         def push (elem)
             @queue << elem
+            self
         end
 
         def shift
@@ -88,7 +89,7 @@ module GraphUtils
         queue.push(source)
         until queue.empty?
             v = queue.shift
-            g.edges_from(v) do |w|
+            g.edges_from(v).each do |w|
                 unless tree.distance_known?(w)
                     tree.set_parent!(child: w, parent: v)
                     queue.push(w)

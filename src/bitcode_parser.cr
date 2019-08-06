@@ -5,14 +5,6 @@ require "./graph_utils"
 require "llvm-crystal/lib_llvm"
 require "llvm-crystal/lib_llvm_c"
 
-# Assuming 'ins' is a terminator instruction, returns its successors as an array.
-private def collect_successors(ins)
-    n = LibLLVM_C.get_num_successors(ins)
-    return Array(LibLLVM::BasicBlock).new(n) do |i|
-        LibLLVM::BasicBlock.new(LibLLVM_C.get_successor(ins, i))
-    end
-end
-
 # Assuming 'ins' is a switch instruction, returns the value (as an integer) of the case with
 # number 'i'. 'i' is 1-based if we only consider 'case' statements without 'default', and 0-based if
 # we consider all the successors, of which the zeroth is the default (thus 'i == 0' is not allowed).
@@ -20,26 +12,7 @@ private def get_case_value(ins, i)
     val = LibLLVM_C.get_operand(ins, i * 2)
     raise "Case value is not an integer constant" unless
         LibLLVM_C.get_value_kind(val).constant_int_value_kind?
-    return LibLLVM_C.const_int_get_s_ext_value(val)
-end
-
-private def inspect_signature (func)
-    func_ty = LibLLVM_C.type_of(func)
-    if LibLLVM_C.get_type_kind(func_ty).pointer_type_kind?
-        func_ty = LibLLVM_C.get_element_type(func_ty)
-    end
-
-    raise "Functions with variable arguments are not supported" unless
-        LibLLVM_C.is_function_var_arg(func_ty) == 0
-
-    ret_ty = LibLLVM_C.get_return_type(func_ty)
-    nparams = LibLLVM_C.count_params(func)
-    params = Array(LibLLVM_C::ValueRef).build(nparams) do |buffer|
-        LibLLVM_C.get_params(func, buffer)
-        nparams
-    end
-
-    yield ret_ty, params
+    return LibLLVM_C.const_int_get_z_ext_value(val)
 end
 
 private class ControlFlowGraph
@@ -49,14 +22,14 @@ private class ControlFlowGraph
     @final_idx : Int32 = -1
 
     private def discover (bb : LibLLVM::BasicBlock)
-        return if @block2idx[bb]?
+        return if @block2idx.has_key? bb
 
         idx = @blocks.size
         @blocks << bb
         @block2idx[bb] = idx
 
         has_succ = false
-        bb.successors do |succ|
+        bb.terminator.successors.each do |succ|
             has_succ = true
             discover(succ)
         end
@@ -80,9 +53,7 @@ private class ControlFlowGraph
     end
 
     def edges_from (v : Int32)
-        @blocks[v].successors do |bb|
-            yield @block2idx[bb]
-        end
+        return @blocks[v].terminator.successors.map { |bb| @block2idx[bb] }
     end
 
     def block_to_idx (bb : LibLLVM::BasicBlock)
@@ -95,6 +66,133 @@ private class ControlFlowGraph
 end
 
 module Isekai
+
+    private class Preprocessor
+        private class Multiset(T)
+            def initialize ()
+                @hash = Hash(T, Int32).new(default_value: 0)
+            end
+
+            def includes? (x)
+                @hash.has_key? x
+            end
+
+            def add (x)
+                @hash[x] += 1
+                self
+            end
+
+            def delete (x)
+                if (@hash[x] -= 1) == 0
+                    @hash.delete x
+                end
+                self
+            end
+        end
+
+        private class InvalidGraph < Exception
+        end
+
+        @cur_sinks = Multiset(LibLLVM::BasicBlock).new
+        @memorized = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
+        @cfg : ControlFlowGraph
+        @bfs_tree : GraphUtils::BfsTree
+
+        private def calc_meeting_point (bb_a, bb_b, junction)
+            a = @cfg.block_to_idx(bb_a)
+            b = @cfg.block_to_idx(bb_b)
+            j = @cfg.block_to_idx(junction)
+            lca, j_on_path = GraphUtils.tree_lca(@bfs_tree, a, b, j)
+            return {@cfg.idx_to_block(lca), j_on_path}
+        end
+
+        private def inspect_until (bb, terminator : LibLLVM::BasicBlock?)
+            while bb != terminator
+                raise InvalidGraph.new unless bb
+                bb = inspect(bb)
+            end
+        end
+
+        private def inspect (bb)
+            raise InvalidGraph.new if @cur_sinks.includes? bb
+
+            ins = bb.terminator
+            successors = ins.successors.to_a
+
+            case LibLLVM_C.get_instruction_opcode(ins)
+            when .br?
+                if LibLLVM_C.is_conditional(ins) != 0
+                    # This is a conditional branch...
+                    if_true, if_false = successors
+
+                    sink, is_loop = calc_meeting_point(if_true, if_false, junction: bb)
+                    if is_loop
+                        case sink
+                        when if_true  then to_loop = if_false
+                        when if_false then to_loop = if_true
+                        else raise InvalidGraph.new
+                        end
+                        inspect_until(to_loop, terminator: bb)
+                    else
+                        while true
+                            @cur_sinks.add sink
+                            begin
+                                inspect_until(if_true, terminator: sink)
+                                inspect_until(if_false, terminator: sink)
+                            rescue InvalidGraph
+                                @cur_sinks.delete sink
+                                old_sink = sink
+                                old_sink.terminator.successors.each do |succ|
+                                    sink, is_loop = calc_meeting_point(sink, succ, junction: bb)
+                                    raise InvalidGraph.new if is_loop
+                                end
+                                raise InvalidGraph.new if sink == old_sink
+                            else
+                                @cur_sinks.delete sink
+                                break
+                            end
+                        end
+                    end
+
+                    @memorized[bb] = {sink, is_loop}
+                    return sink
+                else
+                    # This is an unconditional branch.
+                    return successors[0]
+                end
+
+            when .switch?
+                sink = successors[0]
+                (1...successors.size).each do |i|
+                    sink, is_loop = calc_meeting_point(sink, successors[i], junction: bb)
+                    raise InvalidGraph.new if is_loop
+                end
+
+                # emulate the order in which 'inspect_basic_block' visits the successors
+                (1...successors.size).each do |i|
+                    inspect_until(successors[i], terminator: sink)
+                end
+                inspect_until(successors[0], terminator: sink)
+
+                @memorized[bb] = {sink, false}
+                return sink
+
+            when .ret?
+                return nil
+            end
+        end
+
+        def initialize (entry : LibLLVM::BasicBlock)
+            @cfg = ControlFlowGraph.new(entry)
+            inv = GraphUtils.invert_graph(@cfg)
+            @bfs_tree = GraphUtils.build_bfs_tree(inv, @cfg.final_block_idx)
+            inspect_until(entry, terminator: nil)
+        end
+
+        def sink_and_loop_flag (bb) : {LibLLVM::BasicBlock, Bool}
+            return @memorized[bb]
+        end
+    end
 
     class BitcodeParser
 
@@ -134,20 +232,46 @@ module Isekai
         @nizk_inputs : Array(DFGExpr)?
         @outputs = [] of Tuple(StorageKey, DFGExpr)
 
+        private struct World
+            @hash = {} of LibLLVM_C::ValueRef => DFGExpr
+
+            def [] (k : LibLLVM_C::ValueRef)
+                @hash[k]
+            end
+
+            def [] (k : LibLLVM::Instruction, v)
+                @hash[k.to_unsafe]
+            end
+
+            def []= (k : LibLLVM_C::ValueRef, v)
+                @hash[k] = v
+            end
+
+            def []= (k : LibLLVM::Instruction, v)
+                @hash[k.to_unsafe] = v
+            end
+
+            def fetch_or (k : LibLLVM_C::ValueRef, default)
+                @hash.fetch(k, default)
+            end
+
+            def fetch_or (k : LibLLVM::Instruction, default)
+                @hash.fetch(k.to_unsafe, default)
+            end
+        end
+
         @arguments = {} of LibLLVM_C::ValueRef => DFGExpr
-        @locals = {} of LibLLVM_C::ValueRef => DFGExpr
+        @locals = World.new
         @allocas = [] of DFGExpr
 
         @input_storage : Storage?
         @nizk_input_storage : Storage?
         @output_storage : Storage?
 
-        @cfg : ControlFlowGraph?
-        @bfs_tree : GraphUtils::BfsTree?
+        @preproc : Preprocessor?
 
         @chain = [] of Tuple(DFGExpr, Bool)
         @unroll_ctls = [] of UnrollCtl
-
         @unroll_hint_func : LibLLVM_C::ValueRef? = nil
 
         @ir_module : LibLLVM::IrModule
@@ -156,10 +280,9 @@ module Isekai
             @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
         end
 
-        private def init_graphs (entry : LibLLVM::BasicBlock)
-            @cfg = cfg = ControlFlowGraph.new(entry)
-            inv = GraphUtils.invert_graph(cfg)
-            @bfs_tree = GraphUtils.build_bfs_tree(inv, cfg.final_block_idx)
+        private def sink_and_loop_flag (bb)
+            raise "@preproc was not initialized" unless preproc = @preproc
+            return preproc.sink_and_loop_flag(bb)
         end
 
         private def with_chain_add_condition (
@@ -219,15 +342,6 @@ module Isekai
             end
         end
 
-        private def get_meeting_point (a, b, junction)
-            raise "@cfg not initialized" unless cfg = @cfg
-            raise "@bfs_tree not initialized" unless bfs_tree = @bfs_tree
-            lca, j_on_path = GraphUtils.tree_lca(
-                bfs_tree,
-                cfg.block_to_idx(a), cfg.block_to_idx(b), cfg.block_to_idx(junction))
-            return {cfg.idx_to_block(lca), j_on_path}
-        end
-
         private def inspect_outsource_param (ptr, accept)
             ty = LibLLVM_C.type_of(ptr)
             raise BadOutsourceParam.new("is not a pointer") unless
@@ -276,7 +390,7 @@ module Isekai
                 # this is a reference to a local value created by 'src' instruction
                 expr = @locals[src]
             when .constant_int_value_kind?
-                expr = Constant.new(LibLLVM_C.const_int_get_s_ext_value(src).to_i32)
+                expr = Constant.new(LibLLVM_C.const_int_get_z_ext_value(src).to_i32)
             else
                 raise "NYI: unsupported value kind: #{kind}"
             end
@@ -342,17 +456,23 @@ module Isekai
 
         @[AlwaysInline]
         private def get_phi_value (ins) : DFGExpr
-            return @locals[ins]? || UNDEFINED_EXPR
+            return @locals.fetch_or(ins, UNDEFINED_EXPR)
         end
 
         private def produce_phi_copies (from : LibLLVM::BasicBlock, to : LibLLVM::BasicBlock)
-            to.instructions do |ins|
+            to.instructions.each do |ins|
                 break unless LibLLVM_C.get_instruction_opcode(ins).phi?
-                (0...LibLLVM_C.count_incoming(ins)).each do |i|
-                    next unless from.to_unsafe == LibLLVM_C.get_incoming_block(ins, i)
-                    expr = load_expr(LibLLVM_C.get_incoming_value(ins, i))
-                    @locals[ins] = with_chain_add_condition(get_phi_value(ins), expr)
+
+                ins.incoming.each do |(block, value)|
+                    next unless block == from
+                    @locals[ins] = with_chain_add_condition(get_phi_value(ins), load_expr(value))
                 end
+
+                #(0...LibLLVM_C.count_incoming(ins)).each do |i|
+                #    next unless from.to_unsafe == LibLLVM_C.get_incoming_block(ins, i)
+                #    expr = load_expr(LibLLVM_C.get_incoming_value(ins, i))
+                #    @locals[ins] = with_chain_add_condition(get_phi_value(ins), expr)
+                #end
             end
         end
 
@@ -371,7 +491,7 @@ module Isekai
         end
 
         private def inspect_basic_block (bb : LibLLVM::BasicBlock) : LibLLVM::BasicBlock?
-            bb.instructions do |ins|
+            bb.instructions.each do |ins|
 
                 case LibLLVM_C.get_instruction_opcode(ins)
 
@@ -469,12 +589,11 @@ module Isekai
                     @locals[ins] = target
 
                 when .br?
-                    successors = collect_successors(ins)
+                    successors = ins.successors.to_a
                     successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
 
                     if LibLLVM_C.is_conditional(ins) != 0
                         # This is a conditional branch...
-                        raise "Unsupported br form" unless successors.size == 2
                         cond = load_expr(LibLLVM_C.get_condition(ins))
                         if_true, if_false = successors
 
@@ -482,16 +601,9 @@ module Isekai
                             static_branch = (cond.@value != 0) ? if_true : if_false
                         end
 
-                        sink, is_loop = get_meeting_point(if_true, if_false, junction: bb)
+                        sink, is_loop = sink_and_loop_flag(bb)
                         if is_loop
-                            case sink
-                            when if_true
-                                to_loop = if_false
-                            when if_false
-                                to_loop = if_true
-                            else
-                                raise "Unsupported control flow pattern"
-                            end
+                            to_loop = (sink == if_true) ? if_false : if_true
 
                             if !@unroll_ctls.empty? && @unroll_ctls[-1].@block == bb
                                 ctl = @unroll_ctls[-1]
@@ -532,19 +644,12 @@ module Isekai
                         end
                     else
                         # This is an unconditional branch.
-                        raise "Unsupported br form" unless successors.size == 1
                         return successors[0]
                     end
 
                 when .switch?
-                    successors = collect_successors(ins)
+                    successors = ins.successors.to_a
                     successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
-
-                    sink = successors[0]
-                    (1...successors.size).each do |i|
-                        sink, is_loop = get_meeting_point(sink, successors[i], junction: bb)
-                        raise "Unsupported control flow pattern" if is_loop
-                    end
 
                     arg = load_expr(LibLLVM_C.get_operand(ins, 0))
                     if arg.is_a? Constant
@@ -556,6 +661,7 @@ module Isekai
                         return successors[0]
                     end
 
+                    sink, _ = sink_and_loop_flag(bb)
                     # inspect each case
                     (1...successors.size).each do |i|
                         value = get_case_value(ins, i)
@@ -566,10 +672,8 @@ module Isekai
                         @chain.pop
                         @chain << {cond, false}
                     end
-
                     # inspect the default case
                     inspect_basic_block_until(successors[0], terminator: sink)
-
                     @chain.pop(successors.size - 1)
 
                     return sink
@@ -586,22 +690,23 @@ module Isekai
         end
 
         private def inspect_outsource_func (func)
-            inspect_signature(func) do |ret_ty, params|
+            sig = func.signature
 
-                raise "outsource() return type is not void" unless
-                    LibLLVM_C.get_type_kind(ret_ty).void_type_kind?
+            raise "outsource() return type is not void" unless
+                LibLLVM_C.get_type_kind(sig.@ret_ty).void_type_kind?
 
-                case params.size
-                when 2
-                    inspect_outsource_param(params[0], accept: {:input, :nizk_input})
-                    inspect_outsource_param(params[1], accept: {:output})
-                when 3
-                    inspect_outsource_param(params[0], accept: {:input})
-                    inspect_outsource_param(params[1], accept: {:nizk_input})
-                    inspect_outsource_param(params[2], accept: {:output})
-                else
-                    raise "outsource() takes #{params.size} parameter(s), expected 2 or 3"
-                end
+            raise "outsource() is a var arg function" if sig.@is_var_arg
+
+            case sig.@params.size
+            when 2
+                inspect_outsource_param(sig.@params[0], accept: {:input, :nizk_input})
+                inspect_outsource_param(sig.@params[1], accept: {:output})
+            when 3
+                inspect_outsource_param(sig.@params[0], accept: {:input})
+                inspect_outsource_param(sig.@params[1], accept: {:nizk_input})
+                inspect_outsource_param(sig.@params[2], accept: {:output})
+            else
+                raise "outsource() takes #{sig.@params.size} parameter(s), expected 2 or 3"
             end
 
             @inputs      = make_input_array @input_storage
@@ -612,34 +717,35 @@ module Isekai
                 {StorageKey.new(output_storage, i), UNDEFINED_EXPR}
             end
 
-            init_graphs(func.entry_basic_block)
+            @preproc = Preprocessor.new(func.entry_basic_block)
             inspect_basic_block_until(func.entry_basic_block, terminator: nil)
         end
 
         private def inspect_unroll_hint_func (func)
-            inspect_signature(func) do |ret_ty, params|
+            sig = func.signature
 
-                raise "_unroll_hint() return type is not void" unless
-                    LibLLVM_C.get_type_kind(ret_ty).void_type_kind?
+            raise "_unroll_hint() return type is not void" unless
+                LibLLVM_C.get_type_kind(sig.@ret_ty).void_type_kind?
 
-                raise "_unroll_hint() takes #{params.size} parameters, expected 1" unless
-                    params.size == 1
+            raise "_unroll_hint() is a var arg function" if sig.@is_var_arg
 
-                ty = LibLLVM_C.type_of(params[0])
-                raise "_unroll_hint() parameter has non-integer type" unless
-                    LibLLVM_C.get_type_kind(ty).integer_type_kind?
-            end
+            raise "_unroll_hint() takes #{sig.@params.size} parameters, expected 1" unless
+                sig.@params.size == 1
+
+            ty = LibLLVM_C.type_of(sig.@params[0])
+            raise "_unroll_hint() parameter has non-integer type" unless
+                LibLLVM_C.get_type_kind(ty).integer_type_kind?
 
             @unroll_hint_func = func.to_unsafe
         end
 
         def parse ()
-            @ir_module.functions do |func|
+            @ir_module.functions.each do |func|
                 if func.declaration? && func.name == "_unroll_hint"
                     inspect_unroll_hint_func(func)
                 end
             end
-            @ir_module.functions do |func|
+            @ir_module.functions.each do |func|
                 next if func.declaration?
                 raise "Unexpected function defined: #{func.name}" unless
                     func.name == "outsource"
