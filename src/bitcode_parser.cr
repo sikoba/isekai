@@ -77,7 +77,7 @@ module Isekai
         # junction => {sink, is_loop}
         @data = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
 
-        private def calc_meeting_point (a, b, junction)
+        private def meeting_point (a, b, junction)
             lca, is_loop = GraphUtils.tree_lca(
                 @bfs_tree,
                 @cfg.block_to_idx(a),
@@ -104,7 +104,7 @@ module Isekai
                 if ins.conditional?
                     if_true, if_false = successors
 
-                    sink, is_loop = calc_meeting_point(if_true, if_false, junction: bb)
+                    sink, is_loop = meeting_point(if_true, if_false, junction: bb)
                     if is_loop
                         case sink
                         when if_true  then to_loop = if_false
@@ -122,7 +122,7 @@ module Isekai
                                 @cur_sinks.delete sink
                                 old_sink = sink
                                 old_sink.terminator.successors.each do |succ|
-                                    sink, is_loop = calc_meeting_point(sink, succ, junction: bb)
+                                    sink, is_loop = meeting_point(sink, succ, junction: bb)
                                     raise InvalidGraph.new if is_loop
                                 end
                                 raise InvalidGraph.new if sink == old_sink
@@ -142,7 +142,7 @@ module Isekai
             when .switch?
                 sink = successors[0]
                 (1...successors.size).each do |i|
-                    sink, is_loop = calc_meeting_point(sink, successors[i], junction: bb)
+                    sink, is_loop = meeting_point(sink, successors[i], junction: bb)
                     raise InvalidGraph.new if is_loop
                 end
 
@@ -159,7 +159,7 @@ module Isekai
                 return nil
 
             else
-                raise "Unsupported terminator instruction: #{ins.to_s}"
+                raise "Unsupported terminator instruction: #{ins}"
             end
         end
 
@@ -187,7 +187,7 @@ module Isekai
             end
 
             def n_dynamic_iters
-                @n_dynamic_iters
+                return @n_dynamic_iters
             end
 
             def done?
@@ -249,6 +249,7 @@ module Isekai
         @nizk_input_storage : Storage?
         @output_storage : Storage?
 
+        # junction => {sink, is_loop}
         @preproc_data = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
 
         @chain = [] of Tuple(DFGExpr, Bool)
@@ -383,26 +384,22 @@ module Isekai
             return expr
         end
 
-        private def store (dst, expr : DFGExpr)
-            dst_kind = LibLLVM_C.get_value_kind(dst)
-            raise "NYI: unsupported dst kind: #{dst_kind}" unless dst_kind.instruction_value_kind?
-
-            dst_expr = @locals[dst]
-            case dst_expr
+        private def store (dst : DFGExpr, src : DFGExpr)
+            case dst
 
             when Alloca
-                old_expr = @allocas[dst_expr.@idx]
-                @allocas[dst_expr.@idx] = with_chain_add_condition(old_expr, expr)
+                old_expr = @allocas[dst.@idx]
+                @allocas[dst.@idx] = with_chain_add_condition(old_expr, src)
 
             when GetPointer
-                target = dst_expr.@target
+                target = dst.@target
                 raise "NYI: cannot store at pointer to #{target}" unless target.is_a?(Field)
                 raise "NYI: store in non-output struct" unless target.@key.@storage == @output_storage
                 old_expr = @outputs[target.@key.@idx][1]
-                @outputs[target.@key.@idx] = {target.@key, with_chain_add_condition(old_expr, expr)}
+                @outputs[target.@key.@idx] = {target.@key, with_chain_add_condition(old_expr, src)}
 
             else
-                raise "NYI: cannot store at #{dst_expr}"
+                raise "NYI: cannot store at #{dst}"
             end
         end
 
@@ -471,9 +468,9 @@ module Isekai
                     @allocas << UNDEFINED_EXPR
 
                 when .store?
-                    src = LibLLVM_C.get_operand(ins, 0)
-                    dst = LibLLVM_C.get_operand(ins, 1)
-                    store(dst: dst, expr: load_expr(src))
+                    src = load_expr(LibLLVM_C.get_operand(ins, 0))
+                    dst = load_expr(LibLLVM_C.get_operand(ins, 1))
+                    store(dst: dst, src: src)
 
                 when .load?
                     src = LibLLVM_C.get_operand(ins, 0)
@@ -653,7 +650,7 @@ module Isekai
                     return nil
 
                 else
-                    raise "Unsupported instruction: #{ins.to_s}"
+                    raise "Unsupported instruction: #{ins}"
                 end
             end
         end
