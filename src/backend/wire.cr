@@ -1,5 +1,4 @@
-
-module Isekai
+module Isekai::Backend
     # A single wire. The wire is connecting two
     # gates and its state is represented by the index.
     # For example, if we have two gates, and one has the output

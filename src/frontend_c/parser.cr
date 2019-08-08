@@ -1,44 +1,16 @@
 require "clang"
-require "logger"
 require "./clangutils"
-require "./dfg"
-require "./frontend/symbol_table"
-require "./collapser"
+require "../common/common"
+require "../common/dfg"
+require "../common/symbol_table"
+require "../common/collapser"
+require "../common/bitwidth"
 
-module Isekai
-    VERSION = "0.1.0"
-
-
-        # Raised when trying to statically evaluate nonconstant
-        # expression (for example, when lowering for loop)
-        class NonconstantExpression < Exception
-        end
-        
-    # Simple wrapper around the logger's instance.
-    # Takes care of the Logger's setup and holds Logger instance
-    class Log
-      @@log = Logger.new(STDOUT)
-
-      # Setup the logger
-      # Parameters:
-      #     verbose = be verbose at the output
-      def self.setup (verbose = false)
-          if verbose
-              @@log.level = Logger::DEBUG
-          else
-              @@log.level = Logger::WARN
-          end
-      end
-
-      # Returns:
-      #     the logger instance
-      def self.log
-          @@log
-      end
-    end
-
+module Isekai::CFrontend
     # Class that parses and transforms C code into internal state
-    class CParser
+    class Parser
+        private UNSPECIFIED_BITWIDTH = BitWidth.new(BitWidth::UNSPECIFIED)
+
         @parsed : State?
         @ast_cursor : Clang::Cursor?
 
@@ -207,7 +179,7 @@ module Isekai
                     # For every element in the input array, declare the Input/NIZKInput nodes
                     (0..(input_storage_ref).@type.sizeof-1).each do |idx|
                         sk = StorageKey.new(input_storage_ref.@storage, idx)
-                        input = dfg(Field, sk)
+                        input = dfg(Field, sk, UNSPECIFIED_BITWIDTH)
                         input_list << input
                         symtab.assign(sk, input)
                     end
@@ -495,7 +467,7 @@ module Isekai
                         end
                 else
                     (0..store_type.sizeof-1).each do |i|
-                        symtab.declare(StorageKey.new(storage, i), dfg(Constant, 0))
+                        symtab.declare(StorageKey.new(storage, i), dfg(Constant, 0_i64, UNSPECIFIED_BITWIDTH))
                     end
                 end
 
@@ -633,7 +605,7 @@ module Isekai
             # Resolves the expression and gets its value, if the
             # expression is a literal
             def decode_expression (literal : Int32, symtab) : State
-                return State.new(dfg(Constant, literal), symtab)
+                return State.new(dfg(Constant, literal.to_i64, UNSPECIFIED_BITWIDTH), symtab)
             end
 
             # Takes an expression and a symbol table, and recursively transforms
@@ -731,7 +703,7 @@ module Isekai
                 when .integer_literal?
                     value = ClangUtils.getCursorValue(expression)
                     raise "Integer literal can't be resolved #{expression}" unless !value.is_a? Nil
-                    return State.new(dfg(Constant, value), symtab)
+                    return State.new(dfg(Constant, value.to_i64, UNSPECIFIED_BITWIDTH), symtab)
                     # This is a just a wrapper around real expression,
                     # in order to resolve it, we just unwrap it and do it recursively
                 when .first_expr?
@@ -1155,7 +1127,7 @@ module Isekai
                 return working_symtab
             end
 
-            def evaluate (expr : DFGExpr) : Int32
+            def evaluate (expr : DFGExpr)
                 resolved_const = @expr_evaluator.collapse_tree(expr)
                 raise NonconstantExpression.new("Can't resolve #{expr} to Constant") unless resolved_const.is_a? Constant
                 return (resolved_const.as Constant).@value

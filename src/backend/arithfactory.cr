@@ -1,9 +1,9 @@
 require "./reqfactory"
 require "./bus"
 require "./arithbusreq"
-require "../dfg"
+require "../common/dfg"
 
-module Isekai
+module Isekai::Backend
 
 # Check ReqFactory's documentation.
 class ArithFactory < RequestFactory

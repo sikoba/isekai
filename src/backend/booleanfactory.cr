@@ -1,9 +1,9 @@
 require "./reqfactory"
 require "./bus"
 require "./booleanbusreq"
-require "../dfg"
+require "../common/dfg"
 
-module Isekai
+module Isekai::Backend
 
 # Check ReqFactory's documentation.
 class BooleanFactory < RequestFactory

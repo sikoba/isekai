@@ -1,5 +1,3 @@
-require "./symbol_table_value.cr"
-
 module Isekai
 
 # A common ansector class for all types in the program.
@@ -10,7 +8,10 @@ module Isekai
 # containing the fixed number of different types, accessible
 # by fields. The last type is a pointer type which is a type
 # that references another type.
-class Type < SymbolTableValue
+abstract class Type
+    def sizeof
+        return -1
+    end
 end
 
 # The signed integer type.

@@ -1,6 +1,6 @@
 require "big"
 
-module Isekai
+module Isekai::Backend
     def self.ceillg2(val)
         result = -1
         (0..254-1).each do |i|

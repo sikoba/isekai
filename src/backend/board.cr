@@ -1,23 +1,70 @@
 require "./bus.cr"
 require "./wire.cr"
-require "../bitwidth"
+require "big"
 
-module Isekai
+module Isekai::Backend
+    # Board bit width class - holds the bit width of the board,
+    # and provides convenience methods to calculate sign bit's value,
+    # -1 constant, shifts and truncate.
+    class BoardBitWidth
+        @overflow_limit : Int32?
+
+        def initialize(width : Int32, ignore_overflow)
+            @width = width
+            if (!ignore_overflow)
+                @overflow_limit = 250
+            end
+        end
+
+        def ignoring_overflow()
+            return @overflow_limit.is_a? Nil
+        end
+
+        def get_width()
+            return @width
+        end
+
+        def get_sign_bit()
+            return @width - 1
+        end
+
+        def get_neg1()
+           # return (1 << @width) - 1
+           return ((BigInt.new(1) << @width) -1) 
+        end
+
+        def leftshift(a, b)
+            return (a<<b) & get_neg1()
+        end
+
+        def rightshift(a, b)
+            return ((a & get_neg1()) >> b)
+        end
+
+        def truncate(bits)
+            if (@overflow_limit && bits >= get_width())
+                return get_width()
+            else
+                return bits
+            end
+        end
+    end
+
     # Board class. Defines the bit width, zero bus and constant-1 bus.
     class Board
         @zero_bus : Bus?
         @order_alloc = 0
-        @bit_width : BitWidth?
+        @bit_width : BoardBitWidth?
 
         def initialize (bit_width : Int32)
             @max_width = 252
             @one_bus = OneBus.new(self)
-            @bit_width = BitWidth.new(bit_width, false)
+            @bit_width = BoardBitWidth.new(bit_width, false)
             @order_alloc = 0
         end
 
         # Gets the bit width of the system
-        def bit_width : BitWidth
+        def bit_width
             if wid = @bit_width
                 return wid
             else

@@ -1,9 +1,12 @@
-require "./frontend/types.cr"
-require "./frontend/storage.cr"
+require "./types.cr"
+require "./storage.cr"
+require "./symbol_table_key.cr"
 require "./dfgoperator"
+require "./bitwidth"
+require "./common"
 
 private macro def_simplify_left(**kwargs)
-    def self.simplify_left(const, right)
+    def self.simplify_left (const, right)
         {% for key, value in kwargs %}
             {% if key == :identity %}
                 if const.@value == {{ value }}
@@ -11,7 +14,7 @@ private macro def_simplify_left(**kwargs)
                 end
             {% elsif key == :const %}
                 if const.@value == {{ value[:match] }}
-                    return Constant.new( {{ value[:result] }} )
+                    return Constant.new {{ value[:result] }}, bitwidth: right.@bitwidth
                 end
             {% else %}
                 {% raise "Invalid keyword argument" %}
@@ -22,7 +25,7 @@ private macro def_simplify_left(**kwargs)
 end
 
 private macro def_simplify_right(**kwargs)
-    def self.simplify_right(left, const)
+    def self.simplify_right (left, const)
         {% for key, value in kwargs %}
             {% if key == :identity %}
                 if const.@value == {{ value }}
@@ -30,7 +33,7 @@ private macro def_simplify_right(**kwargs)
                 end
             {% elsif key == :const %}
                 if const.@value == {{ value[:match] }}
-                    return Constant.new( {{ value[:result] }} )
+                    return Constant.new {{ value[:result] }}, bitwidth: left.@bitwidth
                 end
             {% else %}
                 {% raise "Invalid keyword argument" %}
@@ -44,10 +47,13 @@ module Isekai
 
 # Internal expression node. All internal state expressions
 # are instances of this class
-class DFGExpr < SymbolTableValue
+class DFGExpr
     #add_object_helpers
 
-    def collapse_dependencies()
+    def initialize (@bitwidth : BitWidth)
+    end
+
+    def collapse_dependencies ()
         raise "Undefined dependencies collapsing on #{self.class}"
     end
 
@@ -63,11 +69,19 @@ end
 # The void type - result of an expression that yields no value
 # (it only performs side effects).
 class Void < DFGExpr
+    def initialize ()
+        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
+    end
+
     #add_object_helpers
 end
 
 # Undefined operation. Raised if the operation is not supported.
 class Undefined < DFGExpr
+    def initialize ()
+        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
+    end
+
     #add_object_helpers
     def evaluate (collapser)
         raise "Can't evaluate undefined expression."
@@ -83,17 +97,22 @@ class Undefined < DFGExpr
 end
 
 class Structure < DFGExpr
-    def initialize(@storage : Storage)
+    def initialize (@storage : Storage, bitwidth)
+        super(bitwidth)
     end
 end
 
 # Abstract operation
 class Op < DFGExpr
+    def initialize (bitwidth)
+        super(bitwidth)
+    end
     #add_object_helpers
 end
 
 class Field < Op
-    def initialize(@key : StorageKey)
+    def initialize (@key : StorageKey, bitwidth)
+        super(bitwidth)
     end
 
     def evaluate (collapser)
@@ -113,23 +132,34 @@ class Field < Op
 end
 
 class Alloca < DFGExpr
-    def initialize(@idx : Int32)
+    def initialize (@idx : Int32)
+        super(bitwidth: BitWidth.new(BitWidth::POINTER))
     end
 end
 
 class Deref < DFGExpr
-    def initialize(@target : DFGExpr)
+    def initialize (@target : DFGExpr, bitwidth)
+        super(bitwidth)
     end
 end
 
 class GetPointer < DFGExpr
-    def initialize(@target : DFGExpr)
+    def initialize (@target : DFGExpr)
+        super(bitwidth: BitWidth.new(BitWidth::POINTER))
+    end
+end
+
+class DynamicPointer < DFGExpr
+    def initialize ()
+        super(bitwidth: BitWidth.new(BitWidth::POINTER))
     end
 end
 
 # Operation on the array.
 class ArrayOp < Op
-    #add_object_helpers
+    def initialize ()
+        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
+    end
 end
 
 # Reference to the part of an existing node
@@ -142,6 +172,7 @@ class StorageRef < ArrayOp
     #     storage = storage instance
     #     idx = index in the storage
     def initialize (@type : Type, @storage : Storage, @idx : Int32)
+        super()
     end
 
     # Returns:
@@ -189,7 +220,8 @@ end
 class Constant < DFGExpr
     #add_object_helpers
 
-    def initialize (@value : Int32)
+    def initialize (@value : Int64, bitwidth)
+        super(bitwidth)
     end
 
     def evaluate (collapser)
@@ -212,6 +244,7 @@ end
 class Conditional < Op
     #add_object_helpers
     def initialize (@cond : DFGExpr, @valtrue : DFGExpr, @valfalse : DFGExpr)
+        super(valtrue.@bitwidth & valfalse.@bitwidth)
     end
 
     def evaluate (collapser)
@@ -230,7 +263,9 @@ class Conditional < Op
 
     def collapse_constants (collapser)
         begin
-            return Constant.new(collapser.evaluate_as_constant(self).@value)
+            return Constant.new(
+                collapser.evaluate_as_constant(self).@value,
+                bitwidth: @bitwidth)
         rescue
             return Conditional.new(
                 collapser.lookup(@cond),
@@ -246,7 +281,8 @@ end
 # Binary operation. Perform `@op` on two operands `@left` and `@right`
 class BinaryOp < Op
     #add_object_helpers
-    def initialize (@op : ::Symbol, @left : DFGExpr, @right : DFGExpr)
+    def initialize (@op : ::Symbol, @left : DFGExpr, @right : DFGExpr, bitwidth)
+        super(bitwidth)
     end
 
     def set_operands(left, right)
@@ -287,7 +323,7 @@ end
 class BinaryMath < BinaryOp
     ##add_object_helpers
     def initialize (@op, @crystalop : DFGOperator, @identity : (Int32|Nil), @left, @right)
-        super(@op, @left, @right)
+        super(@op, @left, @right, bitwidth: left.@bitwidth & right.@bitwidth)
     end
 
     def evaluate (collapser)
@@ -318,6 +354,12 @@ class BinaryMath < BinaryOp
     end
 end
 
+class BinaryPredicate < BinaryOp
+    def initialize (@op, @left, @right)
+        super(@op, @left, @right, bitwidth: BitWidth.new(1))
+    end
+end
+
 # Add operation
 class Add < BinaryMath
     #add_object_helpers
@@ -325,8 +367,8 @@ class Add < BinaryMath
         super(:plus, OperatorAdd.new, 0, @left, @right)
     end
 
-    def self.eval_with (left, right)
-        left + right
+    def self.eval_with (left, right, bitwidth)
+        return bitwidth.truncate(left + right)
     end
 
     def_simplify_left identity: 0
@@ -340,14 +382,13 @@ class Multiply < BinaryMath
         super(:multiply, OperatorMul.new, 1, @left, @right)
     end
 
-    def self.eval_with (left, right)
-        left * right
+    def self.eval_with (left, right, bitwidth)
+        return bitwidth.truncate(left * right)
     end
 
     def_simplify_left identity: 1, const: {match: 0, result: 0}
     def_simplify_right identity: 1, const: {match: 0, result: 0}
 end
-
 
 # Subtract operation
 class Subtract < BinaryMath
@@ -355,8 +396,8 @@ class Subtract < BinaryMath
         super(:minus, OperatorSub.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right)
-        left - right
+    def self.eval_with (left, right, bitwidth)
+        return bitwidth.truncate(left - right)
     end
 
     def_simplify_left
@@ -369,8 +410,9 @@ class Divide < BinaryMath
         super(:divide, OperatorDiv.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right)
-        left / right
+    def self.eval_with (left, right, bitwidth)
+        # unsigned division; cannot overflow, so no truncate
+        return (left.to_u64 / right.to_u64).to_i64
     end
 
     # 0 / x = 0
@@ -385,8 +427,9 @@ class Modulo < BinaryMath
         super(:modulo, OperatorMod.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right)
-        left % right
+    def self.eval_with (left, right, bitwidth)
+        # unsigned modulo; cannot overflow, so no truncate
+        return (left.to_u64 % right.to_u64).to_i64
     end
 
     # 0 % x = 0
@@ -401,8 +444,9 @@ class Xor < BinaryMath
         super(:bitxor, OperatorXor.new, 0, @left, @right)
     end
 
-    def self.eval_with (left, right)
-        left ^ right
+    def self.eval_with (left, right, bitwidth)
+        # cannot overflow, so no truncate
+        return left ^ right
     end
 
     def_simplify_left identity: 0
@@ -415,8 +459,8 @@ class LeftShift < BinaryMath
         super(:lshift, LeftShiftOp.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right)
-        left << right
+    def self.eval_with (left, right, bitwidth)
+        return bitwidth.truncate(left << right)
     end
 
     # 0 << x = 0
@@ -431,8 +475,9 @@ class RightShift < BinaryMath
         super(:rshift, RightShiftOp.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right)
-        left >> right
+    def self.eval_with (left, right, bitwidth)
+        # unsigned (logical) right shift; cannot overflow, so no truncate
+        return (left.to_u64 >> right.to_u64).to_i64
     end
 
     # 0 >> x = 0
@@ -447,8 +492,9 @@ class BitOr < BinaryMath
         super(:bitor, OperatorBor.new, 0, @left, @right)
     end
 
-    def self.eval_with (left, right)
-        left | right
+    def self.eval_with (left, right, bitwidth)
+        # cannot overflow, so no truncate
+        return left | right
     end
 
     def_simplify_left identity: 0
@@ -461,8 +507,9 @@ class BitAnd < BinaryMath
         super(:bitand, OperatorBAnd.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right)
-        left & right
+    def self.eval_with (left, right, bitwidth)
+        # cannot overflow, so no truncate
+        return left & right
     end
 
     def_simplify_left const: {match: 0, result: 0}
@@ -477,7 +524,7 @@ class LogicalAnd < BinaryMath
 end
 
 # Less-than compare operation
-class CmpLT < BinaryOp
+class CmpLT < BinaryPredicate
     def initialize (@left, @right)
         super(:lt, @left, @right)
     end
@@ -490,8 +537,9 @@ class CmpLT < BinaryOp
         end
     end
 
-    def self.eval_with (left, right)
-        (left < right) ? 1 : 0
+    def self.eval_with (left, right, bitwidth)
+        # unsigned less-than
+        (left.to_u64 < right.to_u64) ? 1_i64 : 0_i64
     end
 
     def_simplify_left
@@ -499,7 +547,7 @@ class CmpLT < BinaryOp
 end
 
 # Less-than-or-equal compare operation
-class CmpLEQ < BinaryOp
+class CmpLEQ < BinaryPredicate
     def initialize (@left, @right)
         super(:leq, @left, @right)
     end
@@ -512,8 +560,9 @@ class CmpLEQ < BinaryOp
         end
     end
 
-    def self.eval_with (left, right)
-        (left <= right) ? 1 : 0
+    def self.eval_with (left, right, bitwidth)
+        # unsigned less-than-or-equals-to
+        (left.to_u64 <= right.to_u64) ? 1_i64 : 0_i64
     end
 
     def_simplify_left
@@ -521,7 +570,7 @@ class CmpLEQ < BinaryOp
 end
 
 # Equal compare operation
-class CmpEQ < BinaryOp
+class CmpEQ < BinaryPredicate
     def initialize (@left, @right)
         super(:eq, @left, @right)
     end
@@ -534,8 +583,8 @@ class CmpEQ < BinaryOp
         end
     end
 
-    def self.eval_with (left, right)
-        (left == right) ? 1 : 0
+    def self.eval_with (left, right, bitwidth)
+        (left == right) ? 1_i64 : 0_i64
     end
 
     def_simplify_left
@@ -543,7 +592,7 @@ class CmpEQ < BinaryOp
 end
 
 # Not-equal compare operation
-class CmpNEQ < BinaryOp
+class CmpNEQ < BinaryPredicate
     def initialize (@left, @right)
         super(:neq, @left, @right)
     end
@@ -556,8 +605,8 @@ class CmpNEQ < BinaryOp
         end
     end
 
-    def self.eval_with (left, right)
-        (left != right) ? 1 : 0
+    def self.eval_with (left, right, bitwidth)
+        (left != right) ? 1_i64 : 0_i64
     end
 
     def_simplify_left
@@ -598,24 +647,25 @@ end
 class UnaryOp < Op
     #add_object_helpers
 
-    @expr : (Isekai::DFGExpr)?
+    @expr : DFGExpr
     setter expr : DFGExpr
 
+    def initialize (@op : ::Symbol, @expr : DFGExpr, bitwidth)
+        super(bitwidth)
+    end
+
     def initialize (@op : ::Symbol, @expr : DFGExpr)
+        super(expr.@bitwidth)
     end
 
     def collapse_dependencies() : Array(DFGExpr)
-        if expr = @expr
-            return Array(DFGExpr).new().push(expr)
-        else
-            raise "No expression set"
-        end
+        return [@expr]
     end
 
     def collapse_constants(collapser)
         begin
             val = collapser.evaluate_as_constant(self).as(Constant)
-            return Constant.new(val.@value)
+            return Constant.new(val.@value, bitwidth: @bitwidth)
         rescue ex : NonconstantExpression
             new_obj = self.dup
             new_obj.expr = collapser.lookup(@expr)
@@ -645,10 +695,6 @@ class BitNot < UnaryOp
         super(:bitnot, @expr)
     end
 
-    def self.eval_with (value)
-        ~value
-    end
-
     def evaluate(collapser)
         #return (~collapser.lookup(@expr) & @bit_width.get_neg1()
     end
@@ -656,23 +702,53 @@ end
 
 # Negate unary operation
 class Negate < UnaryOp
-    def initialize(@expr)
+    def initialize (@expr)
         super(:negate, @expr)
     end
 
-    def evaluate(collapser)
+    def evaluate (collapser)
         return -collapser.lookup(@expr).as(Constant).@value
     end
+end
 
-    def self.eval_with (value)
-        return -value
+# Zero-extend operation
+class ZeroExtend < UnaryOp
+    def initialize (@expr, bitwidth)
+        super(:zext, @expr, bitwidth)
+    end
+
+    def self.eval_with (value, old_bitwidth, new_bitwidth)
+        value
+    end
+end
+
+# Sign-extend operation
+class SignExtend < UnaryOp
+    def initialize (@expr, bitwidth)
+        super(:zext, @expr, bitwidth)
+    end
+
+    def self.eval_with (value, old_bitwidth, new_bitwidth)
+        old_bitwidth.sign_extend_to(value, new_bitwidth)
+    end
+end
+
+# Truncate to a smaller bit width operation
+class Truncate < UnaryOp
+    def initialize (@expr, bitwidth)
+        super(:trunc, @expr, bitwidth)
+    end
+
+    def self.eval_with (value, old_bitwidth, new_bitwidth)
+        return new_bitwidth.truncate(value)
     end
 end
 
 def self.dfg_make_binary (klass, left, right)
     if left.is_a? Constant
         if right.is_a? Constant
-            Constant.new(klass.eval_with(left.@value, right.@value))
+            bitwidth = left.@bitwidth & right.@bitwidth
+            Constant.new(klass.eval_with(left.@value, right.@value, bitwidth), bitwidth)
         else
             klass.simplify_left(left, right)
         end
@@ -683,11 +759,15 @@ def self.dfg_make_binary (klass, left, right)
     end
 end
 
-def self.dfg_make_unary (klass, operand)
-    if operand.is_a? Constant
-        Constant.new(klass.eval_with(operand))
+def self.dfg_make_bitwidth_cast (klass, expr, new_bitwidth)
+    if expr.is_a? Constant
+        value = klass.eval_with(
+            expr.@value,
+            old_bitwidth: expr.@bitwidth,
+            new_bitwidth: new_bitwidth)
+        Constant.new(value, bitwidth: new_bitwidth)
     else
-        klass.new(operand)
+        klass.new(expr, bitwidth: new_bitwidth)
     end
 end
 

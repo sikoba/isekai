@@ -6,7 +6,7 @@ module Isekai
 # location where the state of the given type is stored.
 # Object of this class is unique and distinctive - the label
 # is just a label and it doesn't makes the objects identity
-class Storage < SymbolTableValue
+class Storage
     def initialize(@label : String, @size : Int32)
     end
 

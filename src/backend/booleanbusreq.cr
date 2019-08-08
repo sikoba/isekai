@@ -2,7 +2,7 @@ require "./busreq.cr"
 require "./bus.cr"
 require "./booleanbus.cr"
 
-module Isekai
+module Isekai::Backend
     # Requests to lay down the boolean circuit buses.
 
     abstract class BooleanReq < BusReq

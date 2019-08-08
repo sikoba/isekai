@@ -1,6 +1,7 @@
 require "clang"
+require "../common/common"
 
-module Isekai
+module Isekai::CFrontend
     # Auxilary wrappers for the libclang cursors
     # Provides helpers around the common methods
     # on the libclang interface

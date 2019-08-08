@@ -1,10 +1,10 @@
-require "../collapser.cr"
 require "./board.cr"
-require "../dfg.cr"
 require "./busreq.cr"
 require "./bus.cr"
+require "../common/collapser.cr"
+require "../common/dfg.cr"
 
-module Isekai
+module Isekai::Backend
     # Request factory - the core of the backend. This Collapser recursively converts
     # all dependencies of the output into the Buses.
     # The translation from DFGExpr into BusReq is inside make_req.
@@ -59,6 +59,8 @@ module Isekai
                 result = LeftShiftReq.new(self, expr.as(LeftShift), trace_type)
             when .is_a? RightShift
                 result = RightShiftReq.new(self, expr.as(RightShift), trace_type)
+            when .is_a? ZeroExtend # FIXME
+                result = make_req(expr.@expr, trace_type)
             else
                 raise "Not supported expr: #{expr}"
             end

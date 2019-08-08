@@ -1,9 +1,9 @@
 require "./bus.cr"
 require "./arithbuses.cr"
-require "../dfg.cr"
 require "./busreq.cr"
+require "../common/dfg.cr"
 
-module Isekai
+module Isekai::Backend
 
 # Refer to BusReq's documentation for more explanation.
 
