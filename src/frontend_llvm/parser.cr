@@ -19,21 +19,6 @@ private def get_int_ty_bitwidth (ty)
     return get_int_ty_bitwidth_unchecked(ty)
 end
 
-# Constructs an expression aprropriate for an undefined value of the given type 'ty'.
-private def make_undef_for_ty (ty) : Isekai::DFGExpr
-    # TODO: handle the case of 'ty' being a struct type here
-    # TODO: handle the case of 'ty' being an array type here
-    kind = LibLLVM_C.get_type_kind(ty)
-    case kind
-    when .integer_type_kind?
-        return Isekai::Constant.new(0, bitwidth: get_int_ty_bitwidth_unchecked(ty))
-    when .pointer_type_kind?
-        return Isekai::DynamicPointer.new
-    else
-        raise "Unsupported type kind: #{kind}"
-    end
-end
-
 # Assuming 'value' is a constant integer value, returns its value as a 'Constant' with the
 # appropriate bitwidth.
 private def make_constant_unchecked (value) : Isekai::Constant
@@ -52,8 +37,6 @@ private def get_case_value_unchecked(ins, i) : Isekai::Constant
         LibLLVM_C.get_value_kind(value).constant_int_value_kind?
     return make_constant_unchecked(value)
 end
-
-private BW_32 = Isekai::BitWidth.new(32)
 
 module Isekai::LLVMFrontend
 
@@ -119,30 +102,78 @@ class Parser
         end
     end
 
-    private class BadOutsourceParam < Exception
+    enum OutsourceParam
+        Input
+        NizkInput
+        Output
     end
 
-    private class BadOutsourceParamPosition < Exception
+    enum OutsourceInputParam
+        Input
+        NizkInput
     end
 
-    @inputs : Array(DFGExpr)?
-    @nizk_inputs : Array(DFGExpr)?
-    @outputs = [] of Tuple(StorageKey, DFGExpr)
+    private class ValStruct
+        def initialize (@elems : Array(DFGExpr))
+        end
+
+        def bitwidth_of (i)
+            @elems[i].@bitwidth
+        end
+
+        def index_valid? (i)
+            i >= 0 && i < @elems.size
+        end
+    end
+
+    private class ValInputStruct < ValStruct
+        def initialize (
+                @elems : Array(DFGExpr),
+                @flat_offsets : Array(Int32),
+                @flat_size : Int32)
+        end
+    end
+
+    private class IndexRange
+        @left  : Int32 = -1
+        @right : Int32 = -1
+
+        property left
+        property right
+
+        def initialize ()
+        end
+
+        def includes? (x)
+            @left <= x < @right
+        end
+
+        def outermost
+            @left == @right ? nil : (@right - 1)
+        end
+    end
 
     @arguments = World.new
     @locals = World.new
     @allocas = [] of DFGExpr
+    @cached_undefs = World.new
 
-    @input_storage : Storage?
-    @nizk_input_storage : Storage?
-    @output_storage : Storage?
+    @val_structs = [] of ValStruct
 
     # junction => {sink, is_loop}
     @preproc_data = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
 
     @assumption = Assumption.new
     @unroll_ctls = [] of UnrollCtl
+
     @unroll_hint_func : LibLLVM_C::ValueRef? = nil
+
+    @input_indices = IndexRange.new
+    @nizk_input_indices = IndexRange.new
+    @output_indices = IndexRange.new
+
+    @input_storage : Storage? = nil
+    @nizk_input_storage : Storage? = nil
 
     @ir_module : LibLLVM::IrModule
 
@@ -150,61 +181,156 @@ class Parser
         @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
     end
 
-    private def dereference (expr : DFGExpr) : DFGExpr
+    private def cache_undef (value)
+        return yield unless value
+        begin
+            return @cached_undefs[value]
+        rescue KeyError
+            return @cached_undefs[value] = yield
+        end
+    end
+
+    # Constructs an expression aprropriate for an undefined value of the given type 'ty'.
+    private def make_undef_for_ty (ty, value = nil) : DFGExpr
+        kind = LibLLVM_C.get_type_kind(ty)
+        case kind
+
+        when .integer_type_kind?
+            return Constant.new(0, bitwidth: get_int_ty_bitwidth_unchecked(ty))
+
+        when .pointer_type_kind?
+            return DynamicPointer.new
+
+        when .array_type_kind?
+            return cache_undef(value) do
+                nelems = LibLLVM_C.get_array_length(ty)
+                elem_ty = LibLLVM_C.get_element_type(ty)
+                elems = Array(DFGExpr).new(nelems) do
+                    make_undef_for_ty(elem_ty)
+                end
+                @val_structs << ValStruct.new(elems)
+                CoolStruct.new(idx: @val_structs.size - 1)
+            end
+
+        when .struct_type_kind?
+            return cache_undef(value) do
+                nelems = LibLLVM_C.count_struct_element_types(ty)
+                elems = Array(DFGExpr).new(nelems) do |i|
+                    elem_ty = LibLLVM_C.struct_get_type_at_index(ty, i)
+                    make_undef_for_ty(elem_ty)
+                end
+                @val_structs << ValStruct.new(elems)
+                CoolStruct.new(idx: @val_structs.size - 1)
+            end
+
+        else
+            raise "Unsupported type kind: #{kind}"
+        end
+    end
+
+    private def convert_into_input_struct! (expr : DFGExpr, start_from : Int32) : Int32
+        return start_from + 1 unless expr.is_a? CoolStruct
+
+        elems = @val_structs[expr.@idx].@elems
+        flat_offsets = Array(Int32).new(elems.size)
+
+        offset = start_from
+        elems.each do |elem|
+            flat_offsets << offset
+            offset = convert_into_input_struct!(elem, start_from: offset)
+        end
+        @val_structs[expr.@idx] = ValInputStruct.new(
+            elems: elems,
+            flat_offsets: flat_offsets,
+            flat_size: offset)
+        return offset
+    end
+
+    private def input_idx? (idx) : OutsourceInputParam?
+        if @input_indices.includes? idx
+            return OutsourceInputParam::Input
+        elsif @nizk_input_indices.includes? idx
+            return OutsourceInputParam::NizkInput
+        else
+            return nil
+        end
+    end
+
+    private def dereference (expr : DFGExpr, even_input = false) : DFGExpr
         case expr
         when GetPointer
-            expr.@target
+            expr = expr.@target
         when Alloca
-            @allocas[expr.@idx]
+            expr = @allocas[expr.@idx]
         else
             raise "Cannot dereference #{expr}"
         end
-    end
 
-    private def make_input_array (storage : Storage?)
-        return nil unless storage
-        return Array(DFGExpr).new(storage.@size) do |i|
-            Field.new(StorageKey.new(storage, i), bitwidth: BW_32) # FIXME
+        case expr
+        when CoolField
+            st = @val_structs[expr.@struct_idx]
+            if which_input = input_idx? expr.@struct_idx
+                if even_input
+                    expr = st.@elems[expr.@field_idx]
+                else
+                    flat_idx = st.as(ValInputStruct).@flat_offsets[expr.@field_idx]
+                    bitwidth = st.bitwidth_of(expr.@field_idx)
+
+                    case which_input
+                    when OutsourceInputParam::Input
+                        storage = @input_storage.as(Storage)
+                    when OutsourceInputParam::NizkInput
+                        storage = @nizk_input_storage.as(Storage)
+                    else
+                        raise "Unexpected OutsourceInputParam"
+                    end
+
+                    expr = Field.new(StorageKey.new(storage, flat_idx), bitwidth: bitwidth)
+                end
+            else
+                expr = st.@elems[expr.@field_idx]
+            end
         end
+
+        return expr
     end
 
-    private def inspect_outsource_param (value, accept)
+    private def modify_index_range (ir : IndexRange)
+        ir.left = @val_structs.size
+        result = yield
+        ir.right = @val_structs.size
+        return result
+    end
+
+    private def inspect_outsource_param (value, param_kind)
         ty = LibLLVM_C.type_of(value)
-        raise BadOutsourceParam.new("is not a pointer") unless
+        raise "outsource() parameter is not a pointer" unless
             LibLLVM_C.get_type_kind(ty).pointer_type_kind?
 
         s_ty = LibLLVM_C.get_element_type(ty)
 
-        raise BadOutsourceParam.new("is a pointer to non-struct") unless
+        raise "outsource() parameter is a pointer to non-struct" unless
             LibLLVM_C.get_type_kind(s_ty).struct_type_kind?
 
-        raise BadOutsourceParam.new("is a pointer to an incomplete struct") unless
+        raise "outsource() parameter is a pointer to an incomplete struct" unless
             LibLLVM_C.is_opaque_struct(s_ty) == 0
 
-        s_name = String.new(LibLLVM_C.get_struct_name(s_ty))
-        nelems = LibLLVM_C.count_struct_element_types(s_ty).to_i32
-
-        case s_name
-        when .ends_with? ".Input"
-            raise BadOutsourceParamPosition.new(s_name) unless accept.includes? :input
-            st = Storage.new("Input", nelems)
-            @input_storage = st
-
-        when .ends_with? ".NzikInput" # sic
-            raise BadOutsourceParamPosition.new(s_name) unless accept.includes? :nizk_input
-            st = Storage.new("NzikInput", nelems)
-            @nizk_input_storage = st
-
-        when .ends_with? ".Output"
-            raise BadOutsourceParamPosition.new(s_name) unless accept.includes? :output
-            st = Storage.new("Output", nelems)
-            @output_storage = st
-
+        case param_kind
+        when OutsourceParam::Input
+            expr = modify_index_range(@input_indices) { make_undef_for_ty(s_ty) }
+            convert_into_input_struct!(expr, start_from: 0)
+        when OutsourceParam::NizkInput
+            expr = modify_index_range(@nizk_input_indices) { make_undef_for_ty(s_ty) }
+            convert_into_input_struct!(expr, start_from: 0)
+        when OutsourceParam::Output
+            expr = modify_index_range(@output_indices) { make_undef_for_ty(s_ty) }
+            # yep, this is required...
+            convert_into_input_struct!(expr, start_from: 0)
         else
-            raise BadOutsourceParam.new("unexpected struct name: #{s_name}")
+            raise "Unexpected param_kind: #{param_kind}"
         end
 
-        @arguments[value] = GetPointer.new(Structure.new(st)) # FIXME
+        @arguments[value] = GetPointer.new(expr)
     end
 
     private def load_expr (src) : DFGExpr
@@ -220,16 +346,7 @@ class Parser
         else
             raise "NYI: unsupported value kind: #{kind}"
         end
-
-        case expr
-        when Field
-            if expr.@key.@storage == @output_storage
-                expr = @outputs[expr.@key.@idx][1]
-            end
-        end
-
         expr = @assumption.reduce(expr)
-
         return expr
     end
 
@@ -242,12 +359,15 @@ class Parser
 
         when GetPointer
             target = dst.@target
-            # TODO: support this case
-            raise "NYI: cannot store at pointer to #{target}" unless target.is_a?(Field)
-            # TODO: support this case
-            raise "NYI: store in non-output struct" unless target.@key.@storage == @output_storage
-            old_expr = @outputs[target.@key.@idx][1]
-            @outputs[target.@key.@idx] = {target.@key, @assumption.conditionalize(old_expr, src)}
+            case target
+            when CoolField
+                raise "Cannot store in input parameter" if input_idx? target.@struct_idx
+                st = @val_structs[target.@struct_idx]
+                old_expr = st.@elems[target.@field_idx]
+                st.@elems[target.@field_idx] = @assumption.conditionalize(old_expr, src)
+            else
+                raise "Cannot store at pointer to #{target}"
+            end
 
         else
             raise "Cannot store at #{dst}"
@@ -255,21 +375,24 @@ class Parser
     end
 
     private def get_element_ptr (base : DFGExpr, offset : DFGExpr, field : DFGExpr) : DFGExpr
-        # TODO: handle the 'base.is_a? Alloca' case here
-        raise "NYI: GEP base is not a pointer" unless base.is_a?(GetPointer)
-        # TODO: handle the non-constant offset here
         raise "NYI: non-constant GEP offset" unless offset.is_a?(Constant)
         raise "NYI: non-constant GEP field" unless field.is_a?(Constant)
 
-        # TODO: handle the non-zero offet case here
-        raise "NYI: GEP with non-zero offset" unless offset.@value == 0
+        target = dereference(base, even_input: true)
 
-        target = base.@target
-        # TODO: handle arrays here
-        raise "NYI: GEP target is not a struct" unless target.is_a?(Structure)
-
-        key = StorageKey.new(target.@storage, field.@value.to_i32)
-        return GetPointer.new(Field.new(key, bitwidth: BW_32))
+        case target
+        when CoolStruct
+            raise "NYI: GEP of struct with non-zero offset" unless offset.@value == 0
+            elem_idx = field.@value
+            unless @val_structs[target.@idx].index_valid? elem_idx
+                raise "Array index is out of bounds"
+            end
+            return GetPointer.new(CoolField.new(
+                struct_idx: target.@idx,
+                field_idx: elem_idx.to_i32))
+        else
+            raise "NYI: cannot GEP of pointer to #{target}"
+        end
     end
 
     private def inspect_basic_block_until (
@@ -284,7 +407,7 @@ class Parser
 
     @[AlwaysInline]
     private def get_phi_value (ins) : DFGExpr
-        return @locals.fetch(ins) { make_undef_for_ty(LibLLVM_C.type_of(ins)) }
+        return @locals.fetch(ins) { make_undef_for_ty(LibLLVM_C.type_of(ins), ins) }
     end
 
     private def produce_phi_copies (from : LibLLVM::BasicBlock, to : LibLLVM::BasicBlock)
@@ -325,12 +448,14 @@ class Parser
 
             when .alloca?
                 ty = LibLLVM_C.get_allocated_type(ins)
-                if @locals.has_key? ins
-                    idx = @locals[ins].as(Alloca).@idx
-                    @allocas[idx] = make_undef_for_ty(ty)
-                else
+                expr = make_undef_for_ty(ty, ins)
+                begin
+                    existing = @locals[ins]
+                rescue KeyError
                     @locals[ins] = Alloca.new(@allocas.size)
-                    @allocas << make_undef_for_ty(ty)
+                    @allocas << expr
+                else
+                    @allocas[existing.as(Alloca).@idx] = expr
                 end
 
             when .store?
@@ -347,7 +472,7 @@ class Parser
 
             when .get_element_ptr?
                 nops = LibLLVM_C.get_num_operands(ins)
-                raise "Not supported yet: #{nops}-arg GEP" unless nops == 3
+                raise "NYI: #{nops}-arg GEP" unless nops == 3
 
                 base = load_expr(LibLLVM_C.get_operand(ins, 0))
                 offset = load_expr(LibLLVM_C.get_operand(ins, 1))
@@ -397,7 +522,7 @@ class Parser
                 when .int_uge? then set_binary_swapped(ins, CmpLEQ)
                 when .int_sge? then set_binary_swapped(ins, CmpLEQ)
 
-                else raise "Unknown icmp predicate: #{pred}"
+                else raise "Unknown 'icmp' predicate: #{pred}"
                 end
 
             when .z_ext? then set_bitwidth_cast(ins, ZeroExtend)
@@ -524,6 +649,44 @@ class Parser
         end
     end
 
+    private def each_in_flattened (idx, &block : DFGExpr->)
+        @val_structs[idx].@elems.each do |elem|
+            if elem.is_a? CoolStruct
+                each_in_flattened(elem.@idx, &block)
+            else
+                block.call elem
+            end
+        end
+    end
+
+    private def make_input_array (name, indices)
+        idx = indices.outermost
+        return {nil, [] of DFGExpr} unless idx
+
+        n = @val_structs[idx].as(ValInputStruct).@flat_size
+        storage = Storage.new(name, n)
+        arr = Array(DFGExpr).new(n)
+        each_in_flattened(idx) do |elem|
+            i = arr.size
+            arr << Field.new(StorageKey.new(storage, i), bitwidth: elem.@bitwidth)
+        end
+        return {storage, arr}
+    end
+
+    private def make_output_array (name, indices)
+        idx = indices.outermost
+        return [] of Tuple(StorageKey, DFGExpr) unless idx
+
+        n = @val_structs[idx].as(ValInputStruct).@flat_size
+        storage = Storage.new(name, n)
+        arr = Array(Tuple(StorageKey, DFGExpr)).new(n)
+        each_in_flattened(idx) do |elem|
+            i = arr.size
+            arr << {StorageKey.new(storage, i), elem}
+        end
+        return arr
+    end
+
     private def inspect_outsource_func (func)
         ret_ty, params, is_var_arg = func.signature
 
@@ -534,30 +697,24 @@ class Parser
 
         case params.size
         when 2
-            inspect_outsource_param(params[0], accept: {:input, :nizk_input})
-            inspect_outsource_param(params[1], accept: {:output})
+            inspect_outsource_param(params[0], OutsourceParam::Input)
+            inspect_outsource_param(params[1], OutsourceParam::Output)
         when 3
-            inspect_outsource_param(params[0], accept: {:input})
-            inspect_outsource_param(params[1], accept: {:nizk_input})
-            inspect_outsource_param(params[2], accept: {:output})
+            inspect_outsource_param(params[0], OutsourceParam::Input)
+            inspect_outsource_param(params[1], OutsourceParam::NizkInput)
+            inspect_outsource_param(params[2], OutsourceParam::Output)
         else
             raise "outsource() takes #{params.size} parameter(s), expected 2 or 3"
         end
 
-        @inputs      = make_input_array @input_storage
-        @nizk_inputs = make_input_array @nizk_input_storage
-
-        output_storage = @output_storage.as(Storage)
-        @outputs = Array(Tuple(StorageKey, DFGExpr)).new(output_storage.@size) do |i|
-            {
-                StorageKey.new(output_storage, i),
-                make_undef_for_ty(LibLLVM_C.int32_type()) # FIXME
-            }
-        end
+        @input_storage, inputs = make_input_array("input", @input_indices)
+        @nizk_input_storage, nizk_inputs = make_input_array("nizk_input", @nizk_input_indices)
 
         @preproc_data = Preprocessor.new(func.entry_basic_block).data
         inspect_basic_block_until(func.entry_basic_block, terminator: nil)
         raise "Sanity-check failed" unless @assumption.empty?
+
+        return inputs, nizk_inputs, make_output_array("output", @output_indices)
     end
 
     private def inspect_unroll_hint_func (func)
@@ -587,8 +744,7 @@ class Parser
         @ir_module.functions.each do |func|
             next if func.declaration?
             raise "Unexpected function defined: #{func.name}" unless func.name == "outsource"
-            inspect_outsource_func(func)
-            return {@inputs || [] of DFGExpr, @nizk_inputs, @outputs}
+            return inspect_outsource_func(func)
         end
 
         raise "No 'outsource' function found"

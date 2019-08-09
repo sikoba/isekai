@@ -96,21 +96,31 @@ class Undefined < DFGExpr
     end
 end
 
-class Structure < DFGExpr
-    #def initialize (@members : Array(DFGExpr), @id : Int32)
-    def initialize (@storage : Storage)
+class CoolStruct < DFGExpr
+    def initialize (@idx : Int32)
         super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
     end
 end
 
-class ValArray < DFGExpr
-    def initialize (@elements : Array(DFGExpr))
+class CoolField < DFGExpr
+    def initialize (@struct_idx : Int32, @field_idx : Int32)
         super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
     end
+end
+
+class InputBase < DFGExpr
+    def initialize (@idx : Int32, bitwidth)
+        super(bitwidth)
+    end
+end
+
+class Input < InputBase
+end
+
+class NizkInput < InputBase
 end
 
 class Field < DFGExpr
-    #def initialize (@struct_id : Int32, @idx : Int32, bitwidth)
     def initialize (@key : StorageKey, bitwidth)
         super(bitwidth)
     end
@@ -364,7 +374,7 @@ class Add < BinaryMath
         super(:plus, OperatorAdd.new, 0, @left, @right)
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         return bitwidth.truncate(left + right)
     end
 
@@ -379,7 +389,7 @@ class Multiply < BinaryMath
         super(:multiply, OperatorMul.new, 1, @left, @right)
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         return bitwidth.truncate(left * right)
     end
 
@@ -393,7 +403,7 @@ class Subtract < BinaryMath
         super(:minus, OperatorSub.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         return bitwidth.truncate(left - right)
     end
 
@@ -407,7 +417,7 @@ class Divide < BinaryMath
         super(:divide, OperatorDiv.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         # unsigned division; cannot overflow, so no truncate
         return (left.to_u64 / right.to_u64).to_i64
     end
@@ -424,7 +434,7 @@ class Modulo < BinaryMath
         super(:modulo, OperatorMod.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         # unsigned modulo; cannot overflow, so no truncate
         return (left.to_u64 % right.to_u64).to_i64
     end
@@ -441,7 +451,7 @@ class Xor < BinaryMath
         super(:bitxor, OperatorXor.new, 0, @left, @right)
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         # cannot overflow, so no truncate
         return left ^ right
     end
@@ -456,7 +466,7 @@ class LeftShift < BinaryMath
         super(:lshift, LeftShiftOp.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         return bitwidth.truncate(left << right)
     end
 
@@ -472,7 +482,7 @@ class RightShift < BinaryMath
         super(:rshift, RightShiftOp.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         # unsigned (logical) right shift; cannot overflow, so no truncate
         return (left.to_u64 >> right.to_u64).to_i64
     end
@@ -489,7 +499,7 @@ class BitOr < BinaryMath
         super(:bitor, OperatorBor.new, 0, @left, @right)
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         # cannot overflow, so no truncate
         return left | right
     end
@@ -504,7 +514,7 @@ class BitAnd < BinaryMath
         super(:bitand, OperatorBAnd.new, nil, @left, @right)
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         # cannot overflow, so no truncate
         return left & right
     end
@@ -534,7 +544,7 @@ class CmpLT < BinaryPredicate
         end
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         # unsigned less-than
         (left.to_u64 < right.to_u64) ? 1_i64 : 0_i64
     end
@@ -557,8 +567,8 @@ class CmpLEQ < BinaryPredicate
         end
     end
 
-    def self.eval_with (left, right, bitwidth)
-        # unsigned less-than-or-equals-to
+    def self.static_eval (left, right, bitwidth)
+        # unsigned less-than-or-equal-to
         (left.to_u64 <= right.to_u64) ? 1_i64 : 0_i64
     end
 
@@ -580,7 +590,7 @@ class CmpEQ < BinaryPredicate
         end
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         (left == right) ? 1_i64 : 0_i64
     end
 
@@ -602,7 +612,7 @@ class CmpNEQ < BinaryPredicate
         end
     end
 
-    def self.eval_with (left, right, bitwidth)
+    def self.static_eval (left, right, bitwidth)
         (left != right) ? 1_i64 : 0_i64
     end
 
@@ -714,7 +724,7 @@ class ZeroExtend < UnaryOp
         super(:zext, @expr, bitwidth)
     end
 
-    def self.eval_with (value, old_bitwidth, new_bitwidth)
+    def self.static_eval (value, old_bitwidth, new_bitwidth)
         value
     end
 end
@@ -725,7 +735,7 @@ class SignExtend < UnaryOp
         super(:zext, @expr, bitwidth)
     end
 
-    def self.eval_with (value, old_bitwidth, new_bitwidth)
+    def self.static_eval (value, old_bitwidth, new_bitwidth)
         old_bitwidth.sign_extend_to(value, new_bitwidth)
     end
 end
@@ -736,7 +746,7 @@ class Truncate < UnaryOp
         super(:trunc, @expr, bitwidth)
     end
 
-    def self.eval_with (value, old_bitwidth, new_bitwidth)
+    def self.static_eval (value, old_bitwidth, new_bitwidth)
         return new_bitwidth.truncate(value)
     end
 end
@@ -745,7 +755,7 @@ def self.dfg_make_binary (klass, left, right)
     if left.is_a? Constant
         if right.is_a? Constant
             bitwidth = left.@bitwidth & right.@bitwidth
-            Constant.new(klass.eval_with(left.@value, right.@value, bitwidth), bitwidth)
+            Constant.new(klass.static_eval(left.@value, right.@value, bitwidth), bitwidth)
         else
             klass.simplify_left(left, right)
         end
@@ -758,7 +768,7 @@ end
 
 def self.dfg_make_bitwidth_cast (klass, expr, new_bitwidth)
     if expr.is_a? Constant
-        value = klass.eval_with(
+        value = klass.static_eval(
             expr.@value,
             old_bitwidth: expr.@bitwidth,
             new_bitwidth: new_bitwidth)
