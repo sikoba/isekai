@@ -278,9 +278,9 @@ class Parser
 
                     case which_input
                     when OutsourceInputParam::Input
-                        storage = @input_storage.as(Storage)
+                        storage = @input_storage.not_nil!
                     when OutsourceInputParam::NizkInput
-                        storage = @nizk_input_storage.as(Storage)
+                        storage = @nizk_input_storage.not_nil!
                     else
                         raise "Unexpected OutsourceInputParam"
                     end
