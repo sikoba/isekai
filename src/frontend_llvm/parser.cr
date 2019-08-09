@@ -3,6 +3,7 @@ require "../common/bitwidth"
 require "../common/symbol_table_key"
 require "../common/storage"
 require "./preproc"
+require "./assumption"
 require "llvm-crystal/lib_llvm"
 require "llvm-crystal/lib_llvm_c"
 
@@ -20,6 +21,8 @@ end
 
 # Constructs an expression aprropriate for an undefined value of the given type 'ty'.
 private def make_undef_for_ty (ty) : Isekai::DFGExpr
+    # TODO: handle the case of 'ty' being a struct type here
+    # TODO: handle the case of 'ty' being an array type here
     kind = LibLLVM_C.get_type_kind(ty)
     case kind
     when .integer_type_kind?
@@ -87,7 +90,7 @@ class Parser
             @hash[k]
         end
 
-        def [] (k : LibLLVM::Instruction, v)
+        def [] (k : LibLLVM::Instruction)
             @hash[k.to_unsafe]
         end
 
@@ -105,6 +108,14 @@ class Parser
 
         def fetch (k : LibLLVM::Instruction, &block : -> DFGExpr)
             @hash.fetch(k.to_unsafe, &block)
+        end
+
+        def has_key? (k : LibLLVM_C::ValueRef)
+            @hash.has_key?(k)
+        end
+
+        def has_key? (k : LibLLVM::Instruction)
+            @hash.has_key?(k.to_unsafe)
         end
     end
 
@@ -129,7 +140,7 @@ class Parser
     # junction => {sink, is_loop}
     @preproc_data = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
 
-    @chain = [] of Tuple(DFGExpr, Bool)
+    @assumption = Assumption.new
     @unroll_ctls = [] of UnrollCtl
     @unroll_hint_func : LibLLVM_C::ValueRef? = nil
 
@@ -139,45 +150,6 @@ class Parser
         @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
     end
 
-    private def with_chain_add_condition (
-            old_expr : DFGExpr,
-            new_expr : DFGExpr,
-            chain_index : Int32 = 0) : DFGExpr
-
-        if old_expr.is_a? Conditional && chain_index != @chain.size
-            cond, flag = @chain[chain_index][0], @chain[chain_index][1]
-            if cond.same?(old_expr.@cond)
-                valtrue, valfalse = old_expr.@valtrue, old_expr.@valfalse
-                if flag
-                    valtrue = with_chain_add_condition(valtrue, new_expr, chain_index + 1)
-                else
-                    valfalse = with_chain_add_condition(valfalse, new_expr, chain_index + 1)
-                end
-                return Conditional.new(cond, valtrue, valfalse)
-            end
-        end
-
-        result = new_expr
-        (chain_index...@chain.size).reverse_each do |i|
-            cond, flag = @chain[i][0], @chain[i][1]
-            if flag
-                result = Conditional.new(cond, result, old_expr)
-            else
-                result = Conditional.new(cond, old_expr, result)
-            end
-        end
-        return result
-    end
-
-    private def with_chain_reduce (expr : DFGExpr) : DFGExpr
-        @chain.each do |(cond, flag)|
-            break unless expr.is_a? Conditional
-            break unless cond.same?(expr.@cond)
-            expr = flag ? expr.@valtrue : expr.@valfalse
-        end
-        return expr
-    end
-
     private def dereference (expr : DFGExpr) : DFGExpr
         case expr
         when GetPointer
@@ -185,8 +157,7 @@ class Parser
         when Alloca
             @allocas[expr.@idx]
         else
-            # not supported; might as well raise here
-            Deref.new(expr, bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
+            raise "Cannot dereference #{expr}"
         end
     end
 
@@ -233,7 +204,7 @@ class Parser
             raise BadOutsourceParam.new("unexpected struct name: #{s_name}")
         end
 
-        @arguments[value] = GetPointer.new(Structure.new(st, bitwidth: BW_32)) # FIXME
+        @arguments[value] = GetPointer.new(Structure.new(st)) # FIXME
     end
 
     private def load_expr (src) : DFGExpr
@@ -257,7 +228,7 @@ class Parser
             end
         end
 
-        expr = with_chain_reduce(expr)
+        expr = @assumption.reduce(expr)
 
         return expr
     end
@@ -267,28 +238,34 @@ class Parser
 
         when Alloca
             old_expr = @allocas[dst.@idx]
-            @allocas[dst.@idx] = with_chain_add_condition(old_expr, src)
+            @allocas[dst.@idx] = @assumption.conditionalize(old_expr, src)
 
         when GetPointer
             target = dst.@target
+            # TODO: support this case
             raise "NYI: cannot store at pointer to #{target}" unless target.is_a?(Field)
+            # TODO: support this case
             raise "NYI: store in non-output struct" unless target.@key.@storage == @output_storage
             old_expr = @outputs[target.@key.@idx][1]
-            @outputs[target.@key.@idx] = {target.@key, with_chain_add_condition(old_expr, src)}
+            @outputs[target.@key.@idx] = {target.@key, @assumption.conditionalize(old_expr, src)}
 
         else
-            raise "NYI: cannot store at #{dst}"
+            raise "Cannot store at #{dst}"
         end
     end
 
     private def get_element_ptr (base : DFGExpr, offset : DFGExpr, field : DFGExpr) : DFGExpr
+        # TODO: handle the 'base.is_a? Alloca' case here
         raise "NYI: GEP base is not a pointer" unless base.is_a?(GetPointer)
+        # TODO: handle the non-constant offset here
         raise "NYI: non-constant GEP offset" unless offset.is_a?(Constant)
         raise "NYI: non-constant GEP field" unless field.is_a?(Constant)
 
+        # TODO: handle the non-zero offet case here
         raise "NYI: GEP with non-zero offset" unless offset.@value == 0
 
         target = base.@target
+        # TODO: handle arrays here
         raise "NYI: GEP target is not a struct" unless target.is_a?(Structure)
 
         key = StorageKey.new(target.@storage, field.@value.to_i32)
@@ -316,7 +293,7 @@ class Parser
             ins.incoming.each do |(block, value)|
                 next unless block == from
                 old_expr = get_phi_value(ins)
-                @locals[ins] = with_chain_add_condition(old_expr, load_expr(value))
+                @locals[ins] = @assumption.conditionalize(old_expr, load_expr(value))
             end
         end
     end
@@ -348,8 +325,13 @@ class Parser
 
             when .alloca?
                 ty = LibLLVM_C.get_allocated_type(ins)
-                @locals[ins] = Alloca.new(@allocas.size)
-                @allocas << make_undef_for_ty(ty)
+                if @locals.has_key? ins
+                    idx = @locals[ins].as(Alloca).@idx
+                    @allocas[idx] = make_undef_for_ty(ty)
+                else
+                    @locals[ins] = Alloca.new(@allocas.size)
+                    @allocas << make_undef_for_ty(ty)
+                end
 
             when .store?
                 src = load_expr(LibLLVM_C.get_operand(ins, 0))
@@ -393,7 +375,8 @@ class Parser
             when .u_rem? then set_binary(ins, Modulo)
 
             when .i_cmp?
-                case LibLLVM_C.get_i_cmp_predicate(ins)
+                pred = LibLLVM_C.get_i_cmp_predicate(ins)
+                case pred
 
                 when .int_eq? then set_binary(ins, CmpEQ)
                 when .int_ne? then set_binary(ins, CmpNEQ)
@@ -414,12 +397,14 @@ class Parser
                 when .int_uge? then set_binary_swapped(ins, CmpLEQ)
                 when .int_sge? then set_binary_swapped(ins, CmpLEQ)
 
-                else raise "NYI: ICmp predicate (signed comparison?)"
+                else raise "Unknown icmp predicate: #{pred}"
                 end
 
             when .z_ext? then set_bitwidth_cast(ins, ZeroExtend)
             when .s_ext? then set_bitwidth_cast(ins, SignExtend)
             when .trunc? then set_bitwidth_cast(ins, Truncate)
+
+            # TODO: support bitcast instruction?
 
             when .select?
                 pred = load_expr(LibLLVM_C.get_operand(ins, 0))
@@ -461,7 +446,7 @@ class Parser
                             if ctl.done? || static_branch == sink
                                 # Stop generating iterations
                                 raise "Statically infinite loop" if static_branch == to_loop
-                                @chain.pop(ctl.n_dynamic_iters)
+                                @assumption.pop(ctl.n_dynamic_iters)
                                 @unroll_ctls.pop
                                 return sink
                             else
@@ -480,18 +465,18 @@ class Parser
                                 is_dynamic: !static_branch)
                         end
 
-                        @chain << {cond, to_loop == if_true} unless static_branch
+                        @assumption.push(cond, to_loop == if_true) unless static_branch
                         return to_loop
                     else
                         return static_branch if static_branch
 
-                        @chain << {cond, true}
+                        @assumption.push(cond, true)
                         inspect_basic_block_until(if_true, terminator: sink)
-                        @chain.pop
+                        @assumption.pop
 
-                        @chain << {cond, false}
+                        @assumption.push(cond, false)
                         inspect_basic_block_until(if_false, terminator: sink)
-                        @chain.pop
+                        @assumption.pop
 
                         return sink
                     end
@@ -518,14 +503,14 @@ class Parser
                 (1...successors.size).each do |i|
                     cond = Isekai.dfg_make_binary(CmpEQ, arg, get_case_value_unchecked(ins, i))
 
-                    @chain << {cond, true}
+                    @assumption.push(cond, true)
                     inspect_basic_block_until(successors[i], terminator: sink)
-                    @chain.pop
-                    @chain << {cond, false}
+                    @assumption.pop
+                    @assumption.push(cond, false)
                 end
                 # inspect the default case
                 inspect_basic_block_until(successors[0], terminator: sink)
-                @chain.pop(successors.size - 1)
+                @assumption.pop(successors.size - 1)
 
                 return sink
 
@@ -572,6 +557,7 @@ class Parser
 
         @preproc_data = Preprocessor.new(func.entry_basic_block).data
         inspect_basic_block_until(func.entry_basic_block, terminator: nil)
+        raise "Sanity-check failed" unless @assumption.empty?
     end
 
     private def inspect_unroll_hint_func (func)

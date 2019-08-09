@@ -97,20 +97,21 @@ class Undefined < DFGExpr
 end
 
 class Structure < DFGExpr
-    def initialize (@storage : Storage, bitwidth)
-        super(bitwidth)
+    #def initialize (@members : Array(DFGExpr), @id : Int32)
+
+    def initialize (@storage : Storage)
+        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
     end
 end
 
-# Abstract operation
-class Op < DFGExpr
-    def initialize (bitwidth)
-        super(bitwidth)
+class ValArray < DFGExpr
+    def initialize (@elements : Array(DFGExpr))
+        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
     end
-    #add_object_helpers
 end
 
-class Field < Op
+class Field < DFGExpr
+    #def initialize (@struct_id : Int32, @idx : Int32, bitwidth)
     def initialize (@key : StorageKey, bitwidth)
         super(bitwidth)
     end
@@ -131,24 +132,21 @@ class Field < Op
     def_hash @key
 end
 
+# On-stack allocation.
 class Alloca < DFGExpr
     def initialize (@idx : Int32)
         super(bitwidth: BitWidth.new(BitWidth::POINTER))
     end
 end
 
-class Deref < DFGExpr
-    def initialize (@target : DFGExpr, bitwidth)
-        super(bitwidth)
-    end
-end
-
+# &target
 class GetPointer < DFGExpr
     def initialize (@target : DFGExpr)
         super(bitwidth: BitWidth.new(BitWidth::POINTER))
     end
 end
 
+# Pointer that was created with some operation other than direct referencing.
 class DynamicPointer < DFGExpr
     def initialize ()
         super(bitwidth: BitWidth.new(BitWidth::POINTER))
@@ -156,7 +154,7 @@ class DynamicPointer < DFGExpr
 end
 
 # Operation on the array.
-class ArrayOp < Op
+class ArrayOp < DFGExpr
     def initialize ()
         super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
     end
@@ -241,7 +239,7 @@ class Constant < DFGExpr
 end
 
 # Conditional node. Consists itself of the condition, then and else branches.
-class Conditional < Op
+class Conditional < DFGExpr
     #add_object_helpers
     def initialize (@cond : DFGExpr, @valtrue : DFGExpr, @valfalse : DFGExpr)
         super(valtrue.@bitwidth & valfalse.@bitwidth)
@@ -279,7 +277,7 @@ end
 
 
 # Binary operation. Perform `@op` on two operands `@left` and `@right`
-class BinaryOp < Op
+class BinaryOp < DFGExpr
     #add_object_helpers
     def initialize (@op : ::Symbol, @left : DFGExpr, @right : DFGExpr, bitwidth)
         super(bitwidth)
@@ -644,7 +642,7 @@ end
 #end
 
 # Unary operation. Perform `@op` on `@expr`
-class UnaryOp < Op
+class UnaryOp < DFGExpr
     #add_object_helpers
 
     @expr : DFGExpr
