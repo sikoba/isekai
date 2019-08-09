@@ -85,7 +85,7 @@ class Preprocessor
                 raise InvalidGraph.new if is_loop
             end
 
-            # emulate the order in which 'Isekai::Parser::inspect_basic_block' visits the successors
+            # emulate the order in which 'Parser::inspect_basic_block' visits the successors
             (1...successors.size).each do |i|
                 inspect_until(successors[i], terminator: sink)
             end

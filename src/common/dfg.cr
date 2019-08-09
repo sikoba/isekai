@@ -98,7 +98,6 @@ end
 
 class Structure < DFGExpr
     #def initialize (@members : Array(DFGExpr), @id : Int32)
-
     def initialize (@storage : Storage)
         super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
     end
@@ -139,14 +138,14 @@ class Alloca < DFGExpr
     end
 end
 
-# &target
+# The "unary &" operation.
 class GetPointer < DFGExpr
     def initialize (@target : DFGExpr)
         super(bitwidth: BitWidth.new(BitWidth::POINTER))
     end
 end
 
-# Pointer that was created with some operation other than direct referencing.
+# Pointer that was created with some operation other than direct referencing or alloca.
 class DynamicPointer < DFGExpr
     def initialize ()
         super(bitwidth: BitWidth.new(BitWidth::POINTER))

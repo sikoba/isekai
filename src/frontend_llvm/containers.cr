@@ -1,6 +1,6 @@
 module Isekai::LLVMFrontend::Containers
 
-class Multiset(T)
+struct Multiset(T)
     def initialize ()
         @hash = Hash(T, Int32).new(default_value: 0)
     end
