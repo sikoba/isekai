@@ -13,6 +13,7 @@ struct BitWidth
     UNSPECIFIED = -1
     POINTER = 0
 
+    @[AlwaysInline]
     def initialize (@width : Int32)
     end
 
@@ -24,6 +25,11 @@ struct BitWidth
     @[AlwaysInline]
     def pointer?
         @width == POINTER
+    end
+
+    @[AlwaysInline]
+    def integer?
+        @width > 0
     end
 
     @[AlwaysInline]
@@ -45,6 +51,10 @@ struct BitWidth
         return other if unspecified?
         return self if other.unspecified? || @width == other.@width
         raise BitWidthsIncompatible.new
+    end
+
+    def <=> (other : BitWidth)
+        @width <=> other.@width
     end
 
     def sign_extend_to (value : Int64, to : BitWidth) : Int64

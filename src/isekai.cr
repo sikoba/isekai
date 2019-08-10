@@ -83,7 +83,6 @@ class ParserProgram
         end
 
         inputs, nizk_inputs, output = parser.parse()
-        #puts output
 
         # optional file containing the input values to the program
         in_file = input_file.@filename + ".in"

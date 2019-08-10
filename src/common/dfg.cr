@@ -96,28 +96,25 @@ class Undefined < DFGExpr
     end
 end
 
-class CoolStruct < DFGExpr
-    def initialize (@idx : Int32)
-        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
+abstract class AbstractPointer < DFGExpr
+    def initialize ()
+        super(bitwidth: BitWidth.new(BitWidth::POINTER))
     end
-end
 
-class CoolField < DFGExpr
-    def initialize (@struct_idx : Int32, @field_idx : Int32)
-        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
-    end
+    abstract def load : DFGExpr
+    abstract def store! (value : DFGExpr)
+    abstract def move (by offset : DFGExpr) : DFGExpr
 end
 
 class InputBase < DFGExpr
-    def initialize (@idx : Int32, bitwidth)
+    enum Kind
+        Input
+        NizkInput
+    end
+
+    def initialize (@which : Kind, @idx : Int32, bitwidth)
         super(bitwidth)
     end
-end
-
-class Input < InputBase
-end
-
-class NizkInput < InputBase
 end
 
 class Field < DFGExpr
@@ -139,27 +136,6 @@ class Field < DFGExpr
 
     def_equals @key
     def_hash @key
-end
-
-# On-stack allocation.
-class Alloca < DFGExpr
-    def initialize (@idx : Int32)
-        super(bitwidth: BitWidth.new(BitWidth::POINTER))
-    end
-end
-
-# The "unary &" operation.
-class GetPointer < DFGExpr
-    def initialize (@target : DFGExpr)
-        super(bitwidth: BitWidth.new(BitWidth::POINTER))
-    end
-end
-
-# Pointer that was created with some operation other than direct referencing or alloca.
-class DynamicPointer < DFGExpr
-    def initialize ()
-        super(bitwidth: BitWidth.new(BitWidth::POINTER))
-    end
 end
 
 # Operation on the array.

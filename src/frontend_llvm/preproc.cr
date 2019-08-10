@@ -6,7 +6,7 @@ require "llvm-crystal/lib_llvm_c"
 
 module Isekai::LLVMFrontend
 
-class Preprocessor
+private class Preprocessor
     private class InvalidGraph < Exception
     end
 

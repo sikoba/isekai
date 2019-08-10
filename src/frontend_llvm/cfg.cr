@@ -2,7 +2,7 @@ require "llvm-crystal/lib_llvm"
 
 module Isekai::LLVMFrontend
 
-class ControlFlowGraph
+private class ControlFlowGraph
     @blocks = [] of LibLLVM::BasicBlock
     @block2idx = {} of LibLLVM::BasicBlock => Int32
     @final_idx : Int32 = -1

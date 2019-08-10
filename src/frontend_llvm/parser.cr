@@ -4,12 +4,16 @@ require "../common/symbol_table_key"
 require "../common/storage"
 require "./preproc"
 require "./assumption"
+require "./structure"
+require "./pointers"
 require "llvm-crystal/lib_llvm"
 require "llvm-crystal/lib_llvm_c"
 
+include Isekai
+
 # Assuming 'ty' is an integer type, returns its bit width as a 'BitWidth' object.
 private def get_int_ty_bitwidth_unchecked (ty)
-    return Isekai::BitWidth.new(LibLLVM_C.get_int_type_width(ty).to_i32)
+    return BitWidth.new(LibLLVM_C.get_int_type_width(ty).to_i32)
 end
 
 # If 'ty' is an integer type, returns its bit width as a 'BitWidth' object; raises otherwise.
@@ -21,9 +25,9 @@ end
 
 # Assuming 'value' is a constant integer value, returns its value as a 'Constant' with the
 # appropriate bitwidth.
-private def make_constant_unchecked (value) : Isekai::Constant
+private def make_constant_unchecked (value) : Constant
     ty = LibLLVM_C.type_of(value)
-    return Isekai::Constant.new(
+    return Constant.new(
         LibLLVM_C.const_int_get_z_ext_value(value).to_i64,
         bitwidth: get_int_ty_bitwidth_unchecked(ty))
 end
@@ -31,7 +35,7 @@ end
 # Assuming 'ins' is a switch instruction, returns the value of the case with number 'i'.
 # 'i' is 1-based if we only consider 'case' statements without 'default', and 0-based if we consider
 # all the successors, of which the zeroth is the default (thus 'i == 0' is not allowed).
-private def get_case_value_unchecked(ins, i) : Isekai::Constant
+private def get_case_value_unchecked(ins, i) : Constant
     value = LibLLVM_C.get_operand(ins, i * 2)
     raise "Case value is not an integer constant" unless
         LibLLVM_C.get_value_kind(value).constant_int_value_kind?
@@ -52,11 +56,11 @@ class Parser
         end
 
         def n_dynamic_iters
-            return @n_dynamic_iters
+            @n_dynamic_iters
         end
 
         def done?
-            return @counter == @limit
+            @counter == @limit
         end
 
         def iteration (is_dynamic : Bool)
@@ -69,36 +73,24 @@ class Parser
     private struct World
         @hash = {} of LibLLVM_C::ValueRef => DFGExpr
 
+        @[AlwaysInline]
         def [] (k : LibLLVM_C::ValueRef)
             @hash[k]
         end
 
+        @[AlwaysInline]
         def [] (k : LibLLVM::Instruction)
             @hash[k.to_unsafe]
         end
 
+        @[AlwaysInline]
         def []= (k : LibLLVM_C::ValueRef, v)
             @hash[k] = v
         end
 
+        @[AlwaysInline]
         def []= (k : LibLLVM::Instruction, v)
             @hash[k.to_unsafe] = v
-        end
-
-        def fetch (k : LibLLVM_C::ValueRef, &block : -> DFGExpr)
-            @hash.fetch(k, &block)
-        end
-
-        def fetch (k : LibLLVM::Instruction, &block : -> DFGExpr)
-            @hash.fetch(k.to_unsafe, &block)
-        end
-
-        def has_key? (k : LibLLVM_C::ValueRef)
-            @hash.has_key?(k)
-        end
-
-        def has_key? (k : LibLLVM::Instruction)
-            @hash.has_key?(k.to_unsafe)
         end
     end
 
@@ -108,57 +100,9 @@ class Parser
         Output
     end
 
-    enum OutsourceInputParam
-        Input
-        NizkInput
-    end
-
-    private class ValStruct
-        def initialize (@elems : Array(DFGExpr))
-        end
-
-        def bitwidth_of (i)
-            @elems[i].@bitwidth
-        end
-
-        def index_valid? (i)
-            i >= 0 && i < @elems.size
-        end
-    end
-
-    private class ValInputStruct < ValStruct
-        def initialize (
-                @elems : Array(DFGExpr),
-                @flat_offsets : Array(Int32),
-                @flat_size : Int32)
-        end
-    end
-
-    private class IndexRange
-        @left  : Int32 = -1
-        @right : Int32 = -1
-
-        property left
-        property right
-
-        def initialize ()
-        end
-
-        def includes? (x)
-            @left <= x < @right
-        end
-
-        def outermost
-            @left == @right ? nil : (@right - 1)
-        end
-    end
-
     @arguments = World.new
     @locals = World.new
-    @allocas = [] of DFGExpr
-    @cached_undefs = World.new
-
-    @val_structs = [] of ValStruct
+    @cached_exprs = World.new
 
     # junction => {sink, is_loop}
     @preproc_data = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
@@ -168,12 +112,9 @@ class Parser
 
     @unroll_hint_func : LibLLVM_C::ValueRef? = nil
 
-    @input_indices = IndexRange.new
-    @nizk_input_indices = IndexRange.new
-    @output_indices = IndexRange.new
-
-    @input_storage : Storage? = nil
-    @nizk_input_storage : Storage? = nil
+    @input_struct : Structure? = nil
+    @nizk_input_struct : Structure? = nil
+    @output_struct : Structure? = nil
 
     @ir_module : LibLLVM::IrModule
 
@@ -181,17 +122,49 @@ class Parser
         @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
     end
 
-    private def cache_undef (value)
-        return yield unless value
-        begin
-            return @cached_undefs[value]
-        rescue KeyError
-            return @cached_undefs[value] = yield
+    private def make_input_expr_for_ty (ty, which : InputBase::Kind, offset : Int32) : {DFGExpr, Int32}
+        kind = LibLLVM_C.get_type_kind(ty)
+        case kind
+
+        when .integer_type_kind?
+            expr = InputBase.new(which: which, idx: offset,
+                                 bitwidth: get_int_ty_bitwidth_unchecked(ty))
+            return {expr, offset + 1}
+
+        when .pointer_type_kind?
+            raise "Input structure contains a pointer"
+
+        when .array_type_kind?
+            nelems = LibLLVM_C.get_array_length(ty)
+            elem_ty = LibLLVM_C.get_element_type(ty)
+            # In some reason, Crystal's type checker fails if we use the '.new(nelems, &block)'
+            # constructor of 'Array(DFGExpr)' here. OK, let's do it the dumb way.
+            elems = Array(DFGExpr).new(nelems)
+            (0...nelems).each do
+                expr, offset = make_input_expr_for_ty(elem_ty, which, offset)
+                elems << expr
+            end
+            return {Structure.new(elems), offset}
+
+        when .struct_type_kind?
+            nelems = LibLLVM_C.count_struct_element_types(ty)
+            # In some reason, Crystal's type checker fails if we use the '.new(nelems, &block)'
+            # constructor of 'Array(DFGExpr)' here. OK, let's do it the dumb way.
+            elems = Array(DFGExpr).new(nelems)
+            (0...nelems).each do |i|
+                elem_ty = LibLLVM_C.struct_get_type_at_index(ty, i)
+                expr, offset = make_input_expr_for_ty(elem_ty, which, offset)
+                elems << expr
+            end
+            return {Structure.new(elems), offset}
+
+        else
+            raise "Unsupported type kind: #{kind}"
         end
     end
 
-    # Constructs an expression aprropriate for an undefined value of the given type 'ty'.
-    private def make_undef_for_ty (ty, value = nil) : DFGExpr
+    # Constructs an expression aprropriate for a value of the given type 'ty'.
+    private def make_expr_for_ty (ty) : DFGExpr
         kind = LibLLVM_C.get_type_kind(ty)
         case kind
 
@@ -199,110 +172,36 @@ class Parser
             return Constant.new(0, bitwidth: get_int_ty_bitwidth_unchecked(ty))
 
         when .pointer_type_kind?
-            return DynamicPointer.new
+            return Pointers::UndefPointer.new
 
         when .array_type_kind?
-            return cache_undef(value) do
-                nelems = LibLLVM_C.get_array_length(ty)
-                elem_ty = LibLLVM_C.get_element_type(ty)
-                elems = Array(DFGExpr).new(nelems) do
-                    make_undef_for_ty(elem_ty)
-                end
-                @val_structs << ValStruct.new(elems)
-                CoolStruct.new(idx: @val_structs.size - 1)
-            end
+            nelems = LibLLVM_C.get_array_length(ty)
+            elem_ty = LibLLVM_C.get_element_type(ty)
+            return Structure.new(Array(DFGExpr).new(nelems) do
+                make_expr_for_ty(elem_ty)
+            end)
 
         when .struct_type_kind?
-            return cache_undef(value) do
-                nelems = LibLLVM_C.count_struct_element_types(ty)
-                elems = Array(DFGExpr).new(nelems) do |i|
-                    elem_ty = LibLLVM_C.struct_get_type_at_index(ty, i)
-                    make_undef_for_ty(elem_ty)
-                end
-                @val_structs << ValStruct.new(elems)
-                CoolStruct.new(idx: @val_structs.size - 1)
-            end
+            nelems = LibLLVM_C.count_struct_element_types(ty)
+            return Structure.new(Array(DFGExpr).new(nelems) do |i|
+                elem_ty = LibLLVM_C.struct_get_type_at_index(ty, i)
+                make_expr_for_ty(elem_ty)
+            end)
 
         else
             raise "Unsupported type kind: #{kind}"
         end
     end
 
-    private def convert_into_input_struct! (expr : DFGExpr, start_from : Int32) : Int32
-        return start_from + 1 unless expr.is_a? CoolStruct
-
-        elems = @val_structs[expr.@idx].@elems
-        flat_offsets = Array(Int32).new(elems.size)
-
-        offset = start_from
-        elems.each do |elem|
-            flat_offsets << offset
-            offset = convert_into_input_struct!(elem, start_from: offset)
-        end
-        @val_structs[expr.@idx] = ValInputStruct.new(
-            elems: elems,
-            flat_offsets: flat_offsets,
-            flat_size: offset)
-        return offset
-    end
-
-    private def input_idx? (idx) : OutsourceInputParam?
-        if @input_indices.includes? idx
-            return OutsourceInputParam::Input
-        elsif @nizk_input_indices.includes? idx
-            return OutsourceInputParam::NizkInput
-        else
-            return nil
+    private def make_expr_for_ty_cached (ty, cache_token)
+        begin
+            return @cached_exprs[cache_token]
+        rescue KeyError
+            return @cached_exprs[cache_token] = make_expr_for_ty(ty)
         end
     end
 
-    private def dereference (expr : DFGExpr, even_input = false) : DFGExpr
-        case expr
-        when GetPointer
-            expr = expr.@target
-        when Alloca
-            expr = @allocas[expr.@idx]
-        else
-            raise "Cannot dereference #{expr}"
-        end
-
-        case expr
-        when CoolField
-            st = @val_structs[expr.@struct_idx]
-            if which_input = input_idx? expr.@struct_idx
-                if even_input
-                    expr = st.@elems[expr.@field_idx]
-                else
-                    flat_idx = st.as(ValInputStruct).@flat_offsets[expr.@field_idx]
-                    bitwidth = st.bitwidth_of(expr.@field_idx)
-
-                    case which_input
-                    when OutsourceInputParam::Input
-                        storage = @input_storage.not_nil!
-                    when OutsourceInputParam::NizkInput
-                        storage = @nizk_input_storage.not_nil!
-                    else
-                        raise "Unexpected OutsourceInputParam"
-                    end
-
-                    expr = Field.new(StorageKey.new(storage, flat_idx), bitwidth: bitwidth)
-                end
-            else
-                expr = st.@elems[expr.@field_idx]
-            end
-        end
-
-        return expr
-    end
-
-    private def modify_index_range (ir : IndexRange)
-        ir.left = @val_structs.size
-        result = yield
-        ir.right = @val_structs.size
-        return result
-    end
-
-    private def inspect_outsource_param (value, param_kind)
+    private def inspect_outsource_param (value, which_param : OutsourceParam)
         ty = LibLLVM_C.type_of(value)
         raise "outsource() parameter is not a pointer" unless
             LibLLVM_C.get_type_kind(ty).pointer_type_kind?
@@ -315,84 +214,130 @@ class Parser
         raise "outsource() parameter is a pointer to an incomplete struct" unless
             LibLLVM_C.is_opaque_struct(s_ty) == 0
 
-        case param_kind
+        case which_param
         when OutsourceParam::Input
-            expr = modify_index_range(@input_indices) { make_undef_for_ty(s_ty) }
-            convert_into_input_struct!(expr, start_from: 0)
+            expr, flat_size = make_input_expr_for_ty(s_ty, InputBase::Kind::Input, offset: 0)
+            raise "Unexpected" unless expr.is_a? Structure
+            @input_struct = expr
+            # TODO: get rid of this
+            storage = Storage.new("input", flat_size)
+            expr.modify do |elem|
+                raise "Unexpected" unless elem.is_a? InputBase
+                Field.new(StorageKey.new(storage, elem.@idx), bitwidth: elem.@bitwidth)
+            end
+
         when OutsourceParam::NizkInput
-            expr = modify_index_range(@nizk_input_indices) { make_undef_for_ty(s_ty) }
-            convert_into_input_struct!(expr, start_from: 0)
+            expr, flat_size = make_input_expr_for_ty(s_ty, InputBase::Kind::NizkInput, offset: 0)
+            raise "Unexpected" unless expr.is_a? Structure
+            @nizk_input_struct = expr
+            # TODO: get rid of this
+            storage = Storage.new("nizk_input", flat_size)
+            expr.modify do |elem|
+                raise "Unexpected" unless elem.is_a? InputBase
+                Field.new(StorageKey.new(storage, elem.@idx), bitwidth: elem.@bitwidth)
+            end
+
         when OutsourceParam::Output
-            expr = modify_index_range(@output_indices) { make_undef_for_ty(s_ty) }
-            # yep, this is required...
-            convert_into_input_struct!(expr, start_from: 0)
+            expr = make_expr_for_ty(s_ty)
+            raise "Unexpected" unless expr.is_a? Structure
+            @output_struct = expr
+
         else
-            raise "Unexpected param_kind: #{param_kind}"
+            raise "Unexpected OutsourceParam value: #{which_param}"
         end
 
-        @arguments[value] = GetPointer.new(expr)
+        @arguments[value] = Pointers::StaticPointer.new(expr)
     end
 
-    private def load_expr (src) : DFGExpr
-        kind = LibLLVM_C.get_value_kind(src)
+    private def as_expr (value) : DFGExpr
+        kind = LibLLVM_C.get_value_kind(value)
         case kind
         when .argument_value_kind?
-            expr = @arguments[src]
+            expr = @arguments[value]
         when .instruction_value_kind?
-            # this is a reference to a local value created by 'src' instruction
-            expr = @locals[src]
+            # this is a reference to a local value created by 'value' instruction
+            expr = @locals[value]
         when .constant_int_value_kind?
-            expr = make_constant_unchecked(src)
+            expr = make_constant_unchecked(value)
         else
-            raise "NYI: unsupported value kind: #{kind}"
+            raise "Unsupported value kind: #{kind}"
         end
         expr = @assumption.reduce(expr)
         return expr
     end
 
-    private def store (dst : DFGExpr, src : DFGExpr)
-        case dst
+    private def store (at ptr : DFGExpr, value : DFGExpr)
+        case ptr
+        when AbstractPointer
+            old_expr = ptr.load()
+            ptr.store!(@assumption.conditionalize(old_expr, value))
+        when Conditional
+            @assumption.push(ptr.@cond, true)
+            store(at: ptr.@valtrue, value: value)
+            @assumption.pop
 
-        when Alloca
-            old_expr = @allocas[dst.@idx]
-            @allocas[dst.@idx] = @assumption.conditionalize(old_expr, src)
-
-        when GetPointer
-            target = dst.@target
-            case target
-            when CoolField
-                raise "Cannot store in input parameter" if input_idx? target.@struct_idx
-                st = @val_structs[target.@struct_idx]
-                old_expr = st.@elems[target.@field_idx]
-                st.@elems[target.@field_idx] = @assumption.conditionalize(old_expr, src)
-            else
-                raise "Cannot store at pointer to #{target}"
-            end
-
+            @assumption.push(ptr.@cond, false)
+            store(at: ptr.@valfalse, value: value)
+            @assumption.pop
         else
-            raise "Cannot store at #{dst}"
+            raise "Cannot store at #{ptr}"
         end
     end
 
-    private def get_element_ptr (base : DFGExpr, offset : DFGExpr, field : DFGExpr) : DFGExpr
-        raise "NYI: non-constant GEP offset" unless offset.is_a?(Constant)
-        raise "NYI: non-constant GEP field" unless field.is_a?(Constant)
-
-        target = dereference(base, even_input: true)
-
-        case target
-        when CoolStruct
-            raise "NYI: GEP of struct with non-zero offset" unless offset.@value == 0
-            elem_idx = field.@value
-            unless @val_structs[target.@idx].index_valid? elem_idx
-                raise "Array index is out of bounds"
-            end
-            return GetPointer.new(CoolField.new(
-                struct_idx: target.@idx,
-                field_idx: elem_idx.to_i32))
+    private def load (from src : DFGExpr) : DFGExpr
+        case src
+        when AbstractPointer
+            return src.load()
+        when Conditional
+            return Isekai.dfg_make_conditional(
+                src.@cond,
+                load(from: src.@valtrue),
+                load(from: src.@valfalse))
         else
-            raise "NYI: cannot GEP of pointer to #{target}"
+            raise "Cannot load from #{src}"
         end
+    end
+
+    private def move_ptr (ptr : DFGExpr, by offset : DFGExpr) : DFGExpr
+        case ptr
+        when AbstractPointer
+            return ptr.move(by: offset)
+        when Conditional
+            return Isekai.dfg_make_conditional(
+                ptr.@cond,
+                move_ptr(ptr.@valtrue, by: offset),
+                move_ptr(ptr.@valfalse, by: offset))
+        else
+            raise "Cannot apply move_ptr to #{ptr}"
+        end
+    end
+
+    private def get_field_ptr (base : DFGExpr, field : DFGExpr) : DFGExpr
+        case base
+        when Structure
+            return Pointers.bake_field_pointer(base: base, field: field)
+        when Conditional
+            return Isekai.dfg_make_conditional(
+                base.@cond,
+                get_field_ptr(base: base.@valtrue, field: field),
+                get_field_ptr(base: base.@valtrue, field: field))
+        else
+            raise "Cannot get_field_ptr of #{base}"
+        end
+    end
+
+    private def get_element_ptr (base : DFGExpr) : DFGExpr
+        result = base
+
+        offset = yield
+        return result unless offset
+        result = move_ptr(result, by: offset)
+
+        while field = yield
+            result = load(from: result)
+            result = get_field_ptr(base: result, field: field)
+        end
+        return result
     end
 
     private def inspect_basic_block_until (
@@ -405,9 +350,14 @@ class Parser
         end
     end
 
-    @[AlwaysInline]
     private def get_phi_value (ins) : DFGExpr
-        return @locals.fetch(ins) { make_undef_for_ty(LibLLVM_C.type_of(ins), ins) }
+        begin
+            # Note no 'as_expr()' here, as it calls '@assumption.reduce' on the result, which we
+            # don't want here.
+            return @locals[ins]
+        rescue KeyError
+            return make_expr_for_ty_cached(LibLLVM_C.type_of(ins), cache_token: ins)
+        end
     end
 
     private def produce_phi_copies (from : LibLLVM::BasicBlock, to : LibLLVM::BasicBlock)
@@ -416,28 +366,28 @@ class Parser
             ins.incoming.each do |(block, value)|
                 next unless block == from
                 old_expr = get_phi_value(ins)
-                @locals[ins] = @assumption.conditionalize(old_expr, load_expr(value))
+                @locals[ins] = @assumption.conditionalize(old_expr, as_expr(value))
             end
         end
     end
 
     @[AlwaysInline]
     private def set_binary (ins, klass)
-        left = load_expr(LibLLVM_C.get_operand(ins, 0))
-        right = load_expr(LibLLVM_C.get_operand(ins, 1))
+        left = as_expr(LibLLVM_C.get_operand(ins, 0))
+        right = as_expr(LibLLVM_C.get_operand(ins, 1))
         @locals[ins] = Isekai.dfg_make_binary(klass, left, right)
     end
 
     @[AlwaysInline]
     private def set_binary_swapped (ins, klass)
-        left = load_expr(LibLLVM_C.get_operand(ins, 1))
-        right = load_expr(LibLLVM_C.get_operand(ins, 0))
+        left = as_expr(LibLLVM_C.get_operand(ins, 1))
+        right = as_expr(LibLLVM_C.get_operand(ins, 0))
         @locals[ins] = Isekai.dfg_make_binary(klass, left, right)
     end
 
     @[AlwaysInline]
     private def set_bitwidth_cast (ins, klass)
-        arg = load_expr(LibLLVM_C.get_operand(ins, 0))
+        arg = as_expr(LibLLVM_C.get_operand(ins, 0))
         new_bitwidth = get_int_ty_bitwidth(LibLLVM_C.type_of(ins))
         @locals[ins] = Isekai.dfg_make_bitwidth_cast(klass, arg, new_bitwidth)
     end
@@ -448,36 +398,34 @@ class Parser
 
             when .alloca?
                 ty = LibLLVM_C.get_allocated_type(ins)
-                expr = make_undef_for_ty(ty, ins)
-                begin
-                    existing = @locals[ins]
-                rescue KeyError
-                    @locals[ins] = Alloca.new(@allocas.size)
-                    @allocas << expr
-                else
-                    @allocas[existing.as(Alloca).@idx] = expr
-                end
+                expr = make_expr_for_ty_cached(ty, cache_token: ins)
+                @locals[ins] = Pointers::StaticPointer.new(expr)
 
             when .store?
-                src = load_expr(LibLLVM_C.get_operand(ins, 0))
-                dst = load_expr(LibLLVM_C.get_operand(ins, 1))
-                store(dst: dst, src: src)
+                src = as_expr(LibLLVM_C.get_operand(ins, 0))
+                dst = as_expr(LibLLVM_C.get_operand(ins, 1))
+                store(at: dst, value: src)
 
             when .load?
-                src = LibLLVM_C.get_operand(ins, 0)
-                @locals[ins] = dereference(load_expr(src))
+                src = as_expr(LibLLVM_C.get_operand(ins, 0))
+                @locals[ins] = load(from: src)
 
             when .phi?
                 @locals[ins] = get_phi_value(ins)
 
             when .get_element_ptr?
                 nops = LibLLVM_C.get_num_operands(ins)
-                raise "NYI: #{nops}-arg GEP" unless nops == 3
-
-                base = load_expr(LibLLVM_C.get_operand(ins, 0))
-                offset = load_expr(LibLLVM_C.get_operand(ins, 1))
-                field = load_expr(LibLLVM_C.get_operand(ins, 2))
-                @locals[ins] = get_element_ptr(base: base, offset: offset, field: field)
+                base = as_expr(LibLLVM_C.get_operand(ins, 0))
+                i = 1
+                @locals[ins] = get_element_ptr(base) do
+                    if i == nops
+                        nil
+                    else
+                        expr = as_expr(LibLLVM_C.get_operand(ins, i))
+                        i += 1
+                        expr
+                    end
+                end
 
             when .add?   then set_binary(ins, Add)
             when .sub?   then set_binary(ins, Subtract)
@@ -532,9 +480,9 @@ class Parser
             # TODO: support bitcast instruction?
 
             when .select?
-                pred = load_expr(LibLLVM_C.get_operand(ins, 0))
-                val_true = load_expr(LibLLVM_C.get_operand(ins, 1))
-                val_false = load_expr(LibLLVM_C.get_operand(ins, 2))
+                pred = as_expr(LibLLVM_C.get_operand(ins, 0))
+                val_true = as_expr(LibLLVM_C.get_operand(ins, 1))
+                val_false = as_expr(LibLLVM_C.get_operand(ins, 2))
                 @locals[ins] = Isekai.dfg_make_conditional(pred, val_true, val_false)
 
             when .call?
@@ -543,7 +491,7 @@ class Parser
                 raise "_unroll_hint() must be called with 1 argument" unless
                     LibLLVM_C.get_num_arg_operands(ins) == 1
 
-                arg = load_expr(LibLLVM_C.get_operand(ins, 0))
+                arg = as_expr(LibLLVM_C.get_operand(ins, 0))
 
                 raise "_unroll_hint() argument is not constant" unless arg.is_a? Constant
                 value = arg.@value.to_i32
@@ -555,7 +503,7 @@ class Parser
                 successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
 
                 if ins.conditional?
-                    cond = load_expr(LibLLVM_C.get_condition(ins))
+                    cond = as_expr(LibLLVM_C.get_condition(ins))
                     if_true, if_false = successors
 
                     if cond.is_a? Constant
@@ -613,7 +561,7 @@ class Parser
                 successors = ins.successors.to_a
                 successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
 
-                arg = load_expr(LibLLVM_C.get_operand(ins, 0))
+                arg = as_expr(LibLLVM_C.get_operand(ins, 0))
                 if arg.is_a? Constant
                     (1...successors.size).each do |i|
                         if get_case_value_unchecked(ins, i).@value == arg.@value
@@ -649,42 +597,17 @@ class Parser
         end
     end
 
-    private def each_in_flattened (idx, &block : DFGExpr->)
-        @val_structs[idx].@elems.each do |elem|
-            if elem.is_a? CoolStruct
-                each_in_flattened(elem.@idx, &block)
-            else
-                block.call elem
-            end
-        end
+    private def make_input_array (s : Structure?)
+        return s ? s.flattened : [] of DFGExpr
     end
 
-    private def make_input_array (name, indices)
-        idx = indices.outermost
-        return {nil, [] of DFGExpr} unless idx
-
-        n = @val_structs[idx].as(ValInputStruct).@flat_size
-        storage = Storage.new(name, n)
-        arr = Array(DFGExpr).new(n)
-        each_in_flattened(idx) do |elem|
-            i = arr.size
-            arr << Field.new(StorageKey.new(storage, i), bitwidth: elem.@bitwidth)
+    private def make_output_array (s : Structure?)
+        return [] of Tuple(StorageKey, DFGExpr) unless s
+        elems = s.flattened
+        storage = Storage.new("output", elems.size)
+        return Array(Tuple(StorageKey, DFGExpr)).new(elems.size) do |i|
+            {StorageKey.new(storage, i), elems[i]}
         end
-        return {storage, arr}
-    end
-
-    private def make_output_array (name, indices)
-        idx = indices.outermost
-        return [] of Tuple(StorageKey, DFGExpr) unless idx
-
-        n = @val_structs[idx].as(ValInputStruct).@flat_size
-        storage = Storage.new(name, n)
-        arr = Array(Tuple(StorageKey, DFGExpr)).new(n)
-        each_in_flattened(idx) do |elem|
-            i = arr.size
-            arr << {StorageKey.new(storage, i), elem}
-        end
-        return arr
     end
 
     private def inspect_outsource_func (func)
@@ -707,14 +630,15 @@ class Parser
             raise "outsource() takes #{params.size} parameter(s), expected 2 or 3"
         end
 
-        @input_storage, inputs = make_input_array("input", @input_indices)
-        @nizk_input_storage, nizk_inputs = make_input_array("nizk_input", @nizk_input_indices)
-
         @preproc_data = Preprocessor.new(func.entry_basic_block).data
         inspect_basic_block_until(func.entry_basic_block, terminator: nil)
         raise "Sanity-check failed" unless @assumption.empty?
 
-        return inputs, nizk_inputs, make_output_array("output", @output_indices)
+        return {
+            make_input_array(@input_struct),
+            make_input_array(@nizk_input_struct),
+            make_output_array(@output_struct),
+        }
     end
 
     private def inspect_unroll_hint_func (func)

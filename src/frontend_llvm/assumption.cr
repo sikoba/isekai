@@ -2,7 +2,7 @@ require "../common/dfg"
 
 module Isekai::LLVMFrontend
 
-struct Assumption
+private struct Assumption
     @chain = [] of Tuple(DFGExpr, Bool)
 
     def initialize ()
@@ -14,7 +14,7 @@ struct Assumption
             chain_index : Int32) : DFGExpr
 
         if old_expr.is_a? Conditional && chain_index != @chain.size
-            cond, flag = @chain[chain_index][0], @chain[chain_index][1]
+            cond, flag = @chain[chain_index]
             if cond.same?(old_expr.@cond)
                 valtrue, valfalse = old_expr.@valtrue, old_expr.@valfalse
                 if flag
@@ -28,7 +28,7 @@ struct Assumption
 
         result = new_expr
         (chain_index...@chain.size).reverse_each do |i|
-            cond, flag = @chain[i][0], @chain[i][1]
+            cond, flag = @chain[i]
             if flag
                 result = Conditional.new(cond, result, old_expr)
             else
