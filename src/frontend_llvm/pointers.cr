@@ -1,11 +1,13 @@
 require "../common/dfg"
 require "../common/bitwidth"
 require "./structure"
+require "./type_utils"
+require "llvm-crystal/lib_llvm_c"
 
 include Isekai
 
+# Assumes that both 'a' and 'b' are of integer type.
 private def bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
-    return Poison.new if a.@bitwidth.unspecified? || b.@bitwidth.unspecified?
     case a.@bitwidth <=> b.@bitwidth
     when .< 0
         a = Isekai.dfg_make_bitwidth_cast(SignExtend, a, b.@bitwidth)
@@ -15,27 +17,44 @@ private def bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
     return Isekai.dfg_make_binary(Add, a, b)
 end
 
-module Isekai::LLVMFrontend::Pointers
+module Isekai::LLVMFrontend
+
+abstract class AbstractPointer < DFGExpr
+    def initialize ()
+        super(bitwidth: BitWidth.new(BitWidth::POINTER))
+    end
+
+    # Should return '*ptr'
+    abstract def load : DFGExpr
+
+    # Should perform '*ptr = value'
+    abstract def store! (value : DFGExpr)
+
+    # Should return 'ptr + offset'
+    abstract def move (by offset : DFGExpr) : DFGExpr
+end
 
 class UndefPointer < AbstractPointer
-    def initialize ()
+    def initialize (@target_ty : LibLLVM_C::TypeRef)
         super()
     end
 
     def load : DFGExpr
         Log.log.info("possible undefined behavior: load from uninitialized pointer")
-        return Poison.new
+        return TypeUtils.make_undef_expr_of_ty(@target_ty)
     end
 
     def store! (value : DFGExpr)
         Log.log.info("possible undefined behavior: store at uninitialized pointer")
     end
 
-    def move (by offset : DFGExpr) : DFGExpr
+    def move (by offset : DFGExpr) : AbstractPointer
         return self
     end
 end
 
+# Points to an exactly one instance of an object. Used for on-stack allocations and input/output
+# structs.
 class StaticPointer < AbstractPointer
     def initialize (@target : DFGExpr)
         super()
@@ -56,6 +75,7 @@ class StaticPointer < AbstractPointer
     end
 end
 
+# Points to a field of a structure or an array element with statically known index.
 class StaticFieldPointer < AbstractPointer
     def initialize (@base : Structure, @field : Int32)
         super()
@@ -68,7 +88,7 @@ class StaticFieldPointer < AbstractPointer
     def load : DFGExpr
         unless valid?
             Log.log.info("possible undefined behavior: array index is out of bounds")
-            return Poison.new
+            return TypeUtils.make_undef_expr_of_ty(@base.@elem_ty)
         end
         @base.@elems[@field]
     end
@@ -85,25 +105,22 @@ class StaticFieldPointer < AbstractPointer
         new_field = bitwidth_safe_signed_add(
             offset,
             Constant.new(@field.to_i64, BitWidth.new(32)))
-        return Pointers.bake_field_pointer(base: @base, field: new_field)
+        return PointerFactory.bake_field_pointer(base: @base, field: new_field)
     end
 end
 
+# Points to an array element with statically unknown index.
 class DynamicFieldPointer < AbstractPointer
     @max_size : Int32?
 
+    # Assumes that '@field' is of integer type.
     def initialize (@base : Structure, @field : DFGExpr)
         super()
 
         unless @base.@elems.empty?
             bitwidth = @field.@bitwidth
-            unless bitwidth.unspecified?
-                # Like 'min(@base.@elems.@size, bitwidth.mask + 1)' but without overflow issues.
-                @max_size = ((@base.@elems.size - 1) & bitwidth.mask) + 1
-            else
-                # Looks like the field index is poison value...
-                @max_size = nil
-            end
+            # Like 'min(@base.@elems.@size, bitwidth.mask + 1)' but without overflow issues.
+            @max_size = ((@base.@elems.size - 1) & bitwidth.mask) + 1
         else
             # This is OK as long as the pointer is never dereferenced.
             @max_size = nil
@@ -137,7 +154,7 @@ class DynamicFieldPointer < AbstractPointer
     def load : DFGExpr
         unless (n = @max_size)
             Log.log.info("possible undefined behavior: index is undefined or always invalid")
-            return Poison.new
+            return TypeUtils.make_undef_expr_of_ty(@base.@elem_ty)
         end
         return make_bsearch_expr(0, n)
     end
@@ -163,15 +180,17 @@ class DynamicFieldPointer < AbstractPointer
 
     def move (by offset : DFGExpr) : DFGExpr
         new_field = bitwidth_safe_signed_add(offset, @field)
-        return Pointers.bake_field_pointer(base: @base, field: new_field)
+        return PointerFactory.bake_field_pointer(base: @base, field: new_field)
     end
 end
 
-def self.bake_field_pointer (base : Structure, field : DFGExpr) : AbstractPointer
-    if field.is_a? Constant
-        return StaticFieldPointer.new(base: base, field: field.@value.to_i32)
-    else
-        return DynamicFieldPointer.new(base: base, field: field)
+module PointerFactory
+    def self.bake_field_pointer (base : Structure, field : DFGExpr) : AbstractPointer
+        if field.is_a? Constant
+            return StaticFieldPointer.new(base: base, field: field.@value.to_i32)
+        else
+            return DynamicFieldPointer.new(base: base, field: field)
+        end
     end
 end
 

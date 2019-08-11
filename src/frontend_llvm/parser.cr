@@ -6,22 +6,11 @@ require "./preproc"
 require "./assumption"
 require "./structure"
 require "./pointers"
+require "./type_utils"
 require "llvm-crystal/lib_llvm"
 require "llvm-crystal/lib_llvm_c"
 
-include Isekai
-
-# Assuming 'ty' is an integer type, returns its bit width as a 'BitWidth' object.
-private def get_int_ty_bitwidth_unchecked (ty)
-    return BitWidth.new(LibLLVM_C.get_int_type_width(ty).to_i32)
-end
-
-# If 'ty' is an integer type, returns its bit width as a 'BitWidth' object; raises otherwise.
-private def get_int_ty_bitwidth (ty)
-    raise "Not an integer type" unless
-        LibLLVM_C.get_type_kind(ty).integer_type_kind?
-    return get_int_ty_bitwidth_unchecked(ty)
-end
+include Isekai::LLVMFrontend
 
 # Assuming 'value' is a constant integer value, returns its value as a 'Constant' with the
 # appropriate bitwidth.
@@ -29,7 +18,7 @@ private def make_constant_unchecked (value) : Constant
     ty = LibLLVM_C.type_of(value)
     return Constant.new(
         LibLLVM_C.const_int_get_z_ext_value(value).to_i64,
-        bitwidth: get_int_ty_bitwidth_unchecked(ty))
+        bitwidth: TypeUtils.get_int_ty_bitwidth_unchecked(ty))
 end
 
 # Assuming 'ins' is a switch instruction, returns the value of the case with number 'i'.
@@ -40,6 +29,26 @@ private def get_case_value_unchecked(ins, i) : Constant
     raise "Case value is not an integer constant" unless
         LibLLVM_C.get_value_kind(value).constant_int_value_kind?
     return make_constant_unchecked(value)
+end
+
+private def make_input_expr_of_ty (ty, which : InputBase::Kind) : {DFGExpr, Int32}
+    offset = 0
+    expr = TypeUtils.make_expr_of_ty(ty) do |kind, scalar_ty|
+        case kind
+        when TypeUtils::ScalarTypeKind::Integer
+            result = InputBase.new(
+                which: which,
+                idx: offset,
+                bitwidth: TypeUtils.get_int_ty_bitwidth_unchecked(scalar_ty))
+            offset += 1
+            result
+        when TypeUtils::ScalarTypeKind::Pointer
+            raise "Input structure contains a pointer"
+        else
+            raise "Unexpected TypeUtils::ScalarTypeKind value"
+        end
+    end
+    return expr, offset
 end
 
 module Isekai::LLVMFrontend
@@ -102,7 +111,7 @@ class Parser
 
     @arguments = World.new
     @locals = World.new
-    @cached_exprs = World.new
+    @cached_undef_exprs = World.new
 
     # junction => {sink, is_loop}
     @preproc_data = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
@@ -122,82 +131,11 @@ class Parser
         @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
     end
 
-    private def make_input_expr_for_ty (ty, which : InputBase::Kind, offset : Int32) : {DFGExpr, Int32}
-        kind = LibLLVM_C.get_type_kind(ty)
-        case kind
-
-        when .integer_type_kind?
-            expr = InputBase.new(which: which, idx: offset,
-                                 bitwidth: get_int_ty_bitwidth_unchecked(ty))
-            return {expr, offset + 1}
-
-        when .pointer_type_kind?
-            raise "Input structure contains a pointer"
-
-        when .array_type_kind?
-            nelems = LibLLVM_C.get_array_length(ty)
-            elem_ty = LibLLVM_C.get_element_type(ty)
-            # In some reason, Crystal's type checker fails if we use the '.new(nelems, &block)'
-            # constructor of 'Array(DFGExpr)' here. OK, let's do it the dumb way.
-            elems = Array(DFGExpr).new(nelems)
-            (0...nelems).each do
-                expr, offset = make_input_expr_for_ty(elem_ty, which, offset)
-                elems << expr
-            end
-            return {Structure.new(elems), offset}
-
-        when .struct_type_kind?
-            nelems = LibLLVM_C.count_struct_element_types(ty)
-            # In some reason, Crystal's type checker fails if we use the '.new(nelems, &block)'
-            # constructor of 'Array(DFGExpr)' here. OK, let's do it the dumb way.
-            elems = Array(DFGExpr).new(nelems)
-            (0...nelems).each do |i|
-                elem_ty = LibLLVM_C.struct_get_type_at_index(ty, i)
-                expr, offset = make_input_expr_for_ty(elem_ty, which, offset)
-                elems << expr
-            end
-            return {Structure.new(elems), offset}
-
-        else
-            raise "Unsupported type kind: #{kind}"
-        end
-    end
-
-    # Constructs an expression aprropriate for a value of the given type 'ty'.
-    private def make_expr_for_ty (ty) : DFGExpr
-        kind = LibLLVM_C.get_type_kind(ty)
-        case kind
-
-        when .integer_type_kind?
-            return Constant.new(0, bitwidth: get_int_ty_bitwidth_unchecked(ty))
-
-        when .pointer_type_kind?
-            return Pointers::UndefPointer.new
-
-        when .array_type_kind?
-            nelems = LibLLVM_C.get_array_length(ty)
-            elem_ty = LibLLVM_C.get_element_type(ty)
-            return Structure.new(Array(DFGExpr).new(nelems) do
-                make_expr_for_ty(elem_ty)
-            end)
-
-        when .struct_type_kind?
-            nelems = LibLLVM_C.count_struct_element_types(ty)
-            return Structure.new(Array(DFGExpr).new(nelems) do |i|
-                elem_ty = LibLLVM_C.struct_get_type_at_index(ty, i)
-                make_expr_for_ty(elem_ty)
-            end)
-
-        else
-            raise "Unsupported type kind: #{kind}"
-        end
-    end
-
-    private def make_expr_for_ty_cached (ty, cache_token)
+    private def make_undef_expr_of_ty_cached (ty, cache_token)
         begin
-            return @cached_exprs[cache_token]
+            return @cached_undef_exprs[cache_token]
         rescue KeyError
-            return @cached_exprs[cache_token] = make_expr_for_ty(ty)
+            return @cached_undef_exprs[cache_token] = TypeUtils.make_undef_expr_of_ty(ty)
         end
     end
 
@@ -216,7 +154,7 @@ class Parser
 
         case which_param
         when OutsourceParam::Input
-            expr, flat_size = make_input_expr_for_ty(s_ty, InputBase::Kind::Input, offset: 0)
+            expr, flat_size = make_input_expr_of_ty(s_ty, InputBase::Kind::Input)
             raise "Unexpected" unless expr.is_a? Structure
             @input_struct = expr
             # TODO: get rid of this
@@ -227,7 +165,7 @@ class Parser
             end
 
         when OutsourceParam::NizkInput
-            expr, flat_size = make_input_expr_for_ty(s_ty, InputBase::Kind::NizkInput, offset: 0)
+            expr, flat_size = make_input_expr_of_ty(s_ty, InputBase::Kind::NizkInput)
             raise "Unexpected" unless expr.is_a? Structure
             @nizk_input_struct = expr
             # TODO: get rid of this
@@ -238,7 +176,7 @@ class Parser
             end
 
         when OutsourceParam::Output
-            expr = make_expr_for_ty(s_ty)
+            expr = TypeUtils.make_undef_expr_of_ty(s_ty)
             raise "Unexpected" unless expr.is_a? Structure
             @output_struct = expr
 
@@ -246,7 +184,7 @@ class Parser
             raise "Unexpected OutsourceParam value: #{which_param}"
         end
 
-        @arguments[value] = Pointers::StaticPointer.new(expr)
+        @arguments[value] = StaticPointer.new(expr)
     end
 
     private def as_expr (value) : DFGExpr
@@ -315,7 +253,7 @@ class Parser
     private def get_field_ptr (base : DFGExpr, field : DFGExpr) : DFGExpr
         case base
         when Structure
-            return Pointers.bake_field_pointer(base: base, field: field)
+            return PointerFactory.bake_field_pointer(base: base, field: field)
         when Conditional
             return Isekai.dfg_make_conditional(
                 base.@cond,
@@ -356,7 +294,7 @@ class Parser
             # don't want here.
             return @locals[ins]
         rescue KeyError
-            return make_expr_for_ty_cached(LibLLVM_C.type_of(ins), cache_token: ins)
+            return make_undef_expr_of_ty_cached(LibLLVM_C.type_of(ins), cache_token: ins)
         end
     end
 
@@ -388,7 +326,7 @@ class Parser
     @[AlwaysInline]
     private def set_bitwidth_cast (ins, klass)
         arg = as_expr(LibLLVM_C.get_operand(ins, 0))
-        new_bitwidth = get_int_ty_bitwidth(LibLLVM_C.type_of(ins))
+        new_bitwidth = TypeUtils.get_int_ty_bitwidth(LibLLVM_C.type_of(ins))
         @locals[ins] = Isekai.dfg_make_bitwidth_cast(klass, arg, new_bitwidth)
     end
 
@@ -398,8 +336,8 @@ class Parser
 
             when .alloca?
                 ty = LibLLVM_C.get_allocated_type(ins)
-                expr = make_expr_for_ty_cached(ty, cache_token: ins)
-                @locals[ins] = Pointers::StaticPointer.new(expr)
+                expr = make_undef_expr_of_ty_cached(ty, cache_token: ins)
+                @locals[ins] = StaticPointer.new(expr)
 
             when .store?
                 src = as_expr(LibLLVM_C.get_operand(ins, 0))

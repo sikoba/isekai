@@ -96,16 +96,6 @@ class Undefined < DFGExpr
     end
 end
 
-abstract class AbstractPointer < DFGExpr
-    def initialize ()
-        super(bitwidth: BitWidth.new(BitWidth::POINTER))
-    end
-
-    abstract def load : DFGExpr
-    abstract def store! (value : DFGExpr)
-    abstract def move (by offset : DFGExpr) : DFGExpr
-end
-
 class InputBase < DFGExpr
     enum Kind
         Input
@@ -221,12 +211,6 @@ class Constant < DFGExpr
 
     def_equals @value
     def_hash @value
-end
-
-class Poison < Constant
-    def initialize ()
-        super(0, bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
-    end
 end
 
 # Conditional node. Consists itself of the condition, then and else branches.

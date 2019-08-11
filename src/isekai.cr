@@ -84,6 +84,10 @@ class ParserProgram
 
         inputs, nizk_inputs, output = parser.parse()
 
+        if options.print_exprs
+            puts output
+        end
+
         # optional file containing the input values to the program
         in_file = input_file.@filename + ".in"
         in_array = [] of Int32

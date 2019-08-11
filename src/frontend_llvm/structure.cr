@@ -1,10 +1,14 @@
 require "../common/dfg"
 require "../common/bitwidth"
+require "llvm-crystal/lib_llvm_c"
 
 module Isekai::LLVMFrontend
 
 private class Structure < DFGExpr
-    def initialize (@elems : Array(DFGExpr))
+    # @elem_ty is defined as follows:
+    #   * 'T' for an array of type 'T[N]' (even if N == 0);
+    #   * the void type for a struct type.
+    def initialize (@elems : Array(DFGExpr), @elem_ty : LibLLVM_C::TypeRef)
         super(BitWidth.new(BitWidth::UNSPECIFIED))
     end
 
