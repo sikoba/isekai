@@ -32,7 +32,7 @@ private class Preprocessor
         end
     end
 
-    private def inspect (bb)
+    private def inspect (bb) : LibLLVM::BasicBlock?
         raise InvalidGraph.new if @cur_sinks.includes? bb
 
         ins = bb.terminator

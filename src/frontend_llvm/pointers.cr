@@ -17,6 +17,19 @@ private def bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
     return Isekai.dfg_make_binary(Add, a, b)
 end
 
+private def make_undef_array_elem (arr : Structure) : DFGExpr
+    sig = TypeUtils.get_complex_type_signature(arr.@ty)
+    case sig
+    when {LibLLVM_C::TypeRef, Int32}
+        # array
+        elem_ty, nelems = sig
+        return TypeUtils.make_undef_expr_of_ty(elem_ty)
+    else
+        # structure or something
+        raise "Unexpected type signature"
+    end
+end
+
 module Isekai::LLVMFrontend
 
 abstract class AbstractPointer < DFGExpr
@@ -88,7 +101,7 @@ class StaticFieldPointer < AbstractPointer
     def load : DFGExpr
         unless valid?
             Log.log.info("possible undefined behavior: array index is out of bounds")
-            return TypeUtils.make_undef_expr_of_ty(@base.@elem_ty)
+            return make_undef_array_elem(@base)
         end
         @base.@elems[@field]
     end
@@ -142,7 +155,7 @@ class DynamicFieldPointer < AbstractPointer
                 make_bsearch_expr(left + 1, right))
 
         else
-            pivot = left + n / 2
+            pivot = left + n // 2
             pivot_const = Constant.new(pivot.to_i64, bitwidth: @field.@bitwidth)
             return Isekai.dfg_make_conditional(
                 Isekai.dfg_make_binary(CmpLT, @field, pivot_const),
@@ -154,7 +167,7 @@ class DynamicFieldPointer < AbstractPointer
     def load : DFGExpr
         unless (n = @max_size)
             Log.log.info("possible undefined behavior: index is undefined or always invalid")
-            return TypeUtils.make_undef_expr_of_ty(@base.@elem_ty)
+            return make_undef_array_elem(@base)
         end
         return make_bsearch_expr(0, n)
     end

@@ -149,9 +149,6 @@ class Parser
         raise "outsource() parameter is a pointer to non-struct" unless
             LibLLVM_C.get_type_kind(s_ty).struct_type_kind?
 
-        raise "outsource() parameter is a pointer to an incomplete struct" unless
-            LibLLVM_C.is_opaque_struct(s_ty) == 0
-
         case which_param
         when OutsourceParam::Input
             expr, flat_size = make_input_expr_of_ty(s_ty, InputBase::Kind::Input)
@@ -309,6 +306,18 @@ class Parser
         end
     end
 
+    private def unroll_hint_called (ins)
+        raise "_unroll_hint() must be called with 1 argument" unless
+            LibLLVM_C.get_num_arg_operands(ins) == 1
+
+        arg = as_expr(LibLLVM_C.get_operand(ins, 0))
+
+        raise "_unroll_hint() argument is not constant" unless arg.is_a? Constant
+        value = arg.@value.to_i32
+        raise "_unroll_hint() argument is out of bounds" if value < 0
+        @loop_sanity_limit = value
+    end
+
     @[AlwaysInline]
     private def set_binary (ins, klass)
         left = as_expr(LibLLVM_C.get_operand(ins, 0))
@@ -415,7 +424,7 @@ class Parser
             when .s_ext? then set_bitwidth_cast(ins, SignExtend)
             when .trunc? then set_bitwidth_cast(ins, Truncate)
 
-            # TODO: support bitcast instruction?
+            # TODO: support for 'bitcast' instruction
 
             when .select?
                 pred = as_expr(LibLLVM_C.get_operand(ins, 0))
@@ -424,17 +433,12 @@ class Parser
                 @locals[ins] = Isekai.dfg_make_conditional(pred, val_true, val_false)
 
             when .call?
-                raise "Unsupported function call (not _unroll_hint())" unless
-                    LibLLVM_C.get_called_value(ins) == @unroll_hint_func
-                raise "_unroll_hint() must be called with 1 argument" unless
-                    LibLLVM_C.get_num_arg_operands(ins) == 1
-
-                arg = as_expr(LibLLVM_C.get_operand(ins, 0))
-
-                raise "_unroll_hint() argument is not constant" unless arg.is_a? Constant
-                value = arg.@value.to_i32
-                raise "_unroll_hint() argument is out of bounds" if value < 0
-                @loop_sanity_limit = value
+                called = LibLLVM_C.get_called_value(ins)
+                if called == @unroll_hint_func
+                    unroll_hint_called(ins)
+                else
+                    raise "Unsupported function call"
+                end
 
             when .br?
                 successors = ins.successors.to_a

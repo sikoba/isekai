@@ -4,11 +4,9 @@ require "llvm-crystal/lib_llvm_c"
 
 module Isekai::LLVMFrontend
 
+# This type represents both a structure and an array.
 private class Structure < DFGExpr
-    # @elem_ty is defined as follows:
-    #   * 'T' for an array of type 'T[N]' (even if N == 0);
-    #   * the void type for a struct type.
-    def initialize (@elems : Array(DFGExpr), @elem_ty : LibLLVM_C::TypeRef)
+    def initialize (@elems : Array(DFGExpr), @ty : LibLLVM_C::TypeRef)
         super(BitWidth.new(BitWidth::UNSPECIFIED))
     end
 

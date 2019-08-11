@@ -385,7 +385,7 @@ class Divide < BinaryMath
 
     def self.static_eval (left, right, bitwidth)
         # unsigned division; cannot overflow, so no truncate
-        return (left.to_u64 / right.to_u64).to_i64
+        return (left.to_u64 // right.to_u64).to_i64
     end
 
     # 0 / x = 0

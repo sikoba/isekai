@@ -49,7 +49,7 @@ module Isekai
 
     class OperatorDiv < DFGOperator
         def evaluate (left : T, right : T) forall T
-            return left.as(Constant).@value / right.as(Constant).@value
+            return left.as(Constant).@value // right.as(Constant).@value
         end
     end
 
