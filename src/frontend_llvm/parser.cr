@@ -284,17 +284,17 @@ class Parser
         end
     end
 
-    private def load (from src : DFGExpr) : DFGExpr
-        case src
+    private def load (from ptr : DFGExpr) : DFGExpr
+        case ptr
         when AbstractPointer
-            return src.load()
+            return ptr.load()
         when Conditional
             return Isekai.dfg_make_conditional(
-                src.@cond,
-                load(from: src.@valtrue),
-                load(from: src.@valfalse))
+                ptr.@cond,
+                load(from: ptr.@valtrue),
+                load(from: ptr.@valfalse))
         else
-            raise "Cannot load from #{src}"
+            raise "Cannot load from #{ptr}"
         end
     end
 

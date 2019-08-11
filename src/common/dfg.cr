@@ -223,6 +223,12 @@ class Constant < DFGExpr
     def_hash @value
 end
 
+class Poison < Constant
+    def initialize ()
+        super(0, bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
+    end
+end
+
 # Conditional node. Consists itself of the condition, then and else branches.
 class Conditional < DFGExpr
     #add_object_helpers

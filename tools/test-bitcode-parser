@@ -30,7 +30,7 @@ fix_ptrs() {
 (
     Trace "${CLANG[@]}" -DISEKAI_C_PARSER=0 -O0 -c -emit-llvm "$SRC" -o "$BC_FILE" || exit $?
 
-    Trace "${ISEKAI[@]}" --arith="$ARCI_BITCODE" "$BC_FILE" || exit $?
+    Trace "${ISEKAI[@]}" --progress --arith="$ARCI_BITCODE" "$BC_FILE" || exit $?
 
     Trace "${CLANG[@]}" -E -DISEKAI_C_PARSER=1 "$SRC" -o "$TEMP_SRC" || exit $?
     sed '/^#/d' -i -- "$TEMP_SRC" || exit $?

@@ -5,8 +5,7 @@ require "./structure"
 include Isekai
 
 private def bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
-    raise "One of the summands is not an integer" unless
-        a.@bitwidth.integer? && b.@bitwidth.integer?
+    return Poison.new if a.@bitwidth.unspecified? || b.@bitwidth.unspecified?
     case a.@bitwidth <=> b.@bitwidth
     when .< 0
         a = Isekai.dfg_make_bitwidth_cast(SignExtend, a, b.@bitwidth)
@@ -18,20 +17,18 @@ end
 
 module Isekai::LLVMFrontend::Pointers
 
-class UndefinedBehavior < Exception
-end
-
 class UndefPointer < AbstractPointer
     def initialize ()
         super()
     end
 
     def load : DFGExpr
-        raise UndefinedBehavior.new
+        Log.log.info("possible undefined behavior: load from uninitialized pointer")
+        return Poison.new
     end
 
     def store! (value : DFGExpr)
-        raise UndefinedBehavior.new
+        Log.log.info("possible undefined behavior: store at uninitialized pointer")
     end
 
     def move (by offset : DFGExpr) : DFGExpr
@@ -64,17 +61,23 @@ class StaticFieldPointer < AbstractPointer
         super()
     end
 
-    def can_deref?
+    def valid?
         0 <= @field < @base.@elems.size
     end
 
     def load : DFGExpr
-        raise UndefinedBehavior.new unless can_deref?
+        unless valid?
+            Log.log.info("possible undefined behavior: array index is out of bounds")
+            return Poison.new
+        end
         @base.@elems[@field]
     end
 
     def store! (value : DFGExpr)
-        raise UndefinedBehavior.new unless can_deref?
+        unless valid?
+            Log.log.info("possible undefined behavior: array index is out of bounds")
+            return
+        end
         @base.@elems[@field] = value
     end
 
@@ -92,12 +95,15 @@ class DynamicFieldPointer < AbstractPointer
     def initialize (@base : Structure, @field : DFGExpr)
         super()
 
-        bitwidth = @field.@bitwidth
-        raise "Array index is not an integer" unless bitwidth.integer?
-
         unless @base.@elems.empty?
-            # Like 'min(@base.@elems.@size, bitwidth.mask + 1)' but without overflow issues.
-            @max_size = ((@base.@elems.size - 1) & bitwidth.mask) + 1
+            bitwidth = @field.@bitwidth
+            unless bitwidth.unspecified?
+                # Like 'min(@base.@elems.@size, bitwidth.mask + 1)' but without overflow issues.
+                @max_size = ((@base.@elems.size - 1) & bitwidth.mask) + 1
+            else
+                # Looks like the field index is poison value...
+                @max_size = nil
+            end
         else
             # This is OK as long as the pointer is never dereferenced.
             @max_size = nil
@@ -129,12 +135,19 @@ class DynamicFieldPointer < AbstractPointer
     end
 
     def load : DFGExpr
-        raise UndefinedBehavior.new unless (n = @max_size)
+        unless (n = @max_size)
+            Log.log.info("possible undefined behavior: index is undefined or always invalid")
+            return Poison.new
+        end
         return make_bsearch_expr(0, n)
     end
 
     def store! (value : DFGExpr)
-        raise UndefinedBehavior.new unless (n = @max_size)
+        unless (n = @max_size)
+            Log.log.info("possible undefined behavior: index is undefined or always invalid")
+            return
+        end
+
         if n == 1
             @base.@elems[0] = value
         else
