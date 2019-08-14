@@ -703,7 +703,7 @@ module Isekai::CFrontend
                 when .integer_literal?
                     value = ClangUtils.getCursorValue(expression)
                     raise "Integer literal can't be resolved #{expression}" unless !value.is_a? Nil
-                    return State.new(dfg(Constant, value.to_i64, UNSPECIFIED_BITWIDTH), symtab)
+                    return State.new(dfg(Constant, value.to_i32.to_i64, UNSPECIFIED_BITWIDTH), symtab)
                     # This is a just a wrapper around real expression,
                     # in order to resolve it, we just unwrap it and do it recursively
                 when .first_expr?

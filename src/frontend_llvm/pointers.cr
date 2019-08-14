@@ -26,7 +26,7 @@ private def make_undef_array_elem (arr : Structure) : DFGExpr
         return TypeUtils.make_undef_expr_of_ty(elem_ty)
     else
         # structure or something
-        raise "Unexpected type signature"
+        raise "unreachable"
     end
 end
 
@@ -34,7 +34,7 @@ module Isekai::LLVMFrontend
 
 abstract class AbstractPointer < DFGExpr
     def initialize ()
-        super(bitwidth: BitWidth.new(BitWidth::POINTER))
+        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
     end
 
     # Should return '*ptr'

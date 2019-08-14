@@ -1,3 +1,13 @@
+require "intrinsics"
+
+private macro def_comparison_ops (ops)
+    {% for op in ops %}
+        def {{ op.id }} (other)
+            (self <=> other) {{ op.id }} 0
+        end
+    {% end %}
+end
+
 module Isekai
 
 class BitWidthsIncompatible < Exception
@@ -7,11 +17,10 @@ struct BitWidth
 
     @[AlwaysInline]
     def self.all_ones (n)
-        (1_i64 << n) - 1
+        (1_u64 << n) - 1
     end
 
     UNSPECIFIED = -1
-    POINTER = 0
 
     @[AlwaysInline]
     def initialize (@width : Int32)
@@ -23,27 +32,17 @@ struct BitWidth
     end
 
     @[AlwaysInline]
-    def pointer?
-        @width == POINTER
-    end
-
-    @[AlwaysInline]
-    def integer?
-        @width > 0
-    end
-
-    @[AlwaysInline]
-    def mask : Int64
+    def mask : UInt64
         BitWidth.all_ones(@width)
     end
 
     @[AlwaysInline]
-    def sign_bit : Int64
-        1_i64 << (@width - 1)
+    def sign_bit : UInt64
+        1_u64 << (@width - 1)
     end
 
     @[AlwaysInline]
-    def truncate (value : Int64) : Int64
+    def truncate (value : UInt64) : UInt64
         value & mask
     end
 
@@ -57,7 +56,9 @@ struct BitWidth
         @width <=> other.@width
     end
 
-    def sign_extend_to (value : Int64, to : BitWidth) : Int64
+    def_comparison_ops %i(< <= == != >= >)
+
+    def sign_extend_to (value : UInt64, to : BitWidth) : UInt64
         hi = value & sign_bit
         ones = BitWidth.all_ones(to.@width - @width + 1)
 

@@ -57,7 +57,8 @@ private struct Assumption
     end
 
     def pop (n = 1)
-        @chain.pop(n)
+        # Because 'Array#pop(n)' produces the array of popped elements...
+        n.times { @chain.pop }
         self
     end
 

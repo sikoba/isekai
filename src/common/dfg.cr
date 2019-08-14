@@ -1,6 +1,6 @@
-require "./types.cr"
-require "./storage.cr"
-require "./symbol_table_key.cr"
+require "./types"
+require "./storage"
+require "./symbol_table_key"
 require "./dfgoperator"
 require "./bitwidth"
 require "./common"
@@ -47,7 +47,7 @@ module Isekai
 
 # Internal expression node. All internal state expressions
 # are instances of this class
-class DFGExpr
+abstract class DFGExpr
     #add_object_helpers
 
     def initialize (@bitwidth : BitWidth)
@@ -341,7 +341,7 @@ class Add < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
-        return bitwidth.truncate(left + right)
+        return bitwidth.truncate(left.to_u64 + right.to_u64).to_i64
     end
 
     def_simplify_left identity: 0
@@ -356,7 +356,7 @@ class Multiply < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
-        return bitwidth.truncate(left * right)
+        return bitwidth.truncate(left.to_u64 * right.to_u64).to_i64
     end
 
     def_simplify_left identity: 1, const: {match: 0, result: 0}
@@ -370,7 +370,7 @@ class Subtract < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
-        return bitwidth.truncate(left - right)
+        return bitwidth.truncate(left.to_u64 - right.to_u64).to_i64
     end
 
     def_simplify_left
@@ -433,7 +433,7 @@ class LeftShift < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
-        return bitwidth.truncate(left << right)
+        return bitwidth.truncate(left.to_u64 << right.to_u64).to_i64
     end
 
     # 0 << x = 0
@@ -442,15 +442,33 @@ class LeftShift < BinaryMath
     def_simplify_right identity: 0
 end
 
-# Right shift operation
+# Unsigned (logical) right shift operation
 class RightShift < BinaryMath
     def initialize (@left, @right)
-        super(:rshift, RightShiftOp.new, nil, @left, @right)
+        super(:urshift, RightShiftOp.new, nil, @left, @right)
     end
 
     def self.static_eval (left, right, bitwidth)
-        # unsigned (logical) right shift; cannot overflow, so no truncate
+        # cannot overflow, so no truncate
         return (left.to_u64 >> right.to_u64).to_i64
+    end
+
+    # 0 >> x = 0
+    def_simplify_left const: {match: 0, result: 0}
+    # x >> 0 = x
+    def_simplify_right identity: 0
+end
+
+# Signed (arithmetic) right shift operation
+class SignedRightShift < BinaryMath
+    def initialize (@left, @right)
+        super(:srshift, RightShiftOp.new, nil, @left, @right)
+    end
+
+    def self.static_eval (left, right, bitwidth)
+        signed_left = bitwidth.sign_extend_to(left.to_u64, BitWidth.new(64))
+        result = signed_left.to_i64 >> right.to_i64
+        bitwidth.truncate(result.to_u64).to_i64
     end
 
     # 0 >> x = 0
@@ -702,7 +720,7 @@ class SignExtend < UnaryOp
     end
 
     def self.static_eval (value, old_bitwidth, new_bitwidth)
-        old_bitwidth.sign_extend_to(value, new_bitwidth)
+        old_bitwidth.sign_extend_to(value.to_u64, new_bitwidth).to_i64
     end
 end
 
@@ -713,7 +731,7 @@ class Truncate < UnaryOp
     end
 
     def self.static_eval (value, old_bitwidth, new_bitwidth)
-        return new_bitwidth.truncate(value)
+        return new_bitwidth.truncate(value.to_u64).to_i64
     end
 end
 

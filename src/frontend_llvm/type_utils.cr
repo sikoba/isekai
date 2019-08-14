@@ -56,7 +56,7 @@ def self.make_expr_of_ty (
     when .array_type_kind?
         nelems = LibLLVM_C.get_array_length(ty)
         elem_ty = LibLLVM_C.get_element_type(ty)
-        elems = Array(DFGExpr).new(nelems) do
+        elems = Array.new(nelems) do
             make_expr_of_ty(elem_ty, &block)
         end
         return Structure.new(elems: elems, ty: ty)
@@ -64,7 +64,7 @@ def self.make_expr_of_ty (
     when .struct_type_kind?
         raise "Cannot make an opaque struct" if LibLLVM_C.is_opaque_struct(ty) != 0
         nelems = LibLLVM_C.count_struct_element_types(ty)
-        elems = Array(DFGExpr).new(nelems) do |i|
+        elems = Array.new(nelems) do |i|
             elem_ty = LibLLVM_C.struct_get_type_at_index(ty, i)
             make_expr_of_ty(elem_ty, &block)
         end
@@ -84,7 +84,7 @@ def self.make_undef_expr_of_ty (ty)
             target_ty = LibLLVM_C.get_element_type(scalar_ty)
             UndefPointer.new(target_ty: target_ty)
         else
-            raise "Unexpected ScalarTypeKind value"
+            raise "unreachable"
         end
     end
 end

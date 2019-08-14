@@ -20,11 +20,11 @@ private class Structure < DFGExpr
         end
     end
 
-    def modify (&block : DFGExpr -> DFGExpr)
+    def modify! (&block : DFGExpr -> DFGExpr)
         (0...@elems.size).each do |i|
             elem = @elems[i]
             if elem.is_a? Structure
-                elem.modify &block
+                elem.modify! &block
             else
                 @elems[i] = block.call elem
             end

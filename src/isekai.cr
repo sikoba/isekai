@@ -5,7 +5,10 @@ require "./backend/booleanfactory"
 require "./zksnark/libsnark.cr"
 require "file_utils"
 require "option_parser"
+#require "./backend_alt/backend"
 # TODO require "./crystal/ast_dump"
+require "./backend_alt/board.cr"
+require "./backend_alt/backend.cr"
 
 include Isekai
 
@@ -63,14 +66,66 @@ class InputFile
     end
 end
 
+private def read_input_values (source_filename) : Array(Int32)
+    filename = "#{source_filename}.in"
+    values = [] of Int32
+    if File.exists?(filename)
+        File.each_line(filename) do |line|
+            values << line.to_i32
+        end
+    end
+    return values
+end
+
+private def write_input_values (circuit_filename, values, n_inputs, n_nizk_inputs)
+    File.open("#{circuit_filename}.in", "w") do |file|
+        n_total = n_inputs + 1 + n_nizk_inputs
+        (0...n_total).each do |i|
+            case i <=> n_inputs
+            when .< 0
+                value = values[i]? || 0
+            when .== 0
+                value = 1
+            else
+                value = values[i - 1]? || 0
+            end
+
+            file << i << " "
+            value.to_s(base: 16, io: file)
+            file << "\n"
+        end
+    end
+end
+
 class ParserProgram
     def create_circuit (input_file, arith_outfile, bool_outfile, options)
         case input_file.@kind
         when .bitcode?
             parser = LLVMFrontend::Parser.new(
                 input_file.@filename,
-                options.loop_sanity_limit,
-                options.bit_width)
+                loop_sanity_limit: options.loop_sanity_limit,
+                bit_width: options.bit_width)
+
+            inputs, nizk_inputs, outputs = parser.parse()
+
+            if options.print_exprs
+                puts outputs
+            end
+
+            board = AltBackend::Board.new(
+                inputs,
+                nizk_inputs,
+                output: File.open(arith_outfile, "w"))
+            outputs.each do |output|
+                AltBackend.lay_down_output! board, output
+            end
+            board.done!
+
+            values = read_input_values(input_file.@filename)
+            write_input_values(arith_outfile, values, inputs.size, nizk_inputs.size)
+
+            return
+
         when .c?
             parser = CFrontend::Parser.new(
                 input_file.@filename,
@@ -78,26 +133,18 @@ class ParserProgram
                 options.loop_sanity_limit,
                 options.bit_width,
                 options.progress)
+
         else
-            raise "Unsupported input_file.@kind"
+            raise "Unsupported input file extension"
         end
 
         inputs, nizk_inputs, output = parser.parse()
-
         if options.print_exprs
             puts output
         end
-
         # optional file containing the input values to the program
-        in_file = input_file.@filename + ".in"
-        in_array = [] of Int32
-        if File.exists?(in_file)
-            File.each_line(in_file) do |line|
-                in_array << line.to_i32 { 0 }
-            end
-        end
+        in_array = read_input_values(input_file.@filename)
         in_array << 0
-
         if arith_outfile != ""
             Backend::ArithFactory.new(
                 arith_outfile,
@@ -135,7 +182,7 @@ class ParserProgram
             parser.on("-r", "--r1cs=FILE", "R1CS output file") { |file| opts.r1cs_file = file }
             parser.on("-s", "--snark=FILE", "root file name") { |file| opts.root_file = file }
             parser.on("-v", "--verif=FILE", "input file name") { |file| opts.verif_file = file }
-            parser.on("-w", "--bit-width", "Width of the word in bits (used for overflow/bitwise operations)") { |width| opts.bit_width = width.to_i() }
+            parser.on("-w", "--bit-width=WIDTH", "Width of the word in bits (used for overflow/bitwise operations)") { |width| opts.bit_width = width.to_i() }
             parser.on("-l", "--loop-sanity-limit=LIMIT", "Limit on statically-measured loop unrolling") { |limit| opts.loop_sanity_limit = limit.to_i }
             parser.on("-p", "--progress", "Print progress messages during compilation") { opts.progress = true }
             parser.on("-i", "--ignore-overflow", "Ignore field-P overflows; never truncate") { opts.ignore_overflow = true }

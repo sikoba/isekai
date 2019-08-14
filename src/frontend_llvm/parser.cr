@@ -45,7 +45,7 @@ private def make_input_expr_of_ty (ty, which : InputBase::Kind) : {DFGExpr, Int3
         when TypeUtils::ScalarTypeKind::Pointer
             raise "Input structure contains a pointer"
         else
-            raise "Unexpected TypeUtils::ScalarTypeKind value"
+            raise "unreachable"
         end
     end
     return expr, offset
@@ -139,7 +139,7 @@ class Parser
         end
     end
 
-    private def inspect_outsource_param (value, which_param : OutsourceParam)
+    private def inspect_outsource_param (value, which_param : OutsourceParam) : Nil
         ty = LibLLVM_C.type_of(value)
         raise "outsource() parameter is not a pointer" unless
             LibLLVM_C.get_type_kind(ty).pointer_type_kind?
@@ -151,34 +151,34 @@ class Parser
 
         case which_param
         when OutsourceParam::Input
-            expr, flat_size = make_input_expr_of_ty(s_ty, InputBase::Kind::Input)
-            raise "Unexpected" unless expr.is_a? Structure
+            expr, _ = make_input_expr_of_ty(s_ty, InputBase::Kind::Input)
+            raise "unreachable" unless expr.is_a? Structure
             @input_struct = expr
-            # TODO: get rid of this
-            storage = Storage.new("input", flat_size)
-            expr.modify do |elem|
-                raise "Unexpected" unless elem.is_a? InputBase
-                Field.new(StorageKey.new(storage, elem.@idx), bitwidth: elem.@bitwidth)
-            end
+            ## TODO: get rid of this
+            #storage = Storage.new("input", flat_size)
+            #expr.modify! do |elem|
+            #    raise "unreachable" unless elem.is_a? InputBase
+            #    Field.new(StorageKey.new(storage, elem.@idx), bitwidth: elem.@bitwidth)
+            #end
 
         when OutsourceParam::NizkInput
-            expr, flat_size = make_input_expr_of_ty(s_ty, InputBase::Kind::NizkInput)
-            raise "Unexpected" unless expr.is_a? Structure
+            expr, _ = make_input_expr_of_ty(s_ty, InputBase::Kind::NizkInput)
+            raise "unreachable" unless expr.is_a? Structure
             @nizk_input_struct = expr
-            # TODO: get rid of this
-            storage = Storage.new("nizk_input", flat_size)
-            expr.modify do |elem|
-                raise "Unexpected" unless elem.is_a? InputBase
-                Field.new(StorageKey.new(storage, elem.@idx), bitwidth: elem.@bitwidth)
-            end
+            ## TODO: get rid of this
+            #storage = Storage.new("nizk_input", flat_size)
+            #expr.modify! do |elem|
+            #    raise "unreachable" unless elem.is_a? InputBase
+            #    Field.new(StorageKey.new(storage, elem.@idx), bitwidth: elem.@bitwidth)
+            #end
 
         when OutsourceParam::Output
             expr = TypeUtils.make_undef_expr_of_ty(s_ty)
-            raise "Unexpected" unless expr.is_a? Structure
+            raise "unreachable" unless expr.is_a? Structure
             @output_struct = expr
 
         else
-            raise "Unexpected OutsourceParam value: #{which_param}"
+            raise "unreachable"
         end
 
         @arguments[value] = StaticPointer.new(expr)
@@ -201,7 +201,7 @@ class Parser
         return expr
     end
 
-    private def store (at ptr : DFGExpr, value : DFGExpr)
+    private def store (at ptr : DFGExpr, value : DFGExpr) : Nil
         case ptr
         when AbstractPointer
             old_expr = ptr.load()
@@ -381,9 +381,7 @@ class Parser
             when .or?    then set_binary(ins, BitOr)
             when .xor?   then set_binary(ins, Xor)
             when .shl?   then set_binary(ins, LeftShift)
-
-            # TODO: is 'RightShift' signed or unsigned?
-            when .a_shr? then set_binary(ins, RightShift)
+            when .a_shr? then set_binary(ins, SignedRightShift)
             when .l_shr? then set_binary(ins, RightShift)
 
             # TODO: is 'Divide' signed or unsigned?
@@ -417,7 +415,7 @@ class Parser
                 when .int_uge? then set_binary_swapped(ins, CmpLEQ)
                 when .int_sge? then set_binary_swapped(ins, CmpLEQ)
 
-                else raise "Unknown 'icmp' predicate: #{pred}"
+                else raise "unreachable"
                 end
 
             when .z_ext? then set_bitwidth_cast(ins, ZeroExtend)
@@ -540,16 +538,18 @@ class Parser
     end
 
     private def make_input_array (s : Structure?)
-        return s ? s.flattened : [] of DFGExpr
+        return s ? s.flattened.map &.@bitwidth : [] of BitWidth
+        #return s ? s.flattened.size : 0
     end
 
     private def make_output_array (s : Structure?)
-        return [] of Tuple(StorageKey, DFGExpr) unless s
-        elems = s.flattened
-        storage = Storage.new("output", elems.size)
-        return Array(Tuple(StorageKey, DFGExpr)).new(elems.size) do |i|
-            {StorageKey.new(storage, i), elems[i]}
-        end
+        return s ? s.flattened : [] of DFGExpr
+        # return [] of Tuple(StorageKey, DFGExpr) unless s
+        # elems = s.flattened
+        # storage = Storage.new("output", elems.size)
+        # return Array(Tuple(StorageKey, DFGExpr)).new(elems.size) do |i|
+        #     {StorageKey.new(storage, i), elems[i]}
+        # end
     end
 
     private def inspect_outsource_func (func)
