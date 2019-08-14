@@ -13,6 +13,5 @@ void
 outsource(struct Input *input, struct Output *output)
 {
     output->x = input->a ^ (input->b | (input->c & input->d));
-    output->x = output->x >> 5;
     output->x = output->x << 2;
 }

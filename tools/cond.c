@@ -33,7 +33,7 @@ void outsource(struct Input *input, struct Output *output)
         if (y == 128) {
             x = x | 5;
         } else {
-            y = y >> 5;
+            y = y - 5;
         }
     }
     output->x = x & y;

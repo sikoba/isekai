@@ -7,8 +7,9 @@ require "file_utils"
 require "option_parser"
 #require "./backend_alt/backend"
 # TODO require "./crystal/ast_dump"
-require "./backend_alt/board.cr"
-require "./backend_alt/backend.cr"
+require "./backend_alt/board"
+require "./backend_alt/backend"
+require "./fmtconv"
 
 include Isekai
 
@@ -105,26 +106,19 @@ class ParserProgram
                 input_file.@filename,
                 loop_sanity_limit: options.loop_sanity_limit,
                 bit_width: options.bit_width)
+            inputs, nizk_inputs, outputs = FmtConv.new_to_old(*parser.parse())
 
-            inputs, nizk_inputs, outputs = parser.parse()
-
-            if options.print_exprs
-                puts outputs
-            end
-
-            board = AltBackend::Board.new(
-                inputs,
-                nizk_inputs,
-                output: File.open(arith_outfile, "w"))
-            outputs.each do |output|
-                AltBackend.lay_down_output! board, output
-            end
-            board.done!
-
-            values = read_input_values(input_file.@filename)
-            write_input_values(arith_outfile, values, inputs.size, nizk_inputs.size)
-
-            return
+            #board = AltBackend::Board.new(
+            #    inputs,
+            #    nizk_inputs,
+            #    output: File.open(arith_outfile, "w"))
+            #outputs.each do |output|
+            #    AltBackend.lay_down_output! board, output
+            #end
+            #board.done!
+            #values = read_input_values(input_file.@filename)
+            #write_input_values(arith_outfile, values, inputs.size, nizk_inputs.size)
+            #return
 
         when .c?
             parser = CFrontend::Parser.new(
@@ -133,14 +127,14 @@ class ParserProgram
                 options.loop_sanity_limit,
                 options.bit_width,
                 options.progress)
+            inputs, nizk_inputs, outputs = parser.parse()
 
         else
             raise "Unsupported input file extension"
         end
 
-        inputs, nizk_inputs, output = parser.parse()
         if options.print_exprs
-            puts output
+            puts outputs
         end
         # optional file containing the input values to the program
         in_array = read_input_values(input_file.@filename)
@@ -150,7 +144,7 @@ class ParserProgram
                 arith_outfile,
                 inputs,
                 nizk_inputs,
-                output,
+                outputs,
                 options.bit_width,
                 in_array)
         end
@@ -158,7 +152,7 @@ class ParserProgram
         #    Backend::BooleanFactory.new(
         #        bool_outfile,
         #        inputs,
-        #        output,
+        #        outputs,
         #        options.bit_width)
         #end
     end

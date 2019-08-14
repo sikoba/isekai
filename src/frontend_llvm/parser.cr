@@ -31,9 +31,9 @@ private def get_case_value_unchecked(ins, i) : Constant
     return make_constant_unchecked(value)
 end
 
-private def make_input_expr_of_ty (ty, which : InputBase::Kind) : {DFGExpr, Int32}
+private def make_input_expr_of_ty (ty, which : InputBase::Kind) : DFGExpr
     offset = 0
-    expr = TypeUtils.make_expr_of_ty(ty) do |kind, scalar_ty|
+    return TypeUtils.make_expr_of_ty(ty) do |kind, scalar_ty|
         case kind
         when TypeUtils::ScalarTypeKind::Integer
             result = InputBase.new(
@@ -48,7 +48,14 @@ private def make_input_expr_of_ty (ty, which : InputBase::Kind) : {DFGExpr, Int3
             raise "unreachable"
         end
     end
-    return expr, offset
+end
+
+private def make_input_array (s : Structure?)
+    return s ? s.flattened.map &.@bitwidth : [] of BitWidth
+end
+
+private def make_output_array (s : Structure?)
+    return s ? s.flattened : [] of DFGExpr
 end
 
 module Isekai::LLVMFrontend
@@ -151,26 +158,14 @@ class Parser
 
         case which_param
         when OutsourceParam::Input
-            expr, _ = make_input_expr_of_ty(s_ty, InputBase::Kind::Input)
+            expr = make_input_expr_of_ty(s_ty, InputBase::Kind::Input)
             raise "unreachable" unless expr.is_a? Structure
             @input_struct = expr
-            ## TODO: get rid of this
-            #storage = Storage.new("input", flat_size)
-            #expr.modify! do |elem|
-            #    raise "unreachable" unless elem.is_a? InputBase
-            #    Field.new(StorageKey.new(storage, elem.@idx), bitwidth: elem.@bitwidth)
-            #end
 
         when OutsourceParam::NizkInput
-            expr, _ = make_input_expr_of_ty(s_ty, InputBase::Kind::NizkInput)
+            expr = make_input_expr_of_ty(s_ty, InputBase::Kind::NizkInput)
             raise "unreachable" unless expr.is_a? Structure
             @nizk_input_struct = expr
-            ## TODO: get rid of this
-            #storage = Storage.new("nizk_input", flat_size)
-            #expr.modify! do |elem|
-            #    raise "unreachable" unless elem.is_a? InputBase
-            #    Field.new(StorageKey.new(storage, elem.@idx), bitwidth: elem.@bitwidth)
-            #end
 
         when OutsourceParam::Output
             expr = TypeUtils.make_undef_expr_of_ty(s_ty)
@@ -535,21 +530,6 @@ class Parser
                 raise "Unsupported instruction: #{ins}"
             end
         end
-    end
-
-    private def make_input_array (s : Structure?)
-        return s ? s.flattened.map &.@bitwidth : [] of BitWidth
-        #return s ? s.flattened.size : 0
-    end
-
-    private def make_output_array (s : Structure?)
-        return s ? s.flattened : [] of DFGExpr
-        # return [] of Tuple(StorageKey, DFGExpr) unless s
-        # elems = s.flattened
-        # storage = Storage.new("output", elems.size)
-        # return Array(Tuple(StorageKey, DFGExpr)).new(elems.size) do |i|
-        #     {StorageKey.new(storage, i), elems[i]}
-        # end
     end
 
     private def inspect_outsource_func (func)

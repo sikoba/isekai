@@ -4,7 +4,7 @@ require "./dynamic_range"
 
 module Isekai::AltBackend
 
-struct Wire
+private struct Wire
     def initialize (@index : Int32)
     end
 
@@ -13,9 +13,9 @@ struct Wire
     end
 end
 
-alias WireList = Array(Wire)
+private alias WireList = Array(Wire)
 
-struct OutputBuffer
+private struct OutputBuffer
     def initialize (@file : IO)
         @buf = IO::Memory.new
     end
@@ -214,6 +214,7 @@ class Board
     end
 
     def zext (w : Wire, from old_bitwidth : BitWidth, to new_bitwidth : BitWidth) : Wire
+        raise "This is truncation, not extension" unless old_bitwidth <= new_bitwidth
         return w
     end
 

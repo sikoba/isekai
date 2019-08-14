@@ -2,7 +2,7 @@ require "./bit_manip"
 
 module Isekai::AltBackend
 
-struct DynamicRange
+private struct DynamicRange
     @min_value : UInt64
     @max_value : UInt64
 

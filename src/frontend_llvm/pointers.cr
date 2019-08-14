@@ -205,6 +205,6 @@ module PointerFactory
             return DynamicFieldPointer.new(base: base, field: field)
         end
     end
-end
+end # module PointerFactory
 
-end
+end # module Isekai::LLVMFrontend

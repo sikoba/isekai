@@ -13,11 +13,6 @@ struct ConstTrace
     def self.new_bool (value : UInt64)
         return self.new(value, bitwidth: BitWidth.new(1))
     end
-
-    def extend (to new_bitwidth : BitWidth)
-        raise "This is truncation, not extension" unless new_bitwidth >= @bitwidth
-        return ConstTrace.new(@value, new_bitwidth)
-    end
 end
 
 struct WireTrace
@@ -28,11 +23,6 @@ struct WireTrace
 
     def self.new_bool (wire : Wire)
         return self.new(wire, bitwidth: BitWidth.new(1))
-    end
-
-    def extend (to new_bitwidth : BitWidth)
-        raise "This is truncation, not extension" unless new_bitwidth >= @bitwidth
-        return WireTrace.new(@wire, new_bitwidth)
     end
 end
 
@@ -74,9 +64,11 @@ def self.to_joined (board : Board, trace : Trace) : JoinedTrace
             if cur.is_a? ConstTrace
                 const_summand += cur.value << pos
             else
+                # we assume that the 'Board' class is smart enough to figure out this will not
+                # overflow:
                 bit_w = board.const_mul(1_u64 << pos, cur.wire, bitwidth: bitwidth)
                 if wire_summand
-                    # we assume that the 'Board' class is smart enough to figure out these will not
+                    # we assume that the 'Board' class is smart enough to figure out this will not
                     # overflow:
                     wire_summand = board.add(wire_summand, bit_w, bitwidth: bitwidth)
                 else
