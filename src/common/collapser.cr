@@ -5,8 +5,6 @@ require "./bitwidth.cr"
 module Isekai
 
 abstract class Collapser(ExprType, ReducedType)
-    private UNSPECIFIED_BITWIDTH = BitWidth.new(BitWidth::UNSPECIFIED)
-
     def initialize()
         @table = Hash(ExprType, (Constant|ReducedType)).new()
     end
@@ -48,10 +46,10 @@ abstract class Collapser(ExprType, ReducedType)
 
                 if ReducedType.is_a? DFGExpr
                     if res.is_a? Int64
-                        res = Constant.new(res, bitwidth: UNSPECIFIED_BITWIDTH)
+                        res = Constant.new(res, bitwidth: BitWidth.new_for_undefined)
                     end
                     if res.is_a? Bool
-                        res = Constant.new(res ? 1_i64 : 0_i64, bitwidth: UNSPECIFIED_BITWIDTH)
+                        res = Constant.new(res ? 1_i64 : 0_i64, bitwidth: BitWidth.new_for_undefined)
                     end
                 end
 
@@ -85,12 +83,12 @@ class ExpressionEvaluator(ExprType, ReducedType) < Collapser(ExprType, ReducedTy
     def collapse_impl(expr)
         evaluate = expr.evaluate(self)
         if evaluate.is_a? Int64
-            return Constant.new(evaluate, bitwidth: UNSPECIFIED_BITWIDTH)
+            return Constant.new(evaluate, bitwidth: BitWidth.new_for_undefined)
         elsif evaluate.is_a? Bool
             if evaluate
-                return Constant.new(1, bitwidth: UNSPECIFIED_BITWIDTH)
+                return Constant.new(1, bitwidth: BitWidth.new_for_undefined)
             else 
-                return Constant.new(0, bitwidth: UNSPECIFIED_BITWIDTH)
+                return Constant.new(0, bitwidth: BitWidth.new_for_undefined)
             end 
         else
             return evaluate.as(ReducedType)

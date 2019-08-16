@@ -6,12 +6,12 @@ require "llvm-crystal/lib_llvm_c"
 module Isekai::LLVMFrontend::TypeUtils
 
 # Assuming 'ty' is an integer type, returns its bit width as a 'BitWidth' object.
-def self.get_int_ty_bitwidth_unchecked (ty)
+def self.get_int_ty_bitwidth_unchecked (ty) : BitWidth
     return BitWidth.new(LibLLVM_C.get_int_type_width(ty).to_i32)
 end
 
 # If 'ty' is an integer type, returns its bit width as a 'BitWidth' object; raises otherwise.
-def self.get_int_ty_bitwidth (ty)
+def self.get_int_ty_bitwidth (ty) : BitWidth
     raise "Not an integer type" unless LibLLVM_C.get_type_kind(ty).integer_type_kind?
     return get_int_ty_bitwidth_unchecked(ty)
 end

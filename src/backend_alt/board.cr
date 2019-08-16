@@ -32,13 +32,13 @@ private struct OutputBuffer
         @buf << "nizkinput " << w << " # input\n"
     end
 
-    def write_const_mul (c : UInt64, w, output) : Nil
+    def write_const_mul (c, w, output) : Nil
         @buf << "const-mul-"
         c.to_s(base: 16, io: @buf)
         @buf << " in 1 <" << w << "> out 1 <" << output << ">\n"
     end
 
-    def write_const_mul_neg (c : UInt64, w, output) : Nil
+    def write_const_mul_neg (c, w, output) : Nil
         @buf << "const-mul-neg-"
         c.to_s(base: 16, io: @buf)
         @buf << " in 1 <" << w << "> out 1 <" << output << ">\n"
@@ -76,17 +76,12 @@ end
 
 class Board
     @one_const : Wire
-    @const_pool = {} of UInt64 => Wire
+    @const_pool = {} of UInt128 => Wire
     @inputs : Array(Tuple(Wire, BitWidth))
     @nizk_inputs : Array(Tuple(Wire, BitWidth))
     @dynamic_ranges = [] of DynamicRange
     @outbuf : OutputBuffer
-
-    private def allocate_wire_index!
-        result = @dynamic_ranges.size
-        @dynamic_ranges << DynamicRange.new_for constant: 0
-        result
-    end
+    @p_bits : Int32
 
     private def allocate_wire! (dynamic_range : DynamicRange) : Wire
         result = Wire.new(@dynamic_ranges.size)
@@ -97,21 +92,35 @@ class Board
     def initialize (
             input_bitwidths : Array(BitWidth),
             nizk_input_bitwidths : Array(BitWidth),
-            output : IO)
+            output : IO,
+            @p_bits : Int32)
 
         @outbuf = OutputBuffer.new(output)
 
-        @inputs      = input_bitwidths.map { |bw| {allocate_wire!(DynamicRange.new_for(bw)), bw} }
-        @one_const   = allocate_wire! DynamicRange.new_for constant: 1
-        @nizk_inputs = nizk_input_bitwidths.map { |bw| {allocate_wire!(DynamicRange.new_for(bw)), bw} }
+        @inputs = input_bitwidths.map do |bitwidth|
+            {allocate_wire!(DynamicRange.new_for_bitwidth(bitwidth)), bitwidth}
+        end
+        @one_const = allocate_wire! DynamicRange.new_for_const 1_u64
+        @nizk_inputs = nizk_input_bitwidths.map do |bitwidth|
+            {allocate_wire!(DynamicRange.new_for_bitwidth(bitwidth)), bitwidth}
+        end
 
         @inputs.each { |(w, _)| @outbuf.write_input(w) }
         @outbuf.write_one_input(@one_const)
         @nizk_inputs.each { |(w, _)| @outbuf.write_nizk_input(w) }
     end
 
-    def max_nbits (w : Wire, bitwidth : BitWidth)
-        @dynamic_ranges[w.@index].max_nbits
+    def max_nbits (w : Wire, width : Int32) : Int32
+        n = @dynamic_ranges[w.@index].max_nbits || @p_bits
+        BitManip.min(n, width)
+    end
+
+    private def may_exceed? (w : Wire, width : Int32) : Bool
+        return (@dynamic_ranges[w.@index].max_nbits || 0) > width
+    end
+
+    private def dangerous? (dyn_range : DynamicRange) : Bool
+        return (dyn_range.max_nbits || 0) >= @p_bits
     end
 
     def input (idx : Int32) : {Wire, BitWidth}
@@ -127,22 +136,32 @@ class Board
     end
 
     private def split_impl (w : Wire, into num : Int32) : WireList
-        result = WireList.new(num) { allocate_wire! DynamicRange.new_bool }
+        result = WireList.new(num) { allocate_wire! DynamicRange.new_for_bool }
         @outbuf.write_split(w, outputs: result)
         result
     end
 
-    private def yank (w : Wire, bitwidth : BitWidth) : Wire
-        bits = split_impl(w, into: bitwidth.@width)
-        result = bits[0]
+    private def lowbit (w : Wire) : Wire
+        if @dynamic_ranges[w.@index].fits_into_1bit?
+            w
+        else
+            split_impl(w, into: 1)[0]
+        end
+    end
+
+    private def yank (w : Wire, width : Int32) : Wire
+        bits = split_impl(w, into: width)
+        result = lowbit(bits[0])
         (1...bits.size).each do |i|
-            factor = 1_u64 << i
+            w = lowbit(bits[i])
+            factor = 1_u128 << i
+            dyn_range = DynamicRange.new_for_const factor
 
-            bit_w = allocate_wire_index!
-            @outbuf.write_const_mul(factor, bits[i], output: bit_w)
+            cur_w = allocate_wire! dyn_range
+            @outbuf.write_const_mul(factor, w, output: cur_w)
 
-            res_w = allocate_wire! DynamicRange.new_for BitWidth.new(i + 1)
-            @outbuf.write_add(result, bit_w, output: res_w)
+            res_w = allocate_wire! dyn_range
+            @outbuf.write_add(result, cur_w, output: res_w)
 
             result = res_w
         end
@@ -155,80 +174,141 @@ class Board
         split_impl(w, into: num)
     end
 
-    def zerop (w : Wire, bitwidth : BitWidth) : Wire
-        return w if @dynamic_ranges[w.@index].fits_into_1bit?
+    def zerop (w : Wire, width : Int32) : Wire
+        if may_exceed?(w, width)
+            arg = yank(w, width)
+        else
+            arg = w
+        end
+
+        if @dynamic_ranges[arg.@index].fits_into_1bit?
+            return arg
+        end
+
         # This operation has two output wires!
-        dummy = allocate_wire_index!
-        result = allocate_wire! DynamicRange.new_bool
-        @outbuf.write_zerop(w, dummy_output: dummy, output: result)
+        dummy = allocate_wire! DynamicRange.new_for_bool
+        result = allocate_wire! DynamicRange.new_for_bool
+        @outbuf.write_zerop(arg, dummy_output: dummy, output: result)
         result
     end
 
-    def const_mul (c : UInt64, w : Wire, bitwidth : BitWidth) : Wire
+    private def cast_to_safe_ww (w : Wire, x : Wire, width : Int32)
+        w_range = @dynamic_ranges[w.@index]
+        x_range = @dynamic_ranges[x.@index]
+        if w_range < x_range
+            w, x = x, w
+            w_range, x_range = x_range, w_range
+        end
+        # now, w_range >= x_range
+
+        new_range = yield w_range, x_range
+        unless dangerous?(new_range)
+            arg1, arg2 = w, x
+        else
+            arg1 = yank(w, width)
+            new_range = yield @dynamic_ranges[arg1.@index], x_range
+            unless dangerous?(new_range)
+                arg2 = x
+            else
+                arg2 = yank(x, width)
+                new_range = yield @dynamic_ranges[arg1.@index], @dynamic_ranges[arg2.@index]
+                raise "unreachable" if dangerous?(new_range)
+            end
+        end
+        return arg1, arg2, new_range
+    end
+
+    private def cast_to_safe_cw (c, w : Wire, width : Int32)
+        new_range = yield @dynamic_ranges[w.@index], c
+        unless dangerous?(new_range)
+            arg = w
+        else
+            arg = yank(w, width)
+            new_range = yield @dynamic_ranges[arg.@index], c
+            raise "unreachable" if dangerous?(new_range)
+        end
+        return arg, new_range
+    end
+
+    def const_mul (c, w : Wire, width : Int32) : Wire
         raise "Missed optimization" if c == 0
         return w if c == 1
 
-        w_range = @dynamic_ranges[w.@index]
-        new_range, overflow = w_range.mul(DynamicRange.new_for(constant: c), bitwidth)
-        result = allocate_wire! new_range
+        arg, new_range = cast_to_safe_cw(c, w, width) { |a, b| a * b }
 
+        result = allocate_wire! new_range
         @outbuf.write_const_mul(c, w, output: result)
-
-        overflow ? yank(result, bitwidth) : result
+        result
     end
 
-    def mul (w : Wire, x : Wire, bitwidth : BitWidth) : Wire
-        w_range = @dynamic_ranges[w.@index]
-        x_range = @dynamic_ranges[x.@index]
-        new_range, overflow = w_range.mul(x_range, bitwidth)
+    def mul (w : Wire, x : Wire, width : Int32) : Wire
+        arg1, arg2, new_range = cast_to_safe_ww(w, x, width) { |a, b| a * b }
+
         result = allocate_wire! new_range
-
-        @outbuf.write_mul(w, x, output: result)
-
-        overflow ? yank(result, bitwidth) : result
+        @outbuf.write_mul(arg1, arg2, output: result)
+        result
     end
 
-    def add (w : Wire, x : Wire, bitwidth : BitWidth) : Wire
-        w_range = @dynamic_ranges[w.@index]
-        x_range = @dynamic_ranges[x.@index]
-        new_range, overflow = w_range.add(x_range, bitwidth)
+    def add (w : Wire, x : Wire, width : Int32) : Wire
+        arg1, arg2, new_range = cast_to_safe_ww(w, x, width) { |a, b| a + b }
+
         result = allocate_wire! new_range
-
-        @outbuf.write_add(w, x, output: result)
-
-        overflow ? yank(result, bitwidth) : result
+        @outbuf.write_add(arg1, arg2, output: result)
+        result
     end
 
-    def const_add (c : UInt64, w : Wire, bitwidth : BitWidth) : Wire
+    def const_add (c, w : Wire, width : Int32) : Wire
         return w if c == 0
-        if bitwidth.@width == 1
-            # since 'c' is not 0, is must be '1'; this is 'logical not'
-            neg_w = allocate_wire_index!
-            @outbuf.write_const_mul_neg(1, w, output: neg_w)
-            result = allocate_wire! DynamicRange.new_bool
-            @outbuf.write_add(@one_const, neg_w, output: result)
-            result
+
+        arg, new_range = cast_to_safe_cw(c, w, width) { |a, b| a + b }
+
+        result = allocate_wire! new_range
+        @outbuf.write_add(arg, constant(c), output: result)
+        result
+    end
+
+    def const_mul_neg (c, w : Wire, width : Int32) : Wire
+        if may_exceed?(w, width)
+            arg = yank(w, width)
         else
-            add(constant(c), w, bitwidth)
+            arg = w
         end
+        result = allocate_wire! DynamicRange.new_for_undefined
+        @outbuf.write_const_mul_neg(c, arg, output: result)
+        result
     end
 
-    def zext (w : Wire, from old_bitwidth : BitWidth, to new_bitwidth : BitWidth) : Wire
-        raise "This is truncation, not extension" unless old_bitwidth <= new_bitwidth
-        return w
+    def unsafe_assume_1bit! (w : Wire) : Nil
+        @dynamic_ranges[w.@index] = DynamicRange.new_for_bool
     end
 
-    def constant (c : UInt64) : Wire
+    def zext (w : Wire, from old_width : Int32, to new_width : Int32) : Wire
+        raise "This is truncation, not extension" unless old_width <= new_width
+        if may_exceed?(w, old_width)
+            result = yank(w, old_width)
+        else
+            result = w
+        end
+        result
+    end
+
+    def constant (c) : Wire
+        c = c.to_u128
         return one_constant if c == 1
         return @const_pool.fetch(c) do
-            result = allocate_wire! DynamicRange.new_for constant: c
+            result = allocate_wire! DynamicRange.new_for_const c
             @outbuf.write_const_mul(c, @one_const, output: result)
             result
         end
     end
 
-    def add_output! (w : Wire) : Nil
-        @outbuf.write_output w
+    def add_output! (w : Wire, width : Int32) : Nil
+        if may_exceed?(w, width)
+            arg = yank(w, width)
+        else
+            arg = w
+        end
+        @outbuf.write_output arg
     end
 
     def done! : Nil

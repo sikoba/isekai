@@ -1,34 +1,38 @@
 require "intrinsics"
 
-private macro def_comparison_ops (ops)
-    {% for op in ops %}
-        def {{ op.id }} (other)
-            (self <=> other) {{ op.id }} 0
-        end
-    {% end %}
-end
-
 module Isekai
 
 class BitWidthsIncompatible < Exception
 end
 
+# Assumes width <= 64.
 struct BitWidth
+    include Comparable(BitWidth)
+
+    private UNDEFINED = -1
 
     @[AlwaysInline]
     def self.all_ones (n)
         (1_u64 << n) - 1
     end
 
-    UNSPECIFIED = -1
-
     @[AlwaysInline]
     def initialize (@width : Int32)
     end
 
     @[AlwaysInline]
-    def unspecified?
-        @width == UNSPECIFIED
+    def self.new_for_undefined
+        self.new(UNDEFINED)
+    end
+
+    @[AlwaysInline]
+    def self.new_for_bool
+        self.new(1)
+    end
+
+    @[AlwaysInline]
+    def undefined?
+        @width == UNDEFINED
     end
 
     @[AlwaysInline]
@@ -46,17 +50,15 @@ struct BitWidth
         value & mask
     end
 
-    def & (other : BitWidth)
-        return other if unspecified?
-        return self if other.unspecified? || @width == other.@width
+    def assert_common! (other : BitWidth)
+        return other if undefined?
+        return self if other.undefined? || @width == other.@width
         raise BitWidthsIncompatible.new
     end
 
     def <=> (other : BitWidth)
         @width <=> other.@width
     end
-
-    def_comparison_ops %i(< <= == != >= >)
 
     def sign_extend_to (value : UInt64, to : BitWidth) : UInt64
         hi = value & sign_bit

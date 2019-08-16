@@ -50,7 +50,9 @@ class UnaryOp
     end
 end
 
-module FmtConv
+end # module Isekai
+
+module Isekai::FmtConv
 
 private def self.make_input_fields (bws : Array(BitWidth), name : String) : Array(DFGExpr)
     storage = Storage.new(name, bws.size)
@@ -87,4 +89,3 @@ def self.new_to_old (
 end
 
 end # module Isekai::FmtConv
-end # module Isekai

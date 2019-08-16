@@ -70,7 +70,7 @@ end
 # (it only performs side effects).
 class Void < DFGExpr
     def initialize ()
-        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
+        super(bitwidth: BitWidth.new_for_undefined)
     end
 
     #add_object_helpers
@@ -79,7 +79,7 @@ end
 # Undefined operation. Raised if the operation is not supported.
 class Undefined < DFGExpr
     def initialize ()
-        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
+        super(bitwidth: BitWidth.new_for_undefined)
     end
 
     #add_object_helpers
@@ -131,7 +131,7 @@ end
 # Operation on the array.
 class ArrayOp < DFGExpr
     def initialize ()
-        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
+        super(bitwidth: BitWidth.new_for_undefined)
     end
 end
 
@@ -217,7 +217,7 @@ end
 class Conditional < DFGExpr
     #add_object_helpers
     def initialize (@cond : DFGExpr, @valtrue : DFGExpr, @valfalse : DFGExpr)
-        super(valtrue.@bitwidth & valfalse.@bitwidth)
+        super(valtrue.@bitwidth.assert_common! valfalse.@bitwidth)
     end
 
     def evaluate (collapser)
@@ -296,7 +296,7 @@ end
 class BinaryMath < BinaryOp
     ##add_object_helpers
     def initialize (@op, @crystalop : DFGOperator, @identity : (Int32|Nil), @left, @right)
-        super(@op, @left, @right, bitwidth: left.@bitwidth & right.@bitwidth)
+        super(@op, @left, @right, bitwidth: left.@bitwidth.assert_common! right.@bitwidth)
     end
 
     def evaluate (collapser)
@@ -329,7 +329,7 @@ end
 
 class BinaryPredicate < BinaryOp
     def initialize (@op, @left, @right)
-        super(@op, @left, @right, bitwidth: BitWidth.new(1))
+        super(@op, @left, @right, bitwidth: BitWidth.new_for_bool)
     end
 end
 
@@ -736,14 +736,13 @@ class Truncate < UnaryOp
 end
 
 def self.dfg_make_binary (klass, left, right)
-    if left.is_a? Constant
-        if right.is_a? Constant
-            bitwidth = left.@bitwidth & right.@bitwidth
-            Constant.new(klass.static_eval(left.@value, right.@value, bitwidth), bitwidth)
-        else
-            klass.simplify_left(left, right)
-        end
-    elsif right.is_a? Constant
+    case {left, right}
+    when {Constant, Constant}
+        bitwidth = left.@bitwidth.assert_common! right.@bitwidth
+        Constant.new(klass.static_eval(left.@value, right.@value, bitwidth), bitwidth)
+    when {Constant, _}
+        klass.simplify_left(left, right)
+    when {_, Constant}
         klass.simplify_right(left, right)
     else
         klass.new(left, right)

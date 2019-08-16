@@ -23,6 +23,11 @@ def self.nbits (c : UInt64) : Int32
 end
 
 @[AlwaysInline]
+def self.nbits (c : UInt128) : Int32
+    128 - Intrinsics.countleading128(c, zero_is_undef: false)
+end
+
+@[AlwaysInline]
 def self.add_in_bitwidth (a : UInt64, b : UInt64, bitwidth : BitWidth) : {UInt64, Bool}
     if bitwidth.@width == 64
         # In some reason, this does not link with 'build --release':
@@ -47,6 +52,16 @@ def self.mul_in_bitwidth (a : UInt64, b : UInt64, bitwidth : BitWidth) : {UInt64
         result = bitwidth.truncate(exact_result)
         return {result, result != exact_result}
     end
+end
+
+@[AlwaysInline]
+def self.min(a, b)
+    a < b ? a : b
+end
+
+@[AlwaysInline]
+def self.max(a, b)
+    a > b ? a : b
 end
 
 end

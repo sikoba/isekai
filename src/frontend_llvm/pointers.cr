@@ -4,10 +4,11 @@ require "./structure"
 require "./type_utils"
 require "llvm-crystal/lib_llvm_c"
 
-include Isekai
+module Isekai::LLVMFrontend
+extend self
 
 # Assumes that both 'a' and 'b' are of integer type.
-private def bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
+def bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
     case a.@bitwidth <=> b.@bitwidth
     when .< 0
         a = Isekai.dfg_make_bitwidth_cast(SignExtend, a, b.@bitwidth)
@@ -17,7 +18,7 @@ private def bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
     return Isekai.dfg_make_binary(Add, a, b)
 end
 
-private def make_undef_array_elem (arr : Structure) : DFGExpr
+def make_undef_array_elem (arr : Structure) : DFGExpr
     sig = TypeUtils.get_complex_type_signature(arr.@ty)
     case sig
     when {LibLLVM_C::TypeRef, Int32}
@@ -30,11 +31,9 @@ private def make_undef_array_elem (arr : Structure) : DFGExpr
     end
 end
 
-module Isekai::LLVMFrontend
-
 abstract class AbstractPointer < DFGExpr
     def initialize ()
-        super(bitwidth: BitWidth.new(BitWidth::UNSPECIFIED))
+        super(bitwidth: BitWidth.new_for_undefined)
     end
 
     # Should return '*ptr'
@@ -101,7 +100,7 @@ class StaticFieldPointer < AbstractPointer
     def load : DFGExpr
         unless valid?
             Log.log.info("possible undefined behavior: array index is out of bounds")
-            return make_undef_array_elem(@base)
+            return LLVMFrontend.make_undef_array_elem(@base)
         end
         @base.@elems[@field]
     end
@@ -115,7 +114,7 @@ class StaticFieldPointer < AbstractPointer
     end
 
     def move (by offset : DFGExpr) : DFGExpr
-        new_field = bitwidth_safe_signed_add(
+        new_field = LLVMFrontend.bitwidth_safe_signed_add(
             offset,
             Constant.new(@field.to_i64, BitWidth.new(32)))
         return PointerFactory.bake_field_pointer(base: @base, field: new_field)
@@ -167,7 +166,7 @@ class DynamicFieldPointer < AbstractPointer
     def load : DFGExpr
         unless (n = @max_size)
             Log.log.info("possible undefined behavior: index is undefined or always invalid")
-            return make_undef_array_elem(@base)
+            return LLVMFrontend.make_undef_array_elem(@base)
         end
         return make_bsearch_expr(0, n)
     end
@@ -192,7 +191,7 @@ class DynamicFieldPointer < AbstractPointer
     end
 
     def move (by offset : DFGExpr) : DFGExpr
-        new_field = bitwidth_safe_signed_add(offset, @field)
+        new_field = LLVMFrontend.bitwidth_safe_signed_add(offset, @field)
         return PointerFactory.bake_field_pointer(base: @base, field: new_field)
     end
 end

@@ -9,8 +9,6 @@ require "../common/bitwidth"
 module Isekai::CFrontend
     # Class that parses and transforms C code into internal state
     class Parser
-        private UNSPECIFIED_BITWIDTH = BitWidth.new(BitWidth::UNSPECIFIED)
-
         @parsed : State?
         @ast_cursor : Clang::Cursor?
 
@@ -179,7 +177,7 @@ module Isekai::CFrontend
                     # For every element in the input array, declare the Input/NIZKInput nodes
                     (0..(input_storage_ref).@type.sizeof-1).each do |idx|
                         sk = StorageKey.new(input_storage_ref.@storage, idx)
-                        input = dfg(Field, sk, UNSPECIFIED_BITWIDTH)
+                        input = dfg(Field, sk, BitWidth.new_for_undefined)
                         input_list << input
                         symtab.assign(sk, input)
                     end
@@ -467,7 +465,7 @@ module Isekai::CFrontend
                         end
                 else
                     (0..store_type.sizeof-1).each do |i|
-                        symtab.declare(StorageKey.new(storage, i), dfg(Constant, 0_i64, UNSPECIFIED_BITWIDTH))
+                        symtab.declare(StorageKey.new(storage, i), dfg(Constant, 0_i64, BitWidth.new_for_undefined))
                     end
                 end
 
@@ -605,7 +603,7 @@ module Isekai::CFrontend
             # Resolves the expression and gets its value, if the
             # expression is a literal
             def decode_expression (literal : Int32, symtab) : State
-                return State.new(dfg(Constant, literal.to_i64, UNSPECIFIED_BITWIDTH), symtab)
+                return State.new(dfg(Constant, literal.to_i64, BitWidth.new_for_undefined), symtab)
             end
 
             # Takes an expression and a symbol table, and recursively transforms
@@ -703,7 +701,7 @@ module Isekai::CFrontend
                 when .integer_literal?
                     value = ClangUtils.getCursorValue(expression)
                     raise "Integer literal can't be resolved #{expression}" unless !value.is_a? Nil
-                    return State.new(dfg(Constant, value.to_i32.to_i64, UNSPECIFIED_BITWIDTH), symtab)
+                    return State.new(dfg(Constant, value.to_i32.to_i64, BitWidth.new_for_undefined), symtab)
                     # This is a just a wrapper around real expression,
                     # in order to resolve it, we just unwrap it and do it recursively
                 when .first_expr?

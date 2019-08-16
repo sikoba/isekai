@@ -10,11 +10,12 @@ require "./type_utils"
 require "llvm-crystal/lib_llvm"
 require "llvm-crystal/lib_llvm_c"
 
-include Isekai::LLVMFrontend
+module Isekai::LLVMFrontend
+extend self
 
 # Assuming 'value' is a constant integer value, returns its value as a 'Constant' with the
 # appropriate bitwidth.
-private def make_constant_unchecked (value) : Constant
+def make_constant_unchecked (value) : Constant
     ty = LibLLVM_C.type_of(value)
     return Constant.new(
         LibLLVM_C.const_int_get_z_ext_value(value).to_i64,
@@ -24,14 +25,14 @@ end
 # Assuming 'ins' is a switch instruction, returns the value of the case with number 'i'.
 # 'i' is 1-based if we only consider 'case' statements without 'default', and 0-based if we consider
 # all the successors, of which the zeroth is the default (thus 'i == 0' is not allowed).
-private def get_case_value_unchecked(ins, i) : Constant
+def get_case_value_unchecked(ins, i) : Constant
     value = LibLLVM_C.get_operand(ins, i * 2)
     raise "Case value is not an integer constant" unless
         LibLLVM_C.get_value_kind(value).constant_int_value_kind?
     return make_constant_unchecked(value)
 end
 
-private def make_input_expr_of_ty (ty, which : InputBase::Kind) : DFGExpr
+def make_input_expr_of_ty (ty, which : InputBase::Kind) : DFGExpr
     offset = 0
     return TypeUtils.make_expr_of_ty(ty) do |kind, scalar_ty|
         case kind
@@ -50,15 +51,13 @@ private def make_input_expr_of_ty (ty, which : InputBase::Kind) : DFGExpr
     end
 end
 
-private def make_input_array (s : Structure?)
+def make_input_array (s : Structure?)
     return s ? s.flattened.map &.@bitwidth : [] of BitWidth
 end
 
-private def make_output_array (s : Structure?)
+def make_output_array (s : Structure?)
     return s ? s.flattened : [] of DFGExpr
 end
-
-module Isekai::LLVMFrontend
 
 class Parser
 
@@ -108,6 +107,16 @@ class Parser
         def []= (k : LibLLVM::Instruction, v)
             @hash[k.to_unsafe] = v
         end
+
+        @[AlwaysInline]
+        def fetch (k : LibLLVM_C::ValueRef)
+            @hash.fetch(k) { yield }
+        end
+
+        @[AlwaysInline]
+        def fetch (k : LibLLVM::Instruction)
+            @hash.fetch(k.to_unsafe) { yield }
+        end
     end
 
     enum OutsourceParam
@@ -139,10 +148,8 @@ class Parser
     end
 
     private def make_undef_expr_of_ty_cached (ty, cache_token)
-        begin
-            return @cached_undef_exprs[cache_token]
-        rescue KeyError
-            return @cached_undef_exprs[cache_token] = TypeUtils.make_undef_expr_of_ty(ty)
+        return @cached_undef_exprs.fetch(cache_token) do
+            @cached_undef_exprs[cache_token] = TypeUtils.make_undef_expr_of_ty(ty)
         end
     end
 
@@ -158,12 +165,12 @@ class Parser
 
         case which_param
         when OutsourceParam::Input
-            expr = make_input_expr_of_ty(s_ty, InputBase::Kind::Input)
+            expr = LLVMFrontend.make_input_expr_of_ty(s_ty, InputBase::Kind::Input)
             raise "unreachable" unless expr.is_a? Structure
             @input_struct = expr
 
         when OutsourceParam::NizkInput
-            expr = make_input_expr_of_ty(s_ty, InputBase::Kind::NizkInput)
+            expr = LLVMFrontend.make_input_expr_of_ty(s_ty, InputBase::Kind::NizkInput)
             raise "unreachable" unless expr.is_a? Structure
             @nizk_input_struct = expr
 
@@ -188,7 +195,7 @@ class Parser
             # this is a reference to a local value created by 'value' instruction
             expr = @locals[value]
         when .constant_int_value_kind?
-            expr = make_constant_unchecked(value)
+            expr = LLVMFrontend.make_constant_unchecked(value)
         else
             raise "Unsupported value kind: #{kind}"
         end
@@ -281,12 +288,10 @@ class Parser
     end
 
     private def get_phi_value (ins) : DFGExpr
-        begin
-            # Note no 'as_expr()' here, as it calls '@assumption.reduce' on the result, which we
-            # don't want here.
-            return @locals[ins]
-        rescue KeyError
-            return make_undef_expr_of_ty_cached(LibLLVM_C.type_of(ins), cache_token: ins)
+        # Note no 'as_expr()' here, as it calls '@assumption.reduce' on the result, which we
+        # don't want here.
+        return @locals.fetch(ins) do
+            make_undef_expr_of_ty_cached(LibLLVM_C.type_of(ins), cache_token: ins)
         end
     end
 
@@ -499,7 +504,7 @@ class Parser
                 arg = as_expr(LibLLVM_C.get_operand(ins, 0))
                 if arg.is_a? Constant
                     (1...successors.size).each do |i|
-                        if get_case_value_unchecked(ins, i).@value == arg.@value
+                        if LLVMFrontend.get_case_value_unchecked(ins, i).@value == arg.@value
                             return successors[i]
                         end
                     end
@@ -509,7 +514,8 @@ class Parser
                 sink, _ = @preproc_data[bb]
                 # inspect each case
                 (1...successors.size).each do |i|
-                    cond = Isekai.dfg_make_binary(CmpEQ, arg, get_case_value_unchecked(ins, i))
+                    cond = Isekai.dfg_make_binary(
+                        CmpEQ, arg, LLVMFrontend.get_case_value_unchecked(ins, i))
 
                     @assumption.push(cond, true)
                     inspect_basic_block_until(successors[i], terminator: sink)
@@ -557,9 +563,9 @@ class Parser
         raise "Sanity-check failed" unless @assumption.empty?
 
         return {
-            make_input_array(@input_struct),
-            make_input_array(@nizk_input_struct),
-            make_output_array(@output_struct),
+            LLVMFrontend.make_input_array(@input_struct),
+            LLVMFrontend.make_input_array(@nizk_input_struct),
+            LLVMFrontend.make_output_array(@output_struct),
         }
     end
 

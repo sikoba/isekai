@@ -3,15 +3,38 @@ require "../common/bitwidth"
 require "./board"
 require "./trace"
 
-private alias SplitTrace = AltBackend::SplitTrace
-private alias WireTrace = AltBackend::WireTrace
-private alias ConstTrace = AltBackend::ConstTrace
-private alias JoinedTrace = AltBackend::JoinedTrace
-private alias Trace = AltBackend::Trace
+private alias ConstTrace = Isekai::AltBackend::ConstTrace
+private alias WireTrace = Isekai::AltBackend::WireTrace
+private alias JoinedTrace = Isekai::AltBackend::JoinedTrace
+private alias SplitTrace = Isekai::AltBackend::SplitTrace
+private alias Trace = Isekai::AltBackend::Trace
 
 private def zip_map (left : SplitTrace, right : SplitTrace) : SplitTrace
     raise "Sizes differ" unless left.size == right.size
     return SplitTrace.new(left.size) { |i| yield left[i], right[i] }
+end
+
+private def lay_down_bor_cw (board, c, j : JoinedTrace) : JoinedTrace
+    return (c == 0) ? j : ConstTrace.new_bool(1)
+end
+
+private def lay_down_bor_ww (board, j : JoinedTrace, k : JoinedTrace) : JoinedTrace
+    # There are at least three ways to compute j|k for single bits:
+    # 1. j + k + j*k, everything modulo 2;
+    # 2. j + k - j*k, no modulo;
+    # 3. zerop(j + k), no modulo.
+    # We choose the third.
+
+    ext_j = Isekai::AltBackend.joined_zext(board, j, 2)
+    ext_k = Isekai::AltBackend.joined_zext(board, k, 2)
+    ext_sum = Isekai::AltBackend.joined_add(board, ext_j, ext_k)
+    return Isekai::AltBackend.joined_zerop(board, ext_sum)
+end
+
+private def lay_down_shr (left_bits, right)
+    raise "Not yet implemented" unless right.is_a? ConstTrace
+    shift = right.value
+    return SplitTrace.new(left_bits.size) { |i| left_bits[i + shift]? || yield }
 end
 
 module Isekai
@@ -39,7 +62,7 @@ class InputBase
         else
             raise "unreachable"
         end
-        return WireTrace.new(wire, bitwidth)
+        return WireTrace.new(wire, bitwidth.@width)
     end
 end
 
@@ -48,7 +71,7 @@ class Constant
     end
 
     def lay_down (board, deps)
-        return ConstTrace.new(@value.to_u64, @bitwidth)
+        return ConstTrace.new(@value.to_u64, @bitwidth.@width)
     end
 end
 
@@ -63,27 +86,22 @@ class Conditional
             valtrue, valfalse = valfalse, valtrue
         end
 
-        array << cond
-        array << valtrue
-        array << valfalse
+        not_cond = Isekai.dfg_make_binary(Add, cond, Constant.new(1, cond.@bitwidth))
+
+        cond_is_true, cond_is_false = cond, not_cond
+        unless @bitwidth == @cond.@bitwidth
+            cond_is_true  = Isekai.dfg_make_bitwidth_cast(ZeroExtend, cond_is_true,  @bitwidth)
+            cond_is_false = Isekai.dfg_make_bitwidth_cast(ZeroExtend, cond_is_false, @bitwidth)
+        end
+
+        array << Isekai.dfg_make_binary(
+            Add,
+            Isekai.dfg_make_binary(Multiply, cond_is_true, valtrue),
+            Isekai.dfg_make_binary(Multiply, cond_is_false, valfalse))
     end
 
     def lay_down (board, deps)
-        cond = AltBackend.to_joined(board, deps[0])
-        valtrue = AltBackend.to_joined(board, deps[1])
-        valfalse = AltBackend.to_joined(board, deps[2])
-
-        not_cond = AltBackend.joined_add(board, ConstTrace.new_bool(1), cond)
-
-        cond_is_true, cond_is_false = cond, not_cond
-        unless @cond.@bitwidth == @bitwidth
-            cond_is_true = AltBackend.joined_zext(board, cond_is_true, @bitwidth)
-            cond_is_false = AltBackend.joined_zext(board, cond_is_false, @bitwidth)
-        end
-
-        true_term = AltBackend.joined_mul(board, cond_is_true, valtrue)
-        false_term = AltBackend.joined_mul(board, cond_is_false, valfalse)
-        return AltBackend.joined_add(board, true_term, false_term)
+        return deps[0]
     end
 end
 
@@ -140,24 +158,15 @@ class BitAnd
     end
 end
 
-private def lay_down_bor_cw (board, c : UInt64, w)
-    return (c == 0) ? w : ConstTrace.new_bool(1)
-end
-
-private def lay_down_bor_ww (board, w, x)
-    # TODO: replace this with 'w+x-w*x' without modulo
-    prod = AltBackend.joined_mul(board, w, x)
-    return AltBackend.joined_add(board, AltBackend.joined_add(board, w, x), prod)
-end
-
 class BitOr
     def lay_down (board, deps)
         left = AltBackend.to_split(board, deps[0])
         right = AltBackend.to_split(board, deps[1])
         return zip_map(left, right) do |a, b|
-            if a.is_a? ConstTrace
+            case {a, b}
+            when {ConstTrace, _}
                 lay_down_bor_cw(board, a.value, b)
-            elsif b.is_a? ConstTrace
+            when {_, ConstTrace}
                 lay_down_bor_cw(board, b.value, a)
             else
                 lay_down_bor_ww(board, a, b)
@@ -168,20 +177,20 @@ end
 
 class LeftShift
     def lay_down (board, deps)
-        left = AltBackend.to_joined(board, deps[0])
         right = AltBackend.to_joined(board, deps[1])
         raise "Not yet implemented" unless right.is_a? ConstTrace
-
         shift = right.value
-        factor = ConstTrace.new(@bitwidth.truncate(1_u64 << shift), @bitwidth)
-        return AltBackend.joined_mul(board, left, factor)
-    end
-end
 
-private def lay_down_shr (left_bits, right)
-    raise "Not yet implemented" unless right.is_a? ConstTrace
-    shift = right.value
-    return SplitTrace.new(left_bits.size) { |i| left_bits[i + shift]? || yield }
+        left = deps[0]
+        if left.is_a? JoinedTrace
+            factor = @bitwidth.truncate(1_u64 << shift)
+            return AltBackend.joined_mul_const(board, factor, left)
+        else
+            return SplitTrace.new(left.size) do |i|
+                i < shift ? ConstTrace.new_bool(0) : left[i - shift]
+            end
+        end
+    end
 end
 
 class RightShift
@@ -200,15 +209,6 @@ class SignedRightShift
     end
 end
 
-# Comparisons of unsigned integers: perform subtraction (a - b) and look at the flags of the result.
-# C is the 'carry' flag, Z is the 'zero' flag.
-# ---
-# a >  b: C=1 and Z=0
-# a >= b: C=1
-# a =  b: Z=1
-# a <  b: C=0
-# a <= b: C=0 or Z=1
-
 class CmpNEQ
     def append_deps (to array : Array(DFGExpr)) : Nil
         array << Isekai.dfg_make_binary(Subtract, @left, @right)
@@ -222,45 +222,72 @@ end
 
 class CmpEQ
     def append_deps (to array : Array(DFGExpr)) : Nil
-        array << Isekai.dfg_make_binary(Subtract, @left, @right)
+        array << Isekai.dfg_make_binary(CmpNEQ, @left, @right)
     end
 
     def lay_down (board, deps)
-        diff = AltBackend.to_joined(board, deps[0])
-        neq = AltBackend.joined_zerop(board, diff)
-        return AltBackend.joined_add(board, ConstTrace.new_bool(1), neq)
+        neq = AltBackend.to_joined(board, deps[0])
+        return AltBackend.joined_add_const(board, 1_u64, neq)
     end
 end
 
-#class CmpLT
-#    # This implementation seems to be wrong.
-#
-#    def append_deps (to array : Array(DFGExpr)) : Nil
-#        array << Isekai.dfg_make_binary(Subtract, @left, @right)
-#    end
-#
-#    def lay_down (board, deps)
-#        bits = as_split(board, deps[0], into: @bitwidth.@width)
-#        return bits.last
-#    end
-#end
-#
-#class CmpLEQ
-#    # This implementation seems to be wrong.
-#
-#    def append_deps (to array : Array(DFGExpr)) : Nil
-#        right_plus_one = Isekai.dfg_make_binary(
-#            Add,
-#            @right,
-#            Constant.new(1, bitwidth: @bitwidth))
-#        array << Isekai.dfg_make_binary(Subtract, @left, right_plus_one)
-#    end
-#
-#    def lay_down (board, deps)
-#        bits = as_split(board, deps[0], into: @bitwidth.@width)
-#        return bits.last
-#    end
-#end
+class CmpLT
+    def lay_down (board, deps)
+        left = AltBackend.to_joined(board, deps[0])
+        right = AltBackend.to_joined(board, deps[1])
+
+        if left.is_a? ConstTrace
+            if left.value == @bitwidth.mask
+                # Rewrite 'MAX < x' into '0'.
+                return ConstTrace.new_bool(0_u64)
+            elsif left.value == 0
+                # Rewrite '0 < x' into 'x != 0'.
+                return AltBackend.joined_zerop(board, right)
+            end
+        end
+        if right.is_a? ConstTrace
+            if right.value == 0
+                # Rewrite 'x < 0' into '0'.
+                return ConstTrace.new_bool(0_u64)
+            elsif right.value == @bitwidth.mask
+                # Rewrite 'x < MAX' into 'x + 1 != 0'.
+                right_plus_one = AltBackend.joined_add_const(board, 1_u64, right)
+                return AltBackend.joined_zerop(board, right_plus_one)
+            end
+        end
+
+        new_width = @left.@bitwidth.@width + 1
+        ext_left = AltBackend.joined_zext(board, left, new_width)
+        ext_right = AltBackend.joined_zext(board, right, new_width)
+
+        ext_minus_one = (1_u128 << new_width) - 1
+
+        case {ext_left, ext_right}
+        when {ConstTrace, ConstTrace}
+            return ConstTrace.new_bool(ext_left.value < ext_right.value ? 1_u64 : 0_u64)
+        when {WireTrace, ConstTrace}
+            right_summand = (ext_minus_one * ext_right.value) & ext_minus_one
+            diff = AltBackend.joined_add_const(board, right_summand, ext_left)
+        else
+            right_summand = AltBackend.joined_mul_const(board, ext_minus_one, ext_right)
+            diff = AltBackend.joined_add(board, ext_left, right_summand)
+        end
+
+        diff_bits = AltBackend.to_split(board, diff)
+        return diff_bits.last
+    end
+end
+
+class CmpLEQ
+    def append_deps (to array : Array(DFGExpr)) : Nil
+        array << Isekai.dfg_make_binary(CmpLT, @right, @left)
+    end
+
+    def lay_down (board, deps)
+        not_leq = AltBackend.to_joined(board, deps[0])
+        return AltBackend.joined_add_const(board, 1_u64, not_leq)
+    end
+end
 
 class UnaryOp
     def append_deps (to array : Array(DFGExpr)) : Nil
@@ -272,11 +299,9 @@ class ZeroExtend
     def lay_down (board, deps)
         trace = deps[0]
         if trace.is_a? JoinedTrace
-            return AltBackend.joined_zext(board, trace, @bitwidth)
+            return AltBackend.joined_zext(board, trace, @bitwidth.@width)
         else
-            return SplitTrace.new(@bitwidth.@width) do |i|
-                trace[i]? || ConstTrace.new_bool(0)
-            end
+            return SplitTrace.new(@bitwidth.@width) { |i| trace[i]? || ConstTrace.new_bool(0) }
         end
     end
 end
@@ -336,8 +361,7 @@ def self.lay_down_output! (board : Board, output : DFGExpr) : Nil
     end
 
     joined = AltBackend.to_joined(board, results[0])
-    wire = AltBackend.joined_to_wire!(board, joined)
-    board.add_output!(wire)
+    joined_add_output!(board, joined)
 end
 
 end # module Isekai::AltBackend

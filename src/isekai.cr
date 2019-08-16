@@ -106,19 +106,21 @@ class ParserProgram
                 input_file.@filename,
                 loop_sanity_limit: options.loop_sanity_limit,
                 bit_width: options.bit_width)
-            inputs, nizk_inputs, outputs = FmtConv.new_to_old(*parser.parse())
+            inputs, nizk_inputs, outputs = parser.parse()
+            #inputs, nizk_inputs, outputs = FmtConv.new_to_old(inputs, nizk_inputs, outputs)
 
-            #board = AltBackend::Board.new(
-            #    inputs,
-            #    nizk_inputs,
-            #    output: File.open(arith_outfile, "w"))
-            #outputs.each do |output|
-            #    AltBackend.lay_down_output! board, output
-            #end
-            #board.done!
-            #values = read_input_values(input_file.@filename)
-            #write_input_values(arith_outfile, values, inputs.size, nizk_inputs.size)
-            #return
+            board = AltBackend::Board.new(
+                inputs,
+                nizk_inputs,
+                output: File.open(arith_outfile, "w"),
+                p_bits: 254)
+            outputs.each do |output|
+                AltBackend.lay_down_output! board, output
+            end
+            board.done!
+            values = read_input_values(input_file.@filename)
+            write_input_values(arith_outfile, values, inputs.size, nizk_inputs.size)
+            return
 
         when .c?
             parser = CFrontend::Parser.new(

@@ -5,9 +5,9 @@ require "llvm-crystal/lib_llvm_c"
 module Isekai::LLVMFrontend
 
 # This type represents both a structure and an array.
-private class Structure < DFGExpr
+class Structure < DFGExpr
     def initialize (@elems : Array(DFGExpr), @ty : LibLLVM_C::TypeRef)
-        super(BitWidth.new(BitWidth::UNSPECIFIED))
+        super(BitWidth.new_for_undefined)
     end
 
     def visit (&block : DFGExpr ->)
