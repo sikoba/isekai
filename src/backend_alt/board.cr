@@ -108,8 +108,7 @@ class Board
             input_bitwidths : Array(BitWidth),
             nizk_input_bitwidths : Array(BitWidth),
             output : IO,
-            @p_bits : Int32,
-            @sloppy : Bool)
+            @p_bits : Int32)
 
         @outbuf = OutputBuffer.new(output)
 
@@ -185,7 +184,7 @@ class Board
     end
 
     def truncate (w : Wire, to width : Int32) : Wire
-        if width >= 0 && may_exceed?(w, width)
+        if may_exceed?(w, width)
             yank(w, width)
         else
             w
@@ -198,8 +197,12 @@ class Board
         split_impl(w, into: num)
     end
 
-    def zerop (w : Wire, width : Int32) : Wire
-        arg = truncate(w, to: width)
+    def zerop (w : Wire, width : Int32?) : Wire
+        if width
+            arg = truncate(w, to: width)
+        else
+            arg = w
+        end
 
         if (@dynamic_ranges[arg.@index].max_nbits || @p_bits) <= 1
             return arg
@@ -212,8 +215,8 @@ class Board
         result
     end
 
-    private def cast_to_safe_ww (w : Wire, x : Wire, width : Int32)
-        unless width >= 0
+    private def cast_to_safe_ww (w : Wire, x : Wire, width : Int32?)
+        unless width
             return w, x, DynamicRange.new_for_undefined
         end
 
@@ -242,8 +245,8 @@ class Board
         return arg1, arg2, new_range
     end
 
-    private def cast_to_safe_cw (c : UInt128, w : Wire, width : Int32)
-        unless width >= 0
+    private def cast_to_safe_cw (c : UInt128, w : Wire, width : Int32?)
+        unless width
             return w, DynamicRange.new_for_undefined
         end
 
@@ -258,7 +261,7 @@ class Board
         return arg, new_range
     end
 
-    def const_mul (c : UInt128, w : Wire, width : Int32) : Wire
+    def const_mul (c : UInt128, w : Wire, width : Int32?) : Wire
         raise "Missed optimization" if c == 0
         return w if c == 1
 
@@ -269,7 +272,7 @@ class Board
         result
     end
 
-    def mul (w : Wire, x : Wire, width : Int32) : Wire
+    def mul (w : Wire, x : Wire, width : Int32?) : Wire
         arg1, arg2, new_range = cast_to_safe_ww(w, x, width) { |a, b| a * b }
 
         result = allocate_wire! new_range
@@ -277,7 +280,7 @@ class Board
         result
     end
 
-    def add (w : Wire, x : Wire, width : Int32) : Wire
+    def add (w : Wire, x : Wire, width : Int32?) : Wire
         arg1, arg2, new_range = cast_to_safe_ww(w, x, width) { |a, b| a + b }
 
         result = allocate_wire! new_range
@@ -285,7 +288,7 @@ class Board
         result
     end
 
-    def const_add (c : UInt128, w : Wire, width : Int32) : Wire
+    def const_add (c : UInt128, w : Wire, width : Int32?) : Wire
         return w if c == 0
 
         arg, new_range = cast_to_safe_cw(c, w, width) { |a, b| a + b }
@@ -295,9 +298,9 @@ class Board
         result
     end
 
-    def const_mul_neg (c : UInt128, w : Wire, width : Int32) : Wire
+    def const_mul_neg (c : UInt128, w : Wire, width : Int32?) : Wire
         raise "Missed optimization" if c == 0
-        if width >= 0
+        if width
             arg = truncate(w, to: width)
         else
             arg = w
@@ -331,8 +334,12 @@ class Board
         end
     end
 
-    def add_output! (w : Wire, width : Int32) : Nil
-        arg = truncate(w, to: width)
+    def add_output! (w : Wire, width : Int32?) : Nil
+        if width
+            arg = truncate(w, to: width)
+        else
+            arg = w
+        end
         @outbuf.write_output arg
     end
 

@@ -184,7 +184,7 @@ module Isekai::Backend
                     if i < @circuit_inputs_val.size
                         val = @circuit_inputs_val[i];
                     end
-                    file.print("#{i} #{val.to_s(16)}\n")  #No value..yet...
+                    file.print("#{i} #{val.to_u32.to_s(16)}\n")  #No value..yet...
                     i += 1                   
                 end
                 file.print("#{i} 1\n")      # the ONE constant
@@ -196,7 +196,7 @@ module Isekai::Backend
                         if ni < @circuit_inputs_val.size
                             val = @circuit_inputs_val[ni];
                         end
-                        file.print("#{i} #{val.to_s(16)}\n")  #No value..yet...
+                        file.print("#{i} #{val.to_u32.to_s(16)}\n")  #No value..yet...
                         i += 1  
                         ni += 1                 
                     end

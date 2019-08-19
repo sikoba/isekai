@@ -38,11 +38,11 @@ private def self.lay_down_subtract (board, left, right, width)
 end
 
 private def self.lay_down_cmp_lt (board, left, right, width)
-    ext_width = width + 1
+    new_width = width + 1
 
-    ext_left = Requests.joined_zext(board, left, ext_width)
-    ext_right = Requests.joined_zext(board, right, ext_width)
-    ext_diff = lay_down_subtract(board, ext_left, ext_right, ext_width)
+    ext_left = Requests.joined_zero_extend(board, left, to: new_width)
+    ext_right = Requests.joined_zero_extend(board, right, to: new_width)
+    ext_diff = lay_down_subtract(board, ext_left, ext_right, new_width)
 
     ext_diff_bits = Requests.joined_to_split(board, ext_diff)
     return ext_diff_bits.last
@@ -52,9 +52,9 @@ def self.lay_down (expr, on board : Board, using deps : Array(Request)) : Reques
     case expr
     when InputBase
         case expr.@which
-        when InputBase::Kind::Input
+        when .input?
             return Requests.bake_input(board, expr.@idx)
-        when InputBase::Kind::NizkInput
+        when .nizk_input?
             return Requests.bake_nizk_input(board, expr.@idx)
         else
             raise "unreachable"
@@ -68,9 +68,9 @@ def self.lay_down (expr, on board : Board, using deps : Array(Request)) : Reques
         valtrue = Requests.to_joined(board, deps[1])
         valfalse = Requests.to_joined(board, deps[2])
 
-        ext_cond = Requests.joined_zext(board, cond, expr.@bitwidth.@width)
+        ext_cond = Requests.joined_zero_extend(board, cond, to: expr.@bitwidth.@width)
         not_cond = Requests.joined_add_const(1, cond)
-        ext_not_cond = Requests.joined_zext(board, not_cond, expr.@bitwidth.@width)
+        ext_not_cond = Requests.joined_zero_extend(board, not_cond, to: expr.@bitwidth.@width)
 
         return Requests.joined_add(
             board,
@@ -111,9 +111,11 @@ def self.lay_down (expr, on board : Board, using deps : Array(Request)) : Reques
             elsif (b_val = b.as_constant)
                 b_val != 0 ? b : a
             else
-                # compute as 'a+b+a*b' modulo 2.
-                product = Requests.joined_mul(board, a, b)
-                Requests.joined_add(board, a, Requests.joined_add(board, b, product))
+                # compute as 'zerop(a+b)'
+                ext_a = Requests.joined_zero_extend(board, a, to: 2)
+                ext_b = Requests.joined_zero_extend(board, b, to: 2)
+                ext_sum = Requests.joined_add(board, ext_a, ext_b)
+                Requests.joined_zerop(board, ext_sum)
             end
         end
 
@@ -179,7 +181,7 @@ def self.lay_down (expr, on board : Board, using deps : Array(Request)) : Reques
         arg = deps[0]
         new_width = expr.@bitwidth.@width
         if arg.is_a? JoinedRequest
-            return Requests.joined_zext(board, arg, to: new_width)
+            return Requests.joined_zero_extend(board, arg, to: new_width)
         else
             return SplitRequest.new(new_width) do |i|
                 arg[i]? || Requests.bake_const(0, width: 1)
@@ -214,7 +216,7 @@ class Backend
     def initialize (@board : Board)
     end
 
-    private def lay_down! (output : DFGExpr) : {Wire, Int32}
+    private def lay_down! (output : DFGExpr)
         stack = [{output, -1}]
         results = [] of Request
         dependencies = [] of Request
@@ -244,12 +246,11 @@ class Backend
         end
 
         j = Requests.to_joined(@board, results[0])
-        return Requests.joined_to_output!(@board, j)
+        Requests.joined_add_output!(@board, j)
     end
 
     def lay_down_outputs! (outputs : Array(DFGExpr)) : Nil
-        results = outputs.map { |e| lay_down!(e) }
-        results.each { |wire, width| @board.add_output!(wire, width) }
+        outputs.each { |expr| lay_down!(expr) }
         @board.done!
     end
 end

@@ -11,5 +11,8 @@ struct Output {
 
 void outsource(struct Input *input, struct Output *output)
 {
-    output->x = ((input->a + 1) < (input->b + 1)) ? input->c : input->d;
+    if ((input->a + 1) < (input->b + 1))
+        output->x = input->c;
+    else
+        output->x = input->d;
 }

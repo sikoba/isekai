@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "value_list_reader.hpp"
 #include "circuit_reader.hpp"
 #include <libsnark/gadgetlib2/integration.hpp>
@@ -6,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <unistd.h>
 typedef libff::Fr<libff::default_ec_pp> FieldT;
 using namespace libff;
 using namespace libsnark;
@@ -34,10 +36,10 @@ static void init_pp()
 
 #define CHECK assert
 
-static void print_field_bits(FElem v, int size)
+static void print_field_bits(FElem v, int nbits)
 {
-    for (int i = size - 1; i >= 0; --i) {
-        const int bit = v.getBit(i, R1P);
+    for (int i = 64 - 1; i >= 0; --i) {
+        const int bit = (i < nbits) ? v.getBit(i, R1P) : 0;
         putc('0' + bit, stdout);
     }
     putc('\n', stdout);
@@ -65,13 +67,34 @@ static FieldT hex_to_field(const char *hex)
     return res;
 }
 
+static void print_usage_and_exit(const char *msg = nullptr)
+{
+    if (msg) {
+        fprintf(stderr, "Error: %s.\n", msg);
+    }
+    fprintf(stderr, "USAGE: judge [-w <width>] <arithmetic circuit file>\n");
+    exit(2);
+}
+
 int main(int argc, char **argv)
 {
-    if (argc != 2) {
-        fprintf(stderr, "USAGE: judge <circuit file>\n");
-        return 2;
+    unsigned output_width = 64;
+    for (int c; (c = getopt(argc, argv, "w:")) != -1;) {
+        switch (c) {
+        case 'w':
+            if (sscanf(optarg, "%u", &output_width) != 1) {
+                print_usage_and_exit("cannot parse -w argument as integer");
+            }
+            break;
+        default:
+            print_usage_and_exit();
+        }
     }
-    const std::string arci_filename = argv[1];
+    const int nposarg = argc - optind;
+    if (nposarg != 1) {
+        print_usage_and_exit("expected exactly one positional argument");
+    }
+    const std::string arci_filename = argv[optind];
 
     init_pp();
 
@@ -132,7 +155,7 @@ int main(int argc, char **argv)
             break;
         case Opcode::OUTPUT:
             CHECK(command.inputs.size() == 1);
-            print_field_bits(wires.at(command.inputs[0]), 64);
+            print_field_bits(wires.at(command.inputs[0]), output_width);
             break;
         }
     }

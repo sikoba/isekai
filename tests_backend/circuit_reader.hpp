@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cfile.hpp"
-#include <stddef.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
@@ -72,8 +72,9 @@ class CircuitReader
     };
 
     CFile file_;
-    char buf_[512];
-    char *inline_hex_;
+    char *buf_ = nullptr;
+    size_t nbuf_ = 0;
+    char *inline_hex_ = nullptr;
     std::vector<unsigned> inputs_buf_;
     std::vector<unsigned> outputs_buf_;
 
@@ -184,7 +185,7 @@ class CircuitReader
 
     bool read_line_()
     {
-        return fgets(buf_, sizeof(buf_), file_) != nullptr;
+        return getline(&buf_, &nbuf_, file_) > 0;
     }
 
     bool should_skip_line_()
@@ -273,5 +274,10 @@ public:
         }
 
         throw UnexpectedInput(buf_, "(command)");
+    }
+
+    ~CircuitReader()
+    {
+        free(buf_);
     }
 };

@@ -1,7 +1,5 @@
 struct Input {
     unsigned a;
-    unsigned b;
-    unsigned c;
 };
 
 struct Output {
@@ -10,8 +8,7 @@ struct Output {
 
 void outsource(struct Input *input, struct Output *output)
 {
-    if (25 < input->a)
-        output->x = input->b;
-    else
-        output->x = input->c;
+    (void) input;
+    unsigned char c = 255;
+    output->x = c;
 }

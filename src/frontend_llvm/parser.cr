@@ -36,14 +36,14 @@ def make_input_expr_of_ty (ty, which : InputBase::Kind) : DFGExpr
     offset = 0
     return TypeUtils.make_expr_of_ty(ty) do |kind, scalar_ty|
         case kind
-        when TypeUtils::ScalarTypeKind::Integer
+        when .integer?
             result = InputBase.new(
                 which: which,
                 idx: offset,
                 bitwidth: TypeUtils.get_int_ty_bitwidth_unchecked(scalar_ty))
             offset += 1
             result
-        when TypeUtils::ScalarTypeKind::Pointer
+        when .pointer?
             raise "Input structure contains a pointer"
         else
             raise "unreachable"
@@ -164,17 +164,17 @@ class Parser
             LibLLVM_C.get_type_kind(s_ty).struct_type_kind?
 
         case which_param
-        when OutsourceParam::Input
+        when .input?
             expr = LLVMFrontend.make_input_expr_of_ty(s_ty, InputBase::Kind::Input)
             raise "unreachable" unless expr.is_a? Structure
             @input_struct = expr
 
-        when OutsourceParam::NizkInput
+        when .nizk_input?
             expr = LLVMFrontend.make_input_expr_of_ty(s_ty, InputBase::Kind::NizkInput)
             raise "unreachable" unless expr.is_a? Structure
             @nizk_input_struct = expr
 
-        when OutsourceParam::Output
+        when .output?
             expr = TypeUtils.make_undef_expr_of_ty(s_ty)
             raise "unreachable" unless expr.is_a? Structure
             @output_struct = expr

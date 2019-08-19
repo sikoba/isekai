@@ -82,9 +82,9 @@ end
 def self.make_undef_expr_of_ty (ty)
     return make_expr_of_ty(ty) do |kind, scalar_ty|
         case kind
-        when ScalarTypeKind::Integer
+        when .integer?
             Constant.new(0, bitwidth: get_int_ty_bitwidth_unchecked(scalar_ty))
-        when ScalarTypeKind::Pointer
+        when .pointer?
             target_ty = LibLLVM_C.get_element_type(scalar_ty)
             UndefPointer.new(target_ty: target_ty)
         else

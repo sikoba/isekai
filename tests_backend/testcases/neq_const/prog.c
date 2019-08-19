@@ -10,5 +10,8 @@ struct Output {
 
 void outsource(struct Input *input, struct Output *output)
 {
-    output->x = input->a != 25 ? input->b : input->c;
+    if (input->a != 25)
+        output->x = input->b;
+    else
+        output->x = input->c;
 }

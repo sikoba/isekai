@@ -130,7 +130,7 @@ def self.joined_zerop (board, j : JoinedRequest) : JoinedRequest
     end
 end
 
-def self.joined_zext (board, j : JoinedRequest, to new_width : Int32) : JoinedRequest
+def self.joined_zero_extend (board, j : JoinedRequest, to new_width : Int32) : JoinedRequest
     old_width = j.@width
     return j if old_width == new_width
     raise "This is truncation, not extension" if new_width < old_width
@@ -183,8 +183,8 @@ private def self.joined_cmp_neq_cw (board, c : UInt128, j : JoinedRequest) : Joi
     cmp_against = truncate(c - j.@b, width)
     if cmp_against != 0
         w = board.truncate(w, to: width)
-        diff = board.add(w, board.constant_neg(cmp_against), width: -1)
-        result = board.zerop(diff, width: -1)
+        diff = board.add(w, board.constant_neg(cmp_against), width: nil)
+        result = board.zerop(diff, width: nil)
     else
         result = board.zerop(w, width: width)
     end
@@ -201,8 +201,8 @@ private def self.joined_cmp_neq_ww (board, j : JoinedRequest, k : JoinedRequest)
     w = board.truncate(w, to: width)
 
     minus_x = board.const_mul_neg(1, x, width: width)
-    diff = board.add(w, minus_x, width: -1)
-    result = board.zerop(diff, width: -1)
+    diff = board.add(w, minus_x, width: nil)
+    result = board.zerop(diff, width: nil)
 
     return JoinedRequest.new_for_wire(result, width: 1)
 end
@@ -263,9 +263,9 @@ def self.to_split (board, r : Request) : SplitRequest
     (r.is_a? SplitRequest) ? r : joined_to_split(board, r)
 end
 
-def self.joined_to_output! (board, j : JoinedRequest) : {Wire, Int32}
+def self.joined_add_output! (board, j : JoinedRequest) : Nil
     wire = joined_to_wire(board, j)
-    {wire, j.@width}
+    board.add_output!(wire, j.@width)
 end
 
 end

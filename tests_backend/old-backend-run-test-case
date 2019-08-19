@@ -14,29 +14,30 @@ IN_VALUES=$2
 CLANG=( clang -O0 -Wall -Wextra )
 ISEKAI=( "$REPO_ROOT"/isekai )
 BOILERPLATE_GEN=( "$REPO_ROOT"/boilerplate_gen )
-JUDGE=( "$SCRIPT_DIR"/judge )
+JUDGE=( "$SCRIPT_DIR"/judge -w 32 )
 
 NATIVE_BIN=./a.out
-BC_FILE=bitcode.bc
 ARCI_FILE=arci.arci
 OUT_JUDGE=out_judge.txt
 OUT_NATIVE=out_native.txt
+
+SRC_COPY=src_copy_.c
+
+cp -- "$SRC" "$SRC_COPY"
 
 Trace() {
     printf >&2 -- '≈≈≈≈≈> %s\n' "$*"
     "$@"
 }
 
-Trace "${CLANG[@]}" -c -emit-llvm "$SRC" -o "$BC_FILE"
-
 {
-    cat < "$SRC"
-    Trace "${BOILERPLATE_GEN[@]}" "$SRC"
+    cat < "$SRC_COPY"
+    Trace "${BOILERPLATE_GEN[@]}" "$SRC_COPY"
 } | Trace "${CLANG[@]}" -fsanitize=undefined -x c - -o "$NATIVE_BIN"
 
-cp -- "$IN_VALUES" "$BC_FILE".in
+cp -- "$IN_VALUES" "$SRC_COPY".in
 
-Trace "${ISEKAI[@]}" --arith="$ARCI_FILE" "$BC_FILE"
+Trace "${ISEKAI[@]}" --arith="$ARCI_FILE" "$SRC_COPY"
 
 Trace "${JUDGE[@]}" "$ARCI_FILE" > "$OUT_JUDGE"
 
@@ -46,12 +47,12 @@ if ! cmp -- "$OUT_JUDGE" "$OUT_NATIVE"; then
     echo >&2 '[ERROR] OUTPUTS DIFFER!'
     echo >&2
     Trace diff -u "$OUT_JUDGE" "$OUT_NATIVE" || true
-    exit 1
+    exit 44
 fi
 
 echo >&2 '[OK] OUTPUTS ARE EQUAL'
 rm -f -- \
     "$NATIVE_BIN" \
-    "$BC_FILE" "$BC_FILE".in \
+    "$SRC_COPY" "$SRC_COPY".in \
     "$ARCI_FILE" "$ARCI_FILE".in \
     "$OUT_JUDGE" "$OUT_NATIVE"

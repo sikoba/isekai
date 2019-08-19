@@ -8,5 +8,5 @@ struct Output {
 
 void outsource(struct Input *input, struct Output *output)
 {
-    output->x = input->a;
+    output->x = 2 * input->a + 1;
 }

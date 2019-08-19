@@ -2,13 +2,14 @@ require "./frontend_c/parser.cr"
 require "./frontend_llvm/parser.cr"
 require "./backend/arithfactory"
 require "./backend/booleanfactory"
-require "./zksnark/libsnark.cr"
+#require "./zksnark/libsnark.cr"
 require "file_utils"
 require "option_parser"
 #require "./backend_alt/backend"
 # TODO require "./crystal/ast_dump"
 require "./backend_alt/board"
 require "./backend_alt/backend"
+require "./backend_alt/utils"
 require "./fmtconv"
 
 include Isekai
@@ -32,7 +33,7 @@ struct ProgramOptions
     # R1CS output file - the program will output
     # a r1cs json file if set
     property r1cs_file = ""
-    # root name for the generated files for snark proofs. Files will get a suffix 
+    # root name for the generated files for snark proofs. Files will get a suffix
     property root_file = ""
     # root name for trusted setup and proof (snark)
     property verif_file = ""
@@ -45,9 +46,13 @@ struct ProgramOptions
     property print_exprs = false
     # Ignore overflow
     property ignore_overflow = false
+    # Width of P in bits
+    property p_bits = 254
+    # Force use of primary backend
+    property force_primary_backend = false
 end
 
-class InputFile
+private class InputFile
     enum Kind
         Arith
         C
@@ -78,55 +83,65 @@ private def read_input_values (source_filename) : Array(Int32)
     return values
 end
 
-private def write_input_values (circuit_filename, values, inputs_bitwidths, nizk_inputs_bitwidths)
-    n_inputs = inputs_bitwidths.size
-    n_nizk_inputs = nizk_inputs_bitwidths.size
-    File.open("#{circuit_filename}.in", "w") do |file|
-        n_total = n_inputs + 1 + n_nizk_inputs
-        (0...n_total).each do |i|
-            case i <=> n_inputs
-            when .< 0
-                value = values[i]? || 0
-                bitwidth = inputs_bitwidths[i]
-            when .== 0
-                value = 1
-                bitwidth = BitWidth.new(1)
-            else
-                value = values[i - 1]? || 0
-                bitwidth = nizk_inputs_bitwidths[i - 1 - n_inputs]
-            end
-
-            file << i << " "
-            unsigned_value = bitwidth.truncate(value.to_u64)
-            unsigned_value.to_s(base: 16, io: file)
-            file << "\n"
-        end
+private def run_alt_backend (inputs, nizk_inputs, outputs, input_values, arith_outfile, options)
+    File.open(arith_outfile, "w") do |file|
+        board = AltBackend::Board.new(
+            inputs,
+            nizk_inputs,
+            output: file,
+            p_bits: options.p_bits)
+        AltBackend::Backend.new(board).lay_down_outputs!(outputs)
     end
+    AltBackend::Utils.write_input_values(arith_outfile, input_values, inputs, nizk_inputs)
+end
+
+private def run_primary_backend (
+        inputs, nizk_inputs, outputs,
+        input_values, arith_outfile, bool_outfile, options)
+
+    input_values << 0
+    if arith_outfile != ""
+        Backend::ArithFactory.new(
+            arith_outfile,
+            inputs,
+            nizk_inputs,
+            outputs,
+            options.bit_width,
+            input_values)
+    end
+    #if bool_outfile != ""
+    #    Backend::BooleanFactory.new(
+    #        bool_outfile,
+    #        inputs,
+    #        outputs,
+    #        options.bit_width)
+    #end
 end
 
 class ParserProgram
     def create_circuit (input_file, arith_outfile, bool_outfile, options)
+        input_values = read_input_values(input_file.@filename)
         case input_file.@kind
         when .bitcode?
             parser = LLVMFrontend::Parser.new(
                 input_file.@filename,
                 loop_sanity_limit: options.loop_sanity_limit)
             inputs, nizk_inputs, outputs = parser.parse()
-            #inputs, nizk_inputs, outputs = FmtConv.new_to_old(inputs, nizk_inputs, outputs)
 
             if options.print_exprs
                 puts outputs
             end
-            board = AltBackend::Board.new(
-                inputs,
-                nizk_inputs,
-                output: File.open(arith_outfile, "w"),
-                p_bits: 254,
-                sloppy: true)
-            AltBackend::Backend.new(board).lay_down_outputs!(outputs)
-            values = read_input_values(input_file.@filename)
-            write_input_values(arith_outfile, values, inputs, nizk_inputs)
-            return
+
+            if options.force_primary_backend
+                inputs, nizk_inputs, outputs = FmtConv.new_to_old(inputs, nizk_inputs, outputs)
+                run_primary_backend(
+                    inputs, nizk_inputs, outputs,
+                    input_values, arith_outfile, bool_outfile, options)
+            else
+                run_alt_backend(
+                    inputs, nizk_inputs, outputs,
+                    input_values, arith_outfile, options)
+            end
 
         when .c?
             parser = CFrontend::Parser.new(
@@ -137,32 +152,16 @@ class ParserProgram
                 options.progress)
             inputs, nizk_inputs, outputs = parser.parse()
 
+            if options.print_exprs
+                puts outputs
+            end
+
+            run_primary_backend(
+                inputs, nizk_inputs, outputs,
+                input_values, arith_outfile, bool_outfile, options)
         else
             raise "Unsupported input file extension"
         end
-
-        if options.print_exprs
-            puts outputs
-        end
-        # optional file containing the input values to the program
-        in_array = read_input_values(input_file.@filename)
-        in_array << 0
-        if arith_outfile != ""
-            Backend::ArithFactory.new(
-                arith_outfile,
-                inputs,
-                nizk_inputs,
-                outputs,
-                options.bit_width,
-                in_array)
-        end
-        #if bool_outfile != ""
-        #    Backend::BooleanFactory.new(
-        #        bool_outfile,
-        #        inputs,
-        #        outputs,
-        #        options.bit_width)
-        #end
     end
 
     # Main
@@ -189,6 +188,8 @@ class ParserProgram
             parser.on("-p", "--progress", "Print progress messages during compilation") { opts.progress = true }
             parser.on("-i", "--ignore-overflow", "Ignore field-P overflows; never truncate") { opts.ignore_overflow = true }
             parser.on("-x", "--print-exprs", "Print output expressions to stdout") { opts.print_exprs = true }
+            parser.on("-q", "--p-bits=BITS", "Width of P in bits") { |bits| opts.p_bits = bits.to_i() }
+            parser.on("-z", "--primary-backend", "Force use of primary backend") { opts.force_primary_backend = true }
             parser.on("-h", "--help", "Show this help") { puts parser; exit 0 }
         end
 
@@ -200,34 +201,34 @@ class ParserProgram
         filename = ARGV[-1]
 
         #snakes
-        if opts.verif_file != ""
-            #verify
-            snarc = LibSnark.new()
-            root_name = opts.verif_file
-            result = snarc.verify(root_name + ".s", filename, root_name + ".p")
-            if result == true
-                puts "Congratulations, the proof is correct!\n"
-            else
-                puts "Incorrect statement\n"
-            end
-            return
-        end
+        #if opts.verif_file != ""
+        #    #verify
+        #    snarc = LibSnark.new()
+        #    root_name = opts.verif_file
+        #    result = snarc.verify(root_name + ".s", filename, root_name + ".p")
+        #    if result == true
+        #        puts "Congratulations, the proof is correct!\n"
+        #    else
+        #        puts "Incorrect statement\n"
+        #    end
+        #    return
+        #end
 
-        if opts.root_file != ""
-            #proof
-            snarc = LibSnark.new()
-            snarc.vcSetup(filename, opts.root_file + ".s")
-            snarc.proof(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
+        #if opts.root_file != ""
+        #    #proof
+        #    snarc = LibSnark.new()
+        #    snarc.vcSetup(filename, opts.root_file + ".s")
+        #    snarc.proof(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
 
-            if snarc.verify(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
-                puts "Proved execution successfully with libSnark, generated:
-                    Trusted setup : #{opts.root_file}.s
-                    Proof: #{opts.root_file}.p"
-            else
-                puts "error generating the proof\n"
-            end
-            return
-        end         
+        #    if snarc.verify(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
+        #        puts "Proved execution successfully with libSnark, generated:
+        #            Trusted setup : #{opts.root_file}.s
+        #            Proof: #{opts.root_file}.p"
+        #    else
+        #        puts "error generating the proof\n"
+        #    end
+        #    return
+        #end
 
         Log.setup(opts.progress)
 
@@ -248,18 +249,18 @@ class ParserProgram
         end
 
         #r1cs
-        if opts.r1cs_file != ""
-            tempIn = "#{tempArith}.in"
-            if File.exists?(tempIn) == false
-                puts "inputs file #{tempIn} is missing\n"
-            else
-                LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
-            end
-            #clean-up
-            if opts.arith_file == "" && input_file.@kind.arith? == false
-                FileUtils.rm(tempArith)
-            end
-        end
+        #if opts.r1cs_file != ""
+        #    tempIn = "#{tempArith}.in"
+        #    if File.exists?(tempIn) == false
+        #        puts "inputs file #{tempIn} is missing\n"
+        #    else
+        #        LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
+        #    end
+        #    #clean-up
+        #    if opts.arith_file == "" && input_file.@kind.arith? == false
+        #        FileUtils.rm(tempArith)
+        #    end
+        #end
     end
 end
 
