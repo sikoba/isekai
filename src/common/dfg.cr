@@ -217,7 +217,21 @@ end
 class Conditional < DFGExpr
     #add_object_helpers
     def initialize (@cond : DFGExpr, @valtrue : DFGExpr, @valfalse : DFGExpr)
-        super(valtrue.@bitwidth.assert_common! valfalse.@bitwidth)
+        super(valtrue.@bitwidth.common! valfalse.@bitwidth)
+    end
+
+    def set_operands! (cond, valtrue, valfalse)
+        @cond = cond
+        @valtrue = valtrue
+        @valfalse = valfalse
+    end
+
+    def self.bake (cond : DFGExpr, valtrue : DFGExpr, valfalse : DFGExpr) : DFGExpr
+        if cond.is_a? Constant
+            return (cond.@value != 0) ? valtrue : valfalse
+        else
+            return self.new(cond, valtrue, valfalse)
+        end
     end
 
     def evaluate (collapser)
@@ -252,13 +266,27 @@ end
 
 
 # Binary operation. Perform `@op` on two operands `@left` and `@right`
-class BinaryOp < DFGExpr
+abstract class BinaryOp < DFGExpr
     #add_object_helpers
     def initialize (@op : ::Symbol, @left : DFGExpr, @right : DFGExpr, bitwidth)
         super(bitwidth)
     end
 
-    def set_operands(left, right)
+    def self.bake (left : DFGExpr, right : DFGExpr) : DFGExpr
+        case {left, right}
+        when {Constant, Constant}
+            bitwidth = left.@bitwidth.common! right.@bitwidth
+            Constant.new(self.static_eval(left.@value, right.@value, bitwidth), bitwidth)
+        when {Constant, _}
+            self.simplify_left(left, right)
+        when {_, Constant}
+            self.simplify_right(left, right)
+        else
+            self.new(left, right)
+        end
+    end
+
+    def set_operands! (left, right)
         @left = left
         @right = right
     end
@@ -275,7 +303,7 @@ class BinaryOp < DFGExpr
         left = collapser.lookup(@left)
         right = collapser.lookup(@right)
         collapsed = dup()
-        collapsed.set_operands(left, right)
+        collapsed.set_operands!(left, right)
         # check if the result of this is a constant
         begin
             evaluated_constant = collapser.evaluate_as_constant(collapsed)
@@ -293,10 +321,10 @@ end
 
 # Binary mathematial operation. Performs `@op` (also represented by `DFGOperator`)
 # on `@left` and `@right`, with the optional identity element (e.g. 0 for addition, 1 for multiplication).
-class BinaryMath < BinaryOp
+abstract class BinaryMath < BinaryOp
     ##add_object_helpers
     def initialize (@op, @crystalop : DFGOperator, @identity : (Int32|Nil), @left, @right)
-        super(@op, @left, @right, bitwidth: left.@bitwidth.assert_common! right.@bitwidth)
+        super(@op, @left, @right, bitwidth: left.@bitwidth.common! right.@bitwidth)
     end
 
     def evaluate (collapser)
@@ -635,11 +663,10 @@ end
 #end
 
 # Unary operation. Perform `@op` on `@expr`
-class UnaryOp < DFGExpr
+abstract class UnaryOp < DFGExpr
     #add_object_helpers
 
     @expr : DFGExpr
-    setter expr : DFGExpr
 
     def initialize (@op : ::Symbol, @expr : DFGExpr, bitwidth)
         super(bitwidth)
@@ -653,19 +680,41 @@ class UnaryOp < DFGExpr
         return [@expr]
     end
 
+    def set_operand! (expr)
+        @expr = expr
+    end
+
     def collapse_constants(collapser)
         begin
             val = collapser.evaluate_as_constant(self).as(Constant)
             return Constant.new(val.@value, bitwidth: @bitwidth)
         rescue ex : NonconstantExpression
             new_obj = self.dup
-            new_obj.expr = collapser.lookup(@expr)
+            new_obj.set_operand!(collapser.lookup(@expr))
             return new_obj
         end
     end
 
     def_equals @op, @expr
     def_hash @op, @expr
+end
+
+abstract class BitWidthCast < UnaryOp
+    def initialize (op : ::Symbol, expr : DFGExpr, new_bitwidth : BitWidth)
+        super(op, expr, new_bitwidth)
+    end
+
+    def self.bake (expr : DFGExpr, new_bitwidth : BitWidth)
+        if expr.is_a? Constant
+            value = self.static_eval(
+                expr.@value,
+                old_bitwidth: expr.@bitwidth,
+                new_bitwidth: new_bitwidth)
+            Constant.new(value, bitwidth: new_bitwidth)
+        else
+            self.new(expr, bitwidth: new_bitwidth)
+        end
+    end
 end
 
 # Logical-Not unary operation
@@ -703,7 +752,7 @@ class Negate < UnaryOp
 end
 
 # Zero-extend operation
-class ZeroExtend < UnaryOp
+class ZeroExtend < BitWidthCast
     def initialize (@expr, bitwidth)
         super(:zext, @expr, bitwidth)
     end
@@ -714,7 +763,7 @@ class ZeroExtend < UnaryOp
 end
 
 # Sign-extend operation
-class SignExtend < UnaryOp
+class SignExtend < BitWidthCast
     def initialize (@expr, bitwidth)
         super(:zext, @expr, bitwidth)
     end
@@ -725,47 +774,13 @@ class SignExtend < UnaryOp
 end
 
 # Truncate to a smaller bit width operation
-class Truncate < UnaryOp
+class Truncate < BitWidthCast
     def initialize (@expr, bitwidth)
         super(:trunc, @expr, bitwidth)
     end
 
     def self.static_eval (value, old_bitwidth, new_bitwidth)
         return new_bitwidth.truncate(value.to_u64).to_i64
-    end
-end
-
-def self.dfg_make_binary (klass, left, right)
-    case {left, right}
-    when {Constant, Constant}
-        bitwidth = left.@bitwidth.assert_common! right.@bitwidth
-        Constant.new(klass.static_eval(left.@value, right.@value, bitwidth), bitwidth)
-    when {Constant, _}
-        klass.simplify_left(left, right)
-    when {_, Constant}
-        klass.simplify_right(left, right)
-    else
-        klass.new(left, right)
-    end
-end
-
-def self.dfg_make_bitwidth_cast (klass, expr, new_bitwidth)
-    if expr.is_a? Constant
-        value = klass.static_eval(
-            expr.@value,
-            old_bitwidth: expr.@bitwidth,
-            new_bitwidth: new_bitwidth)
-        Constant.new(value, bitwidth: new_bitwidth)
-    else
-        klass.new(expr, bitwidth: new_bitwidth)
-    end
-end
-
-def self.dfg_make_conditional (cond, valtrue, valfalse)
-    if cond.is_a? Constant
-        (cond.@value != 0) ? valtrue : valfalse
-    else
-        Conditional.new(cond, valtrue, valfalse)
     end
 end
 

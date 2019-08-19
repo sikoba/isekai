@@ -11,11 +11,11 @@ extend self
 def bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
     case a.@bitwidth <=> b.@bitwidth
     when .< 0
-        a = Isekai.dfg_make_bitwidth_cast(SignExtend, a, b.@bitwidth)
+        a = SignExtend.bake(a, b.@bitwidth)
     when .> 0
-        b = Isekai.dfg_make_bitwidth_cast(SignExtend, b, a.@bitwidth)
+        b = SignExtend.bake(b, a.@bitwidth)
     end
-    return Isekai.dfg_make_binary(Add, a, b)
+    return Add.bake(a, b)
 end
 
 def make_undef_array_elem (arr : Structure) : DFGExpr
@@ -148,16 +148,16 @@ class DynamicFieldPointer < AbstractPointer
         # A micro-optimization: 'CmpEQ' is lighter resourse-wise.
         when 2, 3
             left_const = Constant.new(left.to_i64, bitwidth: @field.@bitwidth)
-            return Isekai.dfg_make_conditional(
-                Isekai.dfg_make_binary(CmpEQ, @field, left_const),
+            return Conditional.bake(
+                CmpEQ.bake(@field, left_const),
                 @base.@elems[left],
                 make_bsearch_expr(left + 1, right))
 
         else
             pivot = left + n // 2
             pivot_const = Constant.new(pivot.to_i64, bitwidth: @field.@bitwidth)
-            return Isekai.dfg_make_conditional(
-                Isekai.dfg_make_binary(CmpLT, @field, pivot_const),
+            return Conditional.bake(
+                CmpLT.bake(@field, pivot_const),
                 make_bsearch_expr(left, pivot),
                 make_bsearch_expr(pivot, right))
         end
@@ -182,8 +182,8 @@ class DynamicFieldPointer < AbstractPointer
         else
             (0...n).each do |i|
                 i_const = Constant.new(i.to_i64, bitwidth: @field.@bitwidth)
-                @base.@elems[i] = Isekai.dfg_make_conditional(
-                    Isekai.dfg_make_binary(CmpEQ, @field, i_const),
+                @base.@elems[i] = Conditional.bake(
+                    CmpEQ.bake(@field, i_const),
                     value,
                     @base.@elems[i])
             end

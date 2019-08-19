@@ -78,21 +78,27 @@ private def read_input_values (source_filename) : Array(Int32)
     return values
 end
 
-private def write_input_values (circuit_filename, values, n_inputs, n_nizk_inputs)
+private def write_input_values (circuit_filename, values, inputs_bitwidths, nizk_inputs_bitwidths)
+    n_inputs = inputs_bitwidths.size
+    n_nizk_inputs = nizk_inputs_bitwidths.size
     File.open("#{circuit_filename}.in", "w") do |file|
         n_total = n_inputs + 1 + n_nizk_inputs
         (0...n_total).each do |i|
             case i <=> n_inputs
             when .< 0
                 value = values[i]? || 0
+                bitwidth = inputs_bitwidths[i]
             when .== 0
                 value = 1
+                bitwidth = BitWidth.new(1)
             else
                 value = values[i - 1]? || 0
+                bitwidth = nizk_inputs_bitwidths[i - 1 - n_inputs]
             end
 
             file << i << " "
-            value.to_s(base: 16, io: file)
+            unsigned_value = bitwidth.truncate(value.to_u64)
+            unsigned_value.to_s(base: 16, io: file)
             file << "\n"
         end
     end
@@ -104,22 +110,22 @@ class ParserProgram
         when .bitcode?
             parser = LLVMFrontend::Parser.new(
                 input_file.@filename,
-                loop_sanity_limit: options.loop_sanity_limit,
-                bit_width: options.bit_width)
+                loop_sanity_limit: options.loop_sanity_limit)
             inputs, nizk_inputs, outputs = parser.parse()
             #inputs, nizk_inputs, outputs = FmtConv.new_to_old(inputs, nizk_inputs, outputs)
 
+            if options.print_exprs
+                puts outputs
+            end
             board = AltBackend::Board.new(
                 inputs,
                 nizk_inputs,
                 output: File.open(arith_outfile, "w"),
-                p_bits: 254)
-            outputs.each do |output|
-                AltBackend.lay_down_output! board, output
-            end
-            board.done!
+                p_bits: 254,
+                sloppy: true)
+            AltBackend::Backend.new(board).lay_down_outputs!(outputs)
             values = read_input_values(input_file.@filename)
-            write_input_values(arith_outfile, values, inputs.size, nizk_inputs.size)
+            write_input_values(arith_outfile, values, inputs, nizk_inputs)
             return
 
         when .c?

@@ -62,7 +62,7 @@ class BfsTree
     end
 end
 
-class FastQueue(T)
+private class FastQueue(T)
     def initialize (prealloc : Int = 0)
         @queue = Array(T).new(prealloc)
         @queue_start = 0

@@ -236,7 +236,7 @@ module Isekai::Backend
         end
 
         def get_trace_count 
-            return Math.min(Isekai::Backend.ceillg2(@value), @bus.get_trace_count)
+            return Math.max(Isekai::Backend.ceillg2(@value), @bus.get_trace_count)
         end
 
         def get_wire_count

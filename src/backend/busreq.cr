@@ -299,8 +299,9 @@ module Isekai::Backend
             return ConstBitOrBus.new(board(), const_expr.@value, variable_bus)
         end
 
-        def var_impl (*busses)
-            return @reqfactory.get_BitAndBus_class().new(board(), *busses)
+        def var_impl (left, right)
+            #return @reqfactory.get_BitOrBus_class().new(board(), left, right)
+            return ArithBitOrBus.new(board(), left, right)
         end
     end
     

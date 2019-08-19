@@ -4,8 +4,22 @@ require "./dynamic_range"
 
 module Isekai::AltBackend
 
-private struct Wire
+struct Wire
+    private INVALID = -1
+
     def initialize (@index : Int32)
+    end
+
+    def self.new_invalid
+        self.new(INVALID)
+    end
+
+    def invalid?
+        @index == INVALID
+    end
+
+    def == (other : Wire)
+        @index == other.@index
     end
 
     def to_s (io)
@@ -13,7 +27,7 @@ private struct Wire
     end
 end
 
-private alias WireList = Array(Wire)
+alias WireList = Array(Wire)
 
 private struct OutputBuffer
     def initialize (@file : IO)
@@ -32,13 +46,13 @@ private struct OutputBuffer
         @buf << "nizkinput " << w << " # input\n"
     end
 
-    def write_const_mul (c, w, output) : Nil
+    def write_const_mul (c : UInt128, w, output) : Nil
         @buf << "const-mul-"
         c.to_s(base: 16, io: @buf)
         @buf << " in 1 <" << w << "> out 1 <" << output << ">\n"
     end
 
-    def write_const_mul_neg (c, w, output) : Nil
+    def write_const_mul_neg (c : UInt128, w, output) : Nil
         @buf << "const-mul-neg-"
         c.to_s(base: 16, io: @buf)
         @buf << " in 1 <" << w << "> out 1 <" << output << ">\n"
@@ -77,6 +91,7 @@ end
 class Board
     @one_const : Wire
     @const_pool = {} of UInt128 => Wire
+    @neg_const_pool = {} of UInt128 => Wire
     @inputs : Array(Tuple(Wire, BitWidth))
     @nizk_inputs : Array(Tuple(Wire, BitWidth))
     @dynamic_ranges = [] of DynamicRange
@@ -93,14 +108,15 @@ class Board
             input_bitwidths : Array(BitWidth),
             nizk_input_bitwidths : Array(BitWidth),
             output : IO,
-            @p_bits : Int32)
+            @p_bits : Int32,
+            @sloppy : Bool)
 
         @outbuf = OutputBuffer.new(output)
 
         @inputs = input_bitwidths.map do |bitwidth|
             {allocate_wire!(DynamicRange.new_for_bitwidth(bitwidth)), bitwidth}
         end
-        @one_const = allocate_wire! DynamicRange.new_for_const 1_u64
+        @one_const = allocate_wire! DynamicRange.new_for_const 1_u128
         @nizk_inputs = nizk_input_bitwidths.map do |bitwidth|
             {allocate_wire!(DynamicRange.new_for_bitwidth(bitwidth)), bitwidth}
         end
@@ -142,7 +158,7 @@ class Board
     end
 
     private def lowbit (w : Wire) : Wire
-        if @dynamic_ranges[w.@index].fits_into_1bit?
+        if (@dynamic_ranges[w.@index].max_nbits || 0) <= 1
             w
         else
             split_impl(w, into: 1)[0]
@@ -168,20 +184,24 @@ class Board
         result
     end
 
+    def truncate (w : Wire, to width : Int32) : Wire
+        if width >= 0 && may_exceed?(w, width)
+            yank(w, width)
+        else
+            w
+        end
+    end
+
     def split (w : Wire, into num : Int32) : WireList
         raise "Missed optimization" if num == 0
-        raise "Missed optimization" if @dynamic_ranges[w.@index].fits_into_1bit?
+        raise "Missed optimization" if (@dynamic_ranges[w.@index].max_nbits || 0) <= 1
         split_impl(w, into: num)
     end
 
     def zerop (w : Wire, width : Int32) : Wire
-        if may_exceed?(w, width)
-            arg = yank(w, width)
-        else
-            arg = w
-        end
+        arg = truncate(w, to: width)
 
-        if @dynamic_ranges[arg.@index].fits_into_1bit?
+        if (@dynamic_ranges[arg.@index].max_nbits || @p_bits) <= 1
             return arg
         end
 
@@ -193,6 +213,10 @@ class Board
     end
 
     private def cast_to_safe_ww (w : Wire, x : Wire, width : Int32)
+        unless width >= 0
+            return w, x, DynamicRange.new_for_undefined
+        end
+
         w_range = @dynamic_ranges[w.@index]
         x_range = @dynamic_ranges[x.@index]
         if w_range < x_range
@@ -212,25 +236,29 @@ class Board
             else
                 arg2 = yank(x, width)
                 new_range = yield @dynamic_ranges[arg1.@index], @dynamic_ranges[arg2.@index]
-                raise "unreachable" if dangerous?(new_range)
+                raise "Unexpected" if dangerous?(new_range)
             end
         end
         return arg1, arg2, new_range
     end
 
-    private def cast_to_safe_cw (c, w : Wire, width : Int32)
+    private def cast_to_safe_cw (c : UInt128, w : Wire, width : Int32)
+        unless width >= 0
+            return w, DynamicRange.new_for_undefined
+        end
+
         new_range = yield @dynamic_ranges[w.@index], c
         unless dangerous?(new_range)
             arg = w
         else
             arg = yank(w, width)
             new_range = yield @dynamic_ranges[arg.@index], c
-            raise "unreachable" if dangerous?(new_range)
+            raise "Unexpected" if dangerous?(new_range)
         end
         return arg, new_range
     end
 
-    def const_mul (c, w : Wire, width : Int32) : Wire
+    def const_mul (c : UInt128, w : Wire, width : Int32) : Wire
         raise "Missed optimization" if c == 0
         return w if c == 1
 
@@ -257,7 +285,7 @@ class Board
         result
     end
 
-    def const_add (c, w : Wire, width : Int32) : Wire
+    def const_add (c : UInt128, w : Wire, width : Int32) : Wire
         return w if c == 0
 
         arg, new_range = cast_to_safe_cw(c, w, width) { |a, b| a + b }
@@ -267,9 +295,10 @@ class Board
         result
     end
 
-    def const_mul_neg (c, w : Wire, width : Int32) : Wire
-        if may_exceed?(w, width)
-            arg = yank(w, width)
+    def const_mul_neg (c : UInt128, w : Wire, width : Int32) : Wire
+        raise "Missed optimization" if c == 0
+        if width >= 0
+            arg = truncate(w, to: width)
         else
             arg = w
         end
@@ -278,36 +307,32 @@ class Board
         result
     end
 
-    def unsafe_assume_1bit! (w : Wire) : Nil
-        @dynamic_ranges[w.@index] = DynamicRange.new_for_bool
+    def assume_width! (w : Wire, width : Int32) : Nil
+        @dynamic_ranges[w.@index] = DynamicRange.new_for_width width
     end
 
-    def zext (w : Wire, from old_width : Int32, to new_width : Int32) : Wire
-        raise "This is truncation, not extension" unless old_width <= new_width
-        if may_exceed?(w, old_width)
-            result = yank(w, old_width)
-        else
-            result = w
-        end
-        result
-    end
-
-    def constant (c) : Wire
-        c = c.to_u128
+    def constant (c : UInt128) : Wire
         return one_constant if c == 1
         return @const_pool.fetch(c) do
             result = allocate_wire! DynamicRange.new_for_const c
             @outbuf.write_const_mul(c, @one_const, output: result)
+            @const_pool[c] = result
+            result
+        end
+    end
+
+    def constant_neg (c : UInt128) : Wire
+        raise "Missed optimization" if c == 0
+        return @neg_const_pool.fetch(c) do
+            result = allocate_wire! DynamicRange.new_for_undefined
+            @outbuf.write_const_mul_neg(c, @one_const, output: result)
+            @neg_const_pool[c] = result
             result
         end
     end
 
     def add_output! (w : Wire, width : Int32) : Nil
-        if may_exceed?(w, width)
-            arg = yank(w, width)
-        else
-            arg = w
-        end
+        arg = truncate(w, to: width)
         @outbuf.write_output arg
     end
 

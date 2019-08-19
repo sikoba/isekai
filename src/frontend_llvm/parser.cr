@@ -25,7 +25,7 @@ end
 # Assuming 'ins' is a switch instruction, returns the value of the case with number 'i'.
 # 'i' is 1-based if we only consider 'case' statements without 'default', and 0-based if we consider
 # all the successors, of which the zeroth is the default (thus 'i == 0' is not allowed).
-def get_case_value_unchecked(ins, i) : Constant
+def get_case_value_unchecked (ins, i) : Constant
     value = LibLLVM_C.get_operand(ins, i * 2)
     raise "Case value is not an integer constant" unless
         LibLLVM_C.get_value_kind(value).constant_int_value_kind?
@@ -143,7 +143,7 @@ class Parser
 
     @ir_module : LibLLVM::IrModule
 
-    def initialize (input_file : String, @loop_sanity_limit : Int32, @bit_width : Int32)
+    def initialize (input_file : String, @loop_sanity_limit : Int32)
         @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
     end
 
@@ -226,7 +226,7 @@ class Parser
         when AbstractPointer
             return ptr.load()
         when Conditional
-            return Isekai.dfg_make_conditional(
+            return Conditional.bake(
                 ptr.@cond,
                 load(from: ptr.@valtrue),
                 load(from: ptr.@valfalse))
@@ -240,7 +240,7 @@ class Parser
         when AbstractPointer
             return ptr.move(by: offset)
         when Conditional
-            return Isekai.dfg_make_conditional(
+            return Conditional.bake(
                 ptr.@cond,
                 move_ptr(ptr.@valtrue, by: offset),
                 move_ptr(ptr.@valfalse, by: offset))
@@ -254,7 +254,7 @@ class Parser
         when Structure
             return PointerFactory.bake_field_pointer(base: base, field: field)
         when Conditional
-            return Isekai.dfg_make_conditional(
+            return Conditional.bake(
                 base.@cond,
                 get_field_ptr(base: base.@valtrue, field: field),
                 get_field_ptr(base: base.@valtrue, field: field))
@@ -322,21 +322,21 @@ class Parser
     private def set_binary (ins, klass)
         left = as_expr(LibLLVM_C.get_operand(ins, 0))
         right = as_expr(LibLLVM_C.get_operand(ins, 1))
-        @locals[ins] = Isekai.dfg_make_binary(klass, left, right)
+        @locals[ins] = klass.bake(left, right)
     end
 
     @[AlwaysInline]
     private def set_binary_swapped (ins, klass)
         left = as_expr(LibLLVM_C.get_operand(ins, 1))
         right = as_expr(LibLLVM_C.get_operand(ins, 0))
-        @locals[ins] = Isekai.dfg_make_binary(klass, left, right)
+        @locals[ins] = klass.bake(left, right)
     end
 
     @[AlwaysInline]
     private def set_bitwidth_cast (ins, klass)
         arg = as_expr(LibLLVM_C.get_operand(ins, 0))
         new_bitwidth = TypeUtils.get_int_ty_bitwidth(LibLLVM_C.type_of(ins))
-        @locals[ins] = Isekai.dfg_make_bitwidth_cast(klass, arg, new_bitwidth)
+        @locals[ins] = klass.bake(arg, new_bitwidth)
     end
 
     private def inspect_basic_block (bb) : LibLLVM::BasicBlock?
@@ -361,11 +361,11 @@ class Parser
                 @locals[ins] = get_phi_value(ins)
 
             when .get_element_ptr?
-                nops = LibLLVM_C.get_num_operands(ins)
+                n_operands = LibLLVM_C.get_num_operands(ins)
                 base = as_expr(LibLLVM_C.get_operand(ins, 0))
                 i = 1
                 @locals[ins] = get_element_ptr(base) do
-                    if i == nops
+                    if i == n_operands
                         nil
                     else
                         expr = as_expr(LibLLVM_C.get_operand(ins, i))
@@ -422,13 +422,11 @@ class Parser
             when .s_ext? then set_bitwidth_cast(ins, SignExtend)
             when .trunc? then set_bitwidth_cast(ins, Truncate)
 
-            # TODO: support for 'bitcast' instruction
-
             when .select?
                 pred = as_expr(LibLLVM_C.get_operand(ins, 0))
                 val_true = as_expr(LibLLVM_C.get_operand(ins, 1))
                 val_false = as_expr(LibLLVM_C.get_operand(ins, 2))
-                @locals[ins] = Isekai.dfg_make_conditional(pred, val_true, val_false)
+                @locals[ins] = Conditional.bake(pred, val_true, val_false)
 
             when .call?
                 called = LibLLVM_C.get_called_value(ins)
@@ -514,8 +512,7 @@ class Parser
                 sink, _ = @preproc_data[bb]
                 # inspect each case
                 (1...successors.size).each do |i|
-                    cond = Isekai.dfg_make_binary(
-                        CmpEQ, arg, LLVMFrontend.get_case_value_unchecked(ins, i))
+                    cond = CmpEQ.bake(arg, LLVMFrontend.get_case_value_unchecked(ins, i))
 
                     @assumption.push(cond, true)
                     inspect_basic_block_until(successors[i], terminator: sink)

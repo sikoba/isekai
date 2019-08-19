@@ -7,7 +7,11 @@ module Isekai::LLVMFrontend::TypeUtils
 
 # Assuming 'ty' is an integer type, returns its bit width as a 'BitWidth' object.
 def self.get_int_ty_bitwidth_unchecked (ty) : BitWidth
-    return BitWidth.new(LibLLVM_C.get_int_type_width(ty).to_i32)
+    width = LibLLVM_C.get_int_type_width(ty)
+    if width > 64
+        raise "Bit widths greater than 64 are not supported"
+    end
+    return BitWidth.new(width.to_i32)
 end
 
 # If 'ty' is an integer type, returns its bit width as a 'BitWidth' object; raises otherwise.

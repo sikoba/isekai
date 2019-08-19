@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+set -e
+cd -- "$(dirname "$(readlink "$0" || echo "$0")")"
+
+usage() {
+    echo >&2 "USAGE: $0 [testcase directory]"
+    exit 2
+}
+
+case "$#" in
+1)
+    testcase_dirs=( "$1" )
+    ;;
+0)
+    shopt -s failglob
+    testcase_dirs=( testcases/*/ )
+    shopt -u failglob
+    ;;
+*)
+    usage
+    ;;
+esac
+
+shopt -s nullglob
+
+for d in "${testcase_dirs[@]}"; do
+    dirname=${d%/}
+    for infile in "$dirname"/*.in; do
+        echo >&2 "{{<<==--•• RUNNING ON “$infile” ••--==>>}}"
+        ./run-test-case "$dirname"/prog.c "$infile"
+    done
+done

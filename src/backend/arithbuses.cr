@@ -668,13 +668,13 @@ class OrFamilyBus < BinaryBooleanBus
         return cmds
     end
 
-	def do_trace(j)
+    def do_trace(j)
         return @wire_list.as(WireList)[j*4+3]
     end
 end
 
 class ArithBitOrBus < OrFamilyBus
-	def initialize (@board, bus_left, bus_right)
+    def initialize (@board, bus_left, bus_right)
         super(@board, bus_left, bus_right, -1, "or")
     end
 end
@@ -684,5 +684,5 @@ class ArithXorBus < OrFamilyBus
         super(@board, bus_left, bus_right, -2, "xor")
     end
 end
-			
+
 end

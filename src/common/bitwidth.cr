@@ -5,7 +5,7 @@ module Isekai
 class BitWidthsIncompatible < Exception
 end
 
-# Assumes width <= 64.
+# Assumes either (0 < width <= 64), or (width == UNDEFINED).
 struct BitWidth
     include Comparable(BitWidth)
 
@@ -50,7 +50,7 @@ struct BitWidth
         value & mask
     end
 
-    def assert_common! (other : BitWidth)
+    def common! (other : BitWidth)
         return other if undefined?
         return self if other.undefined? || @width == other.@width
         raise BitWidthsIncompatible.new
