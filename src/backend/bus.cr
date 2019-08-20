@@ -236,7 +236,7 @@ module Isekai
         end
 
         def get_trace_count 
-            return Math.min(Isekai.ceillg2(@value), @bus.get_trace_count)
+            return Math.max(Isekai.ceillg2(@value), @bus.get_trace_count)
         end
 
         def get_wire_count
@@ -259,7 +259,7 @@ module Isekai
     end
 
     # Bus that performs XOR on boolean bus and the constant value
-    class ConstantBitXorBusBase < BooleanBus
+    abstract class ConstantBitXorBusBase < BooleanBus
         def initialize (@board, @value : Int32, @bus : Bus)
             super(@board, Constants::MAJOR_LOGIC)
             raise "Can't OR non-boolean buses" if @bus.get_trace_type != Constants::BOOLEAN_TRACE
@@ -311,26 +311,24 @@ module Isekai
             raise "Abstract."
         end
 
-        def invert_field_op(comment, input_list, output_list)
-            raise "Abstract."
-        end
+        abstract def invert_field_op(comment : String, input_list : Wire, minus : Wire, x_or : Wire)
 
         # Generates the needed gates for XOR operation
         def get_field_ops
             cmds = Array(FieldOp).new()
-
-            (0..get_trace_count()-1).each do |i|
-                if count = @bit_map[i]?
-                    k = wires_per_xor()
-
-                    cmds << invert_field_op(
-                        "bitxor bit #{i}",
-                        @bus.get_trace(i),
-                        @wire_list.as(WireList)[count * k..(count+1)*k]
-                    )
+            k = wires_per_xor()
+            if (w = @wire_list )
+                (0..get_trace_count()-1).each do |i|
+                    if count = @bit_map[i]?
+                        cmds.concat(invert_field_op(
+                            "bitxor bit #{i}",
+                            @bus.get_trace(i),
+                            w[count * k],               #I guess it should be [cout*k..(count+1)*k-1], but anyway k is always 2
+                            w[(count)*k+1]
+                        ))
+                    end
                 end
             end
-
             return cmds
         end
     end
