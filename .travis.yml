@@ -5,6 +5,7 @@ crystal:
   - nightly
 
 before_install:
+  - wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
   - sudo add-apt-repository 'deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic main'
   - sudo apt-get update
   - sudo apt-get install -y llvm-7-dev libclang-7-dev
