@@ -271,7 +271,22 @@ end
 # Subtract operation
 class Subtract < BinaryMath
     def initialize (@left, @right)
-        super("+", OperatorSub.new, 0, @left, @right)
+        super("-", OperatorSub.new, nil, @left, @right)
+    end
+
+    def collapse_constants (collapser)
+        basic_collapsing = super(collapser)
+
+        # check if we can collapse out this operation
+        if basic_collapsing.is_a? BinaryMath
+            if right = basic_collapsing.@right.as? Constant 
+                 if right.@value == 0   #no identity for substract but  'x-0' can be simplified nevertheless
+                     basic_collapsing = basic_collapsing.@left
+                 end
+             end
+        end
+ 
+        return basic_collapsing
     end
 end
 
