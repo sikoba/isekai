@@ -2,7 +2,6 @@
 *.so
 /judge
 /rng
-/cruft/*
 !/cruft/.gitkeep
 # CMake stuff
 CMakeCache.txt

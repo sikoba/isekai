@@ -1,12 +1,12 @@
 struct Input {
-    int a;
-    int b;
-    int c;
-    int d;
+    unsigned a;
+    unsigned b;
+    unsigned c;
+    unsigned d;
 };
 
 struct Output {
-    int x;
+    unsigned x;
 };
 
 void

@@ -1,9 +1,9 @@
 struct Input {
-    int a;
+    unsigned a;
 };
 
 struct Output {
-    int x;
+    unsigned x;
 };
 
 void
@@ -17,7 +17,7 @@ outsource(struct Input *input, struct Output *output)
     }
 #else
     // If input->a <= 10, the C standard says the behavior is undefined.
-    int *p;
+    unsigned *p;
     if (input->a > 10) {
         p = &input->a;
     }

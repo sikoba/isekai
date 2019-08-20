@@ -1,13 +1,21 @@
 #pragma once
 
 #include <exception>
+#include <string>
 
-struct ParseUIntError : public std::exception
+class UnexpectedInput : public std::exception
 {
-    const char * what() const noexcept override
+    std::string what_;
+public:
+    UnexpectedInput(const std::string &found, const std::string &expected)
+        : what_("Found: '")
     {
-        return "cannot parse integer";
+        what_.append(found).append("', expected: ").append(expected);
     }
+
+    explicit UnexpectedInput(const std::string &msg) : what_(msg) {}
+
+    const char *what() const noexcept override { return what_.c_str(); }
 };
 
 struct BaseDec
@@ -63,7 +71,7 @@ static void parse_uint(Iterator &it, T &out, Base)
         out += digit;
     }
     if (!ndigits) {
-        throw ParseUIntError{};
+        throw UnexpectedInput(it, "(digit)");
     }
 }
 
@@ -72,6 +80,6 @@ static void parse_uint_until_nul(Iterator it, T &out, Base base)
 {
     parse_uint(it, out, base);
     if (*it != '\0') {
-        throw ParseUIntError{};
+        throw UnexpectedInput(it, "(end of string)");
     }
 }

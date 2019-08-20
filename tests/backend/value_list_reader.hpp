@@ -3,7 +3,6 @@
 #include "cfile.hpp"
 #include "common.hpp"
 #include <string>
-#include <exception>
 #include <stdio.h>
 
 class ValueListReader
@@ -18,18 +17,6 @@ class ValueListReader
         const char *hex;
 
         operator bool() const { return ok; }
-    };
-
-    class UnexpectedInput : public std::exception
-    {
-        std::string what_;
-    public:
-        explicit UnexpectedInput(const std::string &what) : what_(what) {}
-
-        const char *what() const noexcept override
-        {
-            return what_.c_str();
-        }
     };
 
 public:
@@ -52,7 +39,7 @@ public:
         ++next_index_;
 
         if (*s != ' ') {
-            throw UnexpectedInput("no space after index");
+            throw UnexpectedInput(s, "(space)");
         }
         do {
             ++s;

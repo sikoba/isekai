@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+cd -- "$(dirname "$(readlink "$0" || echo "$0")")" || exit $?
+
+for f in ./[^_]*.c; do
+    ./test-single "$f" || exit $?
+done

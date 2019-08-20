@@ -2,7 +2,8 @@
 
 opwd=$PWD
 cd -- "$(dirname "$(readlink "$0" || echo "$0")")" || exit $?
-source ./utils.lib.bash
+cd .. || exit $?
+source ./utils.lib.bash || exit $?
 
 if (( $# != 1 )); then
     echo >&2 "USAGE: $0 <C source>"

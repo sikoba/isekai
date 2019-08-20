@@ -7,7 +7,6 @@
 #include <string.h>
 #include <vector>
 #include <string>
-#include <exception>
 
 enum class Opcode {
     INPUT,
@@ -52,21 +51,6 @@ class CircuitReader
             res.ok = false;
             return res;
         }
-    };
-
-    class UnexpectedInput : public std::exception
-    {
-        std::string what_;
-    public:
-        UnexpectedInput(const char *found, const char *expected)
-            : what_("Found: '")
-        {
-            what_.append(found).append("', expected: ").append(expected);
-        }
-
-        UnexpectedInput(const char *msg) : what_(msg) {}
-
-        const char *what() const noexcept override { return what_.c_str(); }
     };
 
     CFile file_;

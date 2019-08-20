@@ -2,6 +2,7 @@
 
 #include <system_error>
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <assert.h>
 
@@ -75,7 +76,7 @@ public:
 
     char * c_str()
     {
-        assert(buf_);
+        assert(buf_ && nbuf_);
         return buf_;
     }
 

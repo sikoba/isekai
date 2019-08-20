@@ -1,11 +1,14 @@
+# Everything is relative to this file's directory, that is, tests/.
+utils_REPO_ROOT=..
+utils_TEMP_DIR=./cruft
+utils_BACKEND_TEST_ROOT=./backend
+
 utils_CLANG=( clang )
 utils_NATIVE_CC=( clang -O0 -Wall -Wextra -fsanitize=undefined )
-utils_ISEKAI=( ../isekai )
-utils_BOILERPLATE_GEN=( ../boilerplate_gen )
-utils_JUDGE=( ./judge )
-utils_RNG=( ./rng )
-
-utils_TEMP_DIR=./cruft
+utils_ISEKAI=( "$utils_REPO_ROOT"/isekai )
+utils_BOILERPLATE_GEN=( "$utils_REPO_ROOT"/boilerplate_gen )
+utils_JUDGE=( "$utils_BACKEND_TEST_ROOT"/judge )
+utils_RNG=( "$utils_BACKEND_TEST_ROOT"/rng )
 
 utils_BC_FILE=$utils_TEMP_DIR/bitcode.bc
 utils_ARCI_FOR_BC_FILE=$utils_TEMP_DIR/arith_bc.arci
