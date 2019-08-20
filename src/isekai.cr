@@ -1,4 +1,6 @@
-require "./frontend_c/parser.cr"
+{% unless flag?(:disable_cfront) %}
+    require "./frontend_c/parser.cr"
+{% end %}
 require "./frontend_llvm/parser.cr"
 require "./backend/arithfactory"
 require "./backend/booleanfactory"
@@ -143,21 +145,25 @@ class ParserProgram
             end
 
         when .c?
-            parser = CFrontend::Parser.new(
-                input_file.@filename,
-                options.clang_args,
-                options.loop_sanity_limit,
-                options.bit_width,
-                options.progress)
-            inputs, nizk_inputs, outputs = parser.parse()
+            {% unless flag?(:disable_cfront) %}
+                parser = CFrontend::Parser.new(
+                    input_file.@filename,
+                    options.clang_args,
+                    options.loop_sanity_limit,
+                    options.bit_width,
+                    options.progress)
+                inputs, nizk_inputs, outputs = parser.parse()
 
-            if options.print_exprs
-                puts outputs
-            end
+                if options.print_exprs
+                    puts outputs
+                end
 
-            run_primary_backend(
-                inputs, nizk_inputs, outputs,
-                input_values, arith_outfile, bool_outfile, options)
+                run_primary_backend(
+                    inputs, nizk_inputs, outputs,
+                    input_values, arith_outfile, bool_outfile, options)
+            {% else %}
+                raise "C frontend was disabled at compile time"
+            {% end %}
         else
             raise "Unsupported input file extension"
         end
