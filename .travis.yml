@@ -15,10 +15,11 @@ before_install:
 script:
   - shards update
   - sed '1{s/llvm-7/llvm-8/;s/LLVM-7/LLVM-8/}' -i ./lib/llvm-crystal/src/lib_llvm_c.cr
+  - sed 's/"clang"/"klang"/' -i ./lib/clang/src/lib_clang.cr
   - (cd docker && cp bin/libclang.so.gz /tmp/libclang.so.gz && gzip -d /tmp/libclang.so.gz;)
-  - sudo cp /tmp/libclang.so /usr/lib/x86_64-linux-gnu/libclang-7.so.1
-  - sudo cp /tmp/libclang.so /usr/lib/libclang.so.7
-  - /usr/local/clang-7.0.0/bin/llvm-config --ldflags
+  - sudo rm -rf /usr/local/clang-7.0.0/lib
+  - sudo mkdir -p /usr/local/clang-7.0.0/lib
+  - sudo cp /tmp/libclang.so /usr/local/clang-7.0.0/lib/libklang.so
   - make
   - ./tests/backend/test-runner
   - ./tests/frontend/test-all
