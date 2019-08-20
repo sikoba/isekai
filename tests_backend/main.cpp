@@ -1,9 +1,12 @@
 #define _POSIX_C_SOURCE 200809L
 #include "value_list_reader.hpp"
 #include "circuit_reader.hpp"
+#include "common.hpp"
 #include <libsnark/gadgetlib2/integration.hpp>
 #include <libsnark/gadgetlib2/adapters.hpp>
 #include <libff/common/default_types/ec_pp.hpp>
+#include <string>
+#include <vector>
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -45,32 +48,10 @@ static void print_field_bits(FElem v, int nbits)
     putc('\n', stdout);
 }
 
-static FieldT hex_to_field(const char *hex)
+static void print_usage_and_exit(const std::string &msg = "")
 {
-    FieldT res;
-    do {
-        const char c = *hex;
-        int digit;
-        if ('0' <= c && c <= '9') {
-            digit = c - '0';
-        } else if ('a' <= c && c <= 'f') {
-            digit = c - 'a' + 10;
-        } else if ('A' <= c && c <= 'F') {
-            digit = c - 'A' + 10;
-        } else {
-            fprintf(stderr, "Cannot parse symbol as a hex digit: code %d\n", (unsigned char) c);
-            abort();
-        }
-        res *= 16;
-        res += digit;
-    } while (*(++hex));
-    return res;
-}
-
-static void print_usage_and_exit(const char *msg = nullptr)
-{
-    if (msg) {
-        fprintf(stderr, "Error: %s.\n", msg);
+    if (!msg.empty()) {
+        fprintf(stderr, "Error: %s.\n", msg.c_str());
     }
     fprintf(stderr, "USAGE: judge [-w <width>] <arithmetic circuit file>\n");
     exit(2);
@@ -82,9 +63,7 @@ int main(int argc, char **argv)
     for (int c; (c = getopt(argc, argv, "w:")) != -1;) {
         switch (c) {
         case 'w':
-            if (sscanf(optarg, "%u", &output_width) != 1) {
-                print_usage_and_exit("cannot parse -w argument as integer");
-            }
+            parse_uint_until_nul(optarg, output_width, BaseDec{});
             break;
         default:
             print_usage_and_exit();
@@ -106,7 +85,9 @@ int main(int argc, char **argv)
     {
         ValueListReader reader(arci_filename + ".in");
         while (auto value = reader.next_value()) {
-            wires.emplace_back(hex_to_field(value.hex));
+            FieldT res;
+            parse_uint_until_nul(value.hex, res, BaseHex{});
+            wires.emplace_back(res);
         }
     }
 
@@ -129,14 +110,22 @@ int main(int argc, char **argv)
             wires.at(command.outputs[0]) = wires.at(command.inputs[0]) * wires.at(command.inputs[1]);
             break;
         case Opcode::CONST_MUL:
-            CHECK(command.inputs.size() == 1);
-            CHECK(command.outputs.size() == 1);
-            wires.at(command.outputs[0]) = wires.at(command.inputs[0]) * hex_to_field(command.inline_hex);
+            {
+                CHECK(command.inputs.size() == 1);
+                CHECK(command.outputs.size() == 1);
+                FieldT arg;
+                parse_uint_until_nul(command.inline_hex, arg, BaseHex{});
+                wires.at(command.outputs[0]) = wires.at(command.inputs[0]) * arg;
+            }
             break;
         case Opcode::CONST_MUL_NEG:
-            CHECK(command.inputs.size() == 1);
-            CHECK(command.outputs.size() == 1);
-            wires.at(command.outputs[0]) = wires.at(command.inputs[0]) * hex_to_field(command.inline_hex) * minus_one;
+            {
+                CHECK(command.inputs.size() == 1);
+                CHECK(command.outputs.size() == 1);
+                FieldT arg;
+                parse_uint_until_nul(command.inline_hex, arg, BaseHex{});
+                wires.at(command.outputs[0]) = wires.at(command.inputs[0]) * arg * minus_one;
+            }
             break;
         case Opcode::ZEROP:
             CHECK(command.inputs.size() == 1);

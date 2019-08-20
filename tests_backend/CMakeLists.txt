@@ -24,3 +24,5 @@ target_include_directories (
     PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/../zkp/libsnark/depends/libff"
     "${CMAKE_CURRENT_SOURCE_DIR}/../zkp/libsnark")
+
+add_executable (rng rng.cpp)

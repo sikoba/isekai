@@ -1,8 +1,9 @@
 #pragma once
 
+#include <system_error>
 #include <stdio.h>
 #include <errno.h>
-#include <system_error>
+#include <assert.h>
 
 class CFile
 {
@@ -40,4 +41,43 @@ public:
             fclose(file_);
         }
     }
+};
+
+class CFileLine
+{
+    char *buf_;
+    size_t nbuf_;
+public:
+    CFileLine() : buf_{nullptr}, nbuf_{0} {}
+    explicit CFileLine(size_t prealloc) : buf_{nullptr}, nbuf_{prealloc} {}
+
+    CFileLine(const CFileLine &) = delete;
+
+    CFileLine(CFileLine &&other) : buf_{other.buf_}, nbuf_{other.nbuf_}
+    {
+        other.buf_ = nullptr;
+    }
+
+    CFileLine& operator =(const CFileLine &) = delete;
+
+    CFileLine& operator =(CFileLine &&other)
+    {
+        buf_ = other.buf_;
+        nbuf_ = other.nbuf_;
+        other.buf_ = nullptr;
+        return *this;
+    }
+
+    ssize_t read_from(FILE *f)
+    {
+        return getline(&buf_, &nbuf_, f);
+    }
+
+    char * c_str()
+    {
+        assert(buf_);
+        return buf_;
+    }
+
+    ~CFileLine() { free(buf_); }
 };

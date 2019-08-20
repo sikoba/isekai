@@ -357,7 +357,7 @@ end
 
 class BinaryPredicate < BinaryOp
     def initialize (@op, @left, @right)
-        super(@op, @left, @right, bitwidth: BitWidth.new_for_bool)
+        super(@op, @left, @right, bitwidth: BitWidth.new(1))
     end
 end
 

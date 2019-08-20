@@ -105,12 +105,12 @@ private class Preprocessor
     def initialize (entry : LibLLVM::BasicBlock)
         @cfg = ControlFlowGraph.new(entry)
         inv = GraphUtils.invert_graph(@cfg)
-        @bfs_tree = GraphUtils.build_bfs_tree(inv, @cfg.final_block_idx)
+        @bfs_tree = GraphUtils.build_bfs_tree(on: inv, from: @cfg.final_block_idx)
         inspect_until(entry, terminator: nil)
     end
 
     def data
-        return @data
+        @data
     end
 end
 

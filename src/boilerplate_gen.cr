@@ -55,46 +55,14 @@ class Program
     end
 end
 
-def is_integer_type_kind (type_kind) : Bool
-    case type_kind
-    when .char_u?,
-         .u_char?,
-         .char16?,
-         .char32?,
-         .u_short?,
-         .u_int?,
-         .u_long?,
-         .u_long_long?,
-         .u_int128?,
-         .char_s?,
-         .s_char?,
-         .w_char?,
-         .short?,
-         .int?,
-         .long?,
-         .long_long?,
-         .int128?,
-         .enum?
-        true
-    else
-        false
-    end
-end
-
 def bake_field (cursor) : Field
     name = cursor.spelling
     type = cursor.type
-    case
-    when type.kind.constant_array?
+    if type.kind.constant_array?
         elem_type = type.array_element_type
-        unless is_integer_type_kind(elem_type.kind)
-            raise "Array element has unsupported type: #{elem_type}"
-        end
         return ArrayField.new(name: name, nelems: type.array_size.to_i32)
-    when is_integer_type_kind(type.kind)
-        return ScalarField.new(name: name)
     else
-        raise "Structure field has unsupported type: #{type}"
+        return ScalarField.new(name: name)
     end
 end
 
@@ -218,6 +186,7 @@ int main()
 END
         yield
         puts <<-END
+    return 0; // tcc miscompiles the program without this
 }
 END
     end

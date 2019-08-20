@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+opwd=$PWD
+cd -- "$(dirname "$(readlink "$0" || echo "$0")")" || exit $?
+source ./utils.lib.bash
+
+usage() {
+    echo >&2 "USAGE: $0 [-z] <testcase dir>"
+    exit 2
+}
+
+declare -a ISEKAI_ARGS=()
+declare -i OUTPUT_BIT_WIDTH=64
+while [[ "$1" == -* ]]; do
+    case "$1" in
+    -z)
+        ISEKAI_ARGS+=( --primary-backend )
+        OUTPUT_BIT_WIDTH=32
+        ;;
+    *)
+        usage
+        ;;
+    esac
+    shift
+done
+if (( $# != 1 )); then
+    usage
+fi
+d=$(utils_resolve_relative "$1" "$opwd")
+
+if ! utils_stress_test_can_run "$d"; then
+    echo >&2 "[ERROR] Cannot perform stress testing on test case directory '$d'."
+    exit 1
+fi
+utils_stress_test_prepare "$d" || exit $?
+while true; do
+    utils_stress_test_run_once "$OUTPUT_BIT_WIDTH" "${ISEKAI_ARGS[@]}" || exit $?
+done

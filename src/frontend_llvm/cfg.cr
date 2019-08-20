@@ -31,23 +31,23 @@ private class ControlFlowGraph
     end
 
     def nvertices
-        return @blocks.size
+        @blocks.size
     end
 
     def final_block_idx
-        return @final_idx
+        @final_idx
     end
 
     def edges_from (v : Int32)
-        return @blocks[v].terminator.successors.map { |bb| @block2idx[bb] }
+        @blocks[v].terminator.successors.map { |bb| @block2idx[bb] }
     end
 
     def block_to_idx (bb : LibLLVM::BasicBlock)
-        return @block2idx[bb]
+        @block2idx[bb]
     end
 
     def idx_to_block (idx : Int32)
-        return @blocks[idx]
+        @blocks[idx]
     end
 end
 

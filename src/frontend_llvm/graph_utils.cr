@@ -2,7 +2,7 @@ module Isekai::LLVMFrontend::GraphUtils
 
 class IncidenceList
     def initialize (@nvertices : Int32)
-        @edges = Array(Array(Int32)).new(@nvertices) { Array(Int32).new }
+        @edges = Array(Array(Int32)).new(nvertices) { Array(Int32).new }
     end
 
     def add_edge! (from : Int32, to : Int32)
@@ -13,15 +13,15 @@ class IncidenceList
         return @nvertices
     end
 
-    def edges_from (v : Int32)
-        return @edges[v]
+    def edges_from (vertex : Int32)
+        return @edges[vertex]
     end
 end
 
-def self.invert_graph (g)
-    res = IncidenceList.new(g.nvertices)
-    (0...g.nvertices).each do |i|
-        g.edges_from(i).each do |j|
+def self.invert_graph (graph)
+    res = IncidenceList.new(nvertices: graph.nvertices)
+    (0...graph.nvertices).each do |i|
+        graph.edges_from(i).each do |j|
             res.add_edge!(j, i)
         end
     end
@@ -29,18 +29,18 @@ def self.invert_graph (g)
 end
 
 class BfsTree
-    def initialize (@nvertices : Int32, source : Int32)
-        @parents = Array(Int32).new(@nvertices, -1)
-        @dist = Array(Int32).new(@nvertices, -1)
+    def initialize (@nvertices : Int32, from source : Int32)
+        @parents = Array(Int32).new(nvertices, -1)
+        @dist = Array(Int32).new(nvertices, -1)
         @dist[source] = 0
     end
 
-    def distance_known? (v : Int32)
-        return @dist[v] != -1
+    def distance_known? (to vertex : Int32)
+        @dist[vertex] != -1
     end
 
-    def has_parent? (v : Int32)
-        return @parents[v] != -1
+    def has_parent? (vertex : Int32)
+        @parents[vertex] != -1
     end
 
     def set_parent! (child : Int32, parent : Int32)
@@ -50,30 +50,30 @@ class BfsTree
     end
 
     def nvertices
-        return @nvertices
+        @nvertices
     end
 
-    def parent_of (v : Int32)
-        return @parents[v]
+    def parent_of (vertex : Int32)
+        @parents[vertex]
     end
 
-    def distance_to (v : Int32)
-        return @dist[v]
+    def distance (to vertex : Int32)
+        @dist[vertex]
     end
 end
 
 private class FastQueue(T)
-    def initialize (prealloc : Int = 0)
-        @queue = Array(T).new(prealloc)
+    def initialize (initial_capacity : Int = 0)
+        @queue = Array(T).new(initial_capacity: initial_capacity)
         @queue_start = 0
     end
 
     def empty?
-        return @queue_start == @queue.size
+        @queue_start == @queue.size
     end
 
-    def push (elem)
-        @queue << elem
+    def push (x)
+        @queue << x
         self
     end
 
@@ -84,15 +84,15 @@ private class FastQueue(T)
     end
 end
 
-def self.build_bfs_tree (g, source : Int32)
-    tree = BfsTree.new(g.nvertices, source)
+def self.build_bfs_tree (on graph, from source : Int32)
+    tree = BfsTree.new(nvertices: graph.nvertices, from: source)
 
-    queue = FastQueue(Int32).new(g.nvertices)
+    queue = FastQueue(Int32).new(initial_capacity: graph.nvertices)
     queue.push(source)
     until queue.empty?
         v = queue.shift
-        g.edges_from(v).each do |w|
-            unless tree.distance_known?(w)
+        graph.edges_from(v).each do |w|
+            unless tree.distance_known?(to: w)
                 tree.set_parent!(child: w, parent: v)
                 queue.push(w)
             end
@@ -106,7 +106,7 @@ def self.tree_lca (tree, a : Int32, b : Int32, j : Int32) : {Int32, Bool}
     j_on_path = false
     while true
         j_on_path ||= (a == j || b == j)
-        case tree.distance_to(a) <=> tree.distance_to(b)
+        case tree.distance(to: a) <=> tree.distance(to: b)
         when .> 0
             a = tree.parent_of(a)
         when .< 0

@@ -170,7 +170,7 @@ class Board
         (1...bits.size).each do |i|
             w = lowbit(bits[i])
             factor = 1_u128 << i
-            dyn_range = DynamicRange.new_for_const factor
+            dyn_range = DynamicRange.new_for_width(i + 1)
 
             cur_w = allocate_wire! dyn_range
             @outbuf.write_const_mul(factor, w, output: cur_w)

@@ -1,13 +1,15 @@
 #pragma once
 
 #include "cfile.hpp"
-#include <stdio.h>
+#include "common.hpp"
+#include <string>
 #include <exception>
+#include <stdio.h>
 
 class ValueListReader
 {
     CFile file_;
-    char buf_[128];
+    CFileLine line_;
     unsigned next_index_ = 0;
 
     struct Value
@@ -18,29 +20,50 @@ class ValueListReader
         operator bool() const { return ok; }
     };
 
-    struct UnexpectedIndex : public std::exception
+    class UnexpectedInput : public std::exception
     {
+        std::string what_;
+    public:
+        explicit UnexpectedInput(const std::string &what) : what_(what) {}
+
         const char *what() const noexcept override
         {
-            return "unexpected index";
+            return what_.c_str();
         }
     };
 
 public:
-    ValueListReader(const char *path) : file_(path, "r") {}
+    explicit ValueListReader(const char *path) : file_(path, "r") {}
 
-    ValueListReader(const std::string &path) : ValueListReader(path.c_str()) {}
+    explicit ValueListReader(const std::string &path) : ValueListReader(path.c_str()) {}
 
     Value next_value()
     {
-        unsigned i;
-        if (fscanf(file_, "%u %127s", &i, buf_) != 2) {
+        if (line_.read_from(file_) <= 0) {
             return Value{false, nullptr};
         }
-        if (i != next_index_) {
-            throw UnexpectedIndex{};
+        char *s = line_.c_str();
+
+        unsigned index;
+        parse_uint(s, index, BaseDec{});
+        if (index != next_index_) {
+            throw UnexpectedInput("unexpected index");
         }
         ++next_index_;
-        return Value{true, buf_};
+
+        if (*s != ' ') {
+            throw UnexpectedInput("no space after index");
+        }
+        do {
+            ++s;
+        } while (*s == ' ');
+
+        char *hex_start = s;
+        while (static_cast<unsigned char>(*s) > 32) {
+            ++s;
+        }
+        *s = '\0';
+
+        return Value{true, hex_start};
     }
 };

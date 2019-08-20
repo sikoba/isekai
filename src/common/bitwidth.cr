@@ -1,5 +1,3 @@
-require "intrinsics"
-
 module Isekai
 
 class BitWidthsIncompatible < Exception
@@ -23,11 +21,6 @@ struct BitWidth
     @[AlwaysInline]
     def self.new_for_undefined
         self.new(UNDEFINED)
-    end
-
-    @[AlwaysInline]
-    def self.new_for_bool
-        self.new(1)
     end
 
     @[AlwaysInline]

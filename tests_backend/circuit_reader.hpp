@@ -1,10 +1,12 @@
 #pragma once
 
+#include "common.hpp"
 #include "cfile.hpp"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
+#include <string>
 #include <exception>
 
 enum class Opcode {
@@ -59,11 +61,7 @@ class CircuitReader
         UnexpectedInput(const char *found, const char *expected)
             : what_("Found: '")
         {
-            size_t nfound = strlen(found);
-            while (nfound && found[nfound - 1] == '\n') {
-                --nfound;
-            }
-            what_.append(found, nfound).append("', expected: ").append(expected);
+            what_.append(found).append("', expected: ").append(expected);
         }
 
         UnexpectedInput(const char *msg) : what_(msg) {}
@@ -72,8 +70,7 @@ class CircuitReader
     };
 
     CFile file_;
-    char *buf_ = nullptr;
-    size_t nbuf_ = 0;
+    CFileLine line_;
     char *inline_hex_ = nullptr;
     std::vector<unsigned> inputs_buf_;
     std::vector<unsigned> outputs_buf_;
@@ -98,26 +95,10 @@ class CircuitReader
         }
     }
 
-    static void parse_int_(char *&s, unsigned &out)
-    {
-        out = 0;
-        int ndigits = 0;
-        for (;; ++s, ++ndigits) {
-            const int digit = ((int) *s) - '0';
-            if (digit < 0 || digit > 9) {
-                break;
-            }
-            out = out * 10 + digit;
-        }
-        if (!ndigits) {
-            throw UnexpectedInput(s, "(digit)");
-        }
-    }
-
     void handle_inline_hex_(char *&s)
     {
         inline_hex_ = s;
-        while (((unsigned char) *s) > 32) {
+        while (static_cast<unsigned char>(*s) > 32) {
             ++s;
         }
         if (*s != ' ') {
@@ -138,7 +119,7 @@ class CircuitReader
     {
         skip_ws_(s);
         unsigned u;
-        parse_int_(s, u);
+        parse_uint(s, u, BaseDec{});
         inputs_buf_.push_back(u);
     }
 
@@ -149,7 +130,7 @@ class CircuitReader
 
         skip_ws_(s);
         unsigned nargs;
-        parse_int_(s, nargs);
+        parse_uint(s, nargs, BaseDec{});
 
         skip_ws_(s);
         slurp_(s, "<");
@@ -158,7 +139,7 @@ class CircuitReader
         for (unsigned i = 0; i < nargs; ++i) {
             skip_ws_(s);
             unsigned u;
-            parse_int_(s, u);
+            parse_uint(s, u, BaseDec{});
             out.push_back(u);
         }
 
@@ -185,18 +166,18 @@ class CircuitReader
 
     bool read_line_()
     {
-        return getline(&buf_, &nbuf_, file_) > 0;
+        return line_.read_from(file_) > 0;
     }
 
     bool should_skip_line_()
     {
-        return buf_[0] == '#';
+        return line_.c_str()[0] == '#';
     }
 
 public:
-    CircuitReader(const char *path) : file_(path, "r") {}
+    explicit CircuitReader(const char *path) : file_(path, "r") {}
 
-    CircuitReader(const std::string &path) : CircuitReader(path.c_str()) {}
+    explicit CircuitReader(const std::string &path) : CircuitReader(path.c_str()) {}
 
     size_t total()
     {
@@ -206,11 +187,11 @@ public:
             }
         } while (should_skip_line_());
 
-        char *s = buf_;
+        char *s = line_.c_str();
         slurp_(s, "total ");
         skip_ws_(s);
         unsigned u;
-        parse_int_(s, u);
+        parse_uint(s, u, BaseDec{});
         return u;
     }
 
@@ -224,60 +205,56 @@ public:
             }
         } while (should_skip_line_());
 
+        char *s = line_.c_str();
         char *v;
 
-        if ((v = try_slurp_(buf_, "input "))) {
+        if ((v = try_slurp_(s, "input "))) {
             read_inline_input_(v);
             return make_command_(Opcode::INPUT);
         }
 
-        if ((v = try_slurp_(buf_, "nizkinput "))) {
+        if ((v = try_slurp_(s, "nizkinput "))) {
             read_inline_input_(v);
             return make_command_(Opcode::NIZK_INPUT);
         }
 
-        if ((v = try_slurp_(buf_, "output "))) {
+        if ((v = try_slurp_(s, "output "))) {
             read_inline_input_(v);
             return make_command_(Opcode::OUTPUT);
         }
 
-        if ((v = try_slurp_(buf_, "const-mul-neg-"))) {
+        if ((v = try_slurp_(s, "const-mul-neg-"))) {
             handle_inline_hex_(v);
             read_args_(v);
             return make_command_(Opcode::CONST_MUL_NEG);
         }
 
-        if ((v = try_slurp_(buf_, "const-mul-"))) {
+        if ((v = try_slurp_(s, "const-mul-"))) {
             handle_inline_hex_(v);
             read_args_(v);
             return make_command_(Opcode::CONST_MUL);
         }
 
-        if ((v = try_slurp_(buf_, "add "))) {
+        if ((v = try_slurp_(s, "add "))) {
             read_args_(v);
             return make_command_(Opcode::ADD);
         }
 
-        if ((v = try_slurp_(buf_, "mul "))) {
+        if ((v = try_slurp_(s, "mul "))) {
             read_args_(v);
             return make_command_(Opcode::MUL);
         }
 
-        if ((v = try_slurp_(buf_, "zerop "))) {
+        if ((v = try_slurp_(s, "zerop "))) {
             read_args_(v);
             return make_command_(Opcode::ZEROP);
         }
 
-        if ((v = try_slurp_(buf_, "split "))) {
+        if ((v = try_slurp_(s, "split "))) {
             read_args_(v);
             return make_command_(Opcode::SPLIT);
         }
 
-        throw UnexpectedInput(buf_, "(command)");
-    }
-
-    ~CircuitReader()
-    {
-        free(buf_);
+        throw UnexpectedInput(s, "(command)");
     }
 };
