@@ -153,12 +153,7 @@ def self.joined_to_split (board, j : JoinedRequest) : SplitRequest
         end
     else
         j_wire = joined_to_wire(board, j)
-        max_nbits = board.max_nbits(j_wire, width)
-        if max_nbits <= 1
-            bits = [j_wire]
-        else
-            bits = board.split(j_wire, into: max_nbits)
-        end
+        bits = board.split(j_wire)
         return SplitRequest.new(width) do |i|
             if i < bits.size
                 JoinedRequest.new_for_wire(bits[i], width: 1)

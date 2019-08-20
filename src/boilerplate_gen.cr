@@ -59,7 +59,6 @@ def bake_field (cursor) : Field
     name = cursor.spelling
     type = cursor.type
     if type.kind.constant_array?
-        elem_type = type.array_element_type
         return ArrayField.new(name: name, nelems: type.array_size.to_i32)
     else
         return ScalarField.new(name: name)

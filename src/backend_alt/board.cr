@@ -150,24 +150,26 @@ class Board
         @nizk_inputs[idx]
     end
 
-    private def split_impl (w : Wire, into num : Int32) : WireList
-        result = WireList.new(num) { allocate_wire! DynamicRange.new_for_bool }
+    def split (w : Wire) : WireList
+        w_range = @dynamic_ranges[w.@index]
+
+        width = w_range.max_nbits
+        raise "Cannot split undefined-width value" unless width
+        return [w] if width <= 1
+
+        result = WireList.new(width) { allocate_wire! DynamicRange.new_for_bool }
         @outbuf.write_split(w, outputs: result)
-        result
+        return result
     end
 
     private def lowbit (w : Wire) : Wire
-        if (@dynamic_ranges[w.@index].max_nbits || 0) <= 1
-            w
-        else
-            split_impl(w, into: 1)[0]
-        end
+        split(w)[0]
     end
 
     private def yank (w : Wire, width : Int32) : Wire
-        bits = split_impl(w, into: width)
+        bits = split(w)
         result = lowbit(bits[0])
-        (1...bits.size).each do |i|
+        (1...width).each do |i|
             w = lowbit(bits[i])
             factor = 1_u128 << i
             dyn_range = DynamicRange.new_for_width(i + 1)
@@ -189,12 +191,6 @@ class Board
         else
             w
         end
-    end
-
-    def split (w : Wire, into num : Int32) : WireList
-        raise "Missed optimization" if num == 0
-        raise "Missed optimization" if (@dynamic_ranges[w.@index].max_nbits || 0) <= 1
-        split_impl(w, into: num)
     end
 
     def zerop (w : Wire, width : Int32?) : Wire

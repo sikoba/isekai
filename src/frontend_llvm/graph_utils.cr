@@ -10,11 +10,11 @@ class IncidenceList
     end
 
     def nvertices
-        return @nvertices
+        @nvertices
     end
 
     def edges_from (vertex : Int32)
-        return @edges[vertex]
+        @edges[vertex]
     end
 end
 
@@ -80,7 +80,7 @@ private class FastQueue(T)
     def shift
         res = @queue[@queue_start]
         @queue_start += 1
-        return res
+        res
     end
 end
 

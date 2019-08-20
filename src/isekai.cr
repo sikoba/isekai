@@ -108,13 +108,13 @@ private def run_primary_backend (
             options.bit_width,
             input_values)
     end
-    #if bool_outfile != ""
-    #    Backend::BooleanFactory.new(
-    #        bool_outfile,
-    #        inputs,
-    #        outputs,
-    #        options.bit_width)
-    #end
+    if bool_outfile != ""
+        Backend::BooleanFactory.new(
+            bool_outfile,
+            inputs,
+            outputs,
+            options.bit_width)
+    end
 end
 
 class ParserProgram

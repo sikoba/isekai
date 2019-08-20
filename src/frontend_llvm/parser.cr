@@ -399,21 +399,17 @@ class Parser
                 when .int_eq? then set_binary(ins, CmpEQ)
                 when .int_ne? then set_binary(ins, CmpNEQ)
 
-                # TODO: is 'CmpLT' signed or unsigned?
-                when .int_slt? then set_binary(ins, CmpLT)
+                when .int_slt? then set_binary(ins, SignedCmpLT)
                 when .int_ult? then set_binary(ins, CmpLT)
 
-                # TODO: is 'CmpLEQ' signed or unsigned?
+                when .int_sle? then set_binary(ins, SignedCmpLEQ)
                 when .int_ule? then set_binary(ins, CmpLEQ)
-                when .int_sle? then set_binary(ins, CmpLEQ)
 
-                # TODO: is 'CmpLT' signed or unsigned?
+                when .int_sgt? then set_binary_swapped(ins, SignedCmpLT)
                 when .int_ugt? then set_binary_swapped(ins, CmpLT)
-                when .int_sgt? then set_binary_swapped(ins, CmpLT)
 
-                # TODO: is 'CmpLEQ' signed or unsigned?
+                when .int_sge? then set_binary_swapped(ins, SignedCmpLEQ)
                 when .int_uge? then set_binary_swapped(ins, CmpLEQ)
-                when .int_sge? then set_binary_swapped(ins, CmpLEQ)
 
                 else raise "unreachable"
                 end

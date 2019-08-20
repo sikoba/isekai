@@ -31,18 +31,56 @@ def self.for_each_dependency (expr : DFGExpr)
     end
 end
 
-private def self.lay_down_subtract (board, left, right, width)
+private def self.lay_down_subtract (
+        board,
+        left : JoinedRequest,
+        right : JoinedRequest,
+        width : Int32) : JoinedRequest
+
     minus_one = (1_u128 << width) - 1
     minus_right = Requests.joined_mul_const(minus_one, right)
     return Requests.joined_add(board, left, minus_right)
 end
 
-private def self.lay_down_cmp_lt (board, left, right, width)
+private def self.lay_down_cmp_lt (
+        board,
+        left : JoinedRequest,
+        right : JoinedRequest,
+        width : Int32) : JoinedRequest
+
     new_width = width + 1
 
     ext_left = Requests.joined_zero_extend(board, left, to: new_width)
     ext_right = Requests.joined_zero_extend(board, right, to: new_width)
     ext_diff = lay_down_subtract(board, ext_left, ext_right, new_width)
+
+    ext_diff_bits = Requests.joined_to_split(board, ext_diff)
+    return ext_diff_bits.last
+end
+
+private def self.lay_down_sign_extend (
+        left : SplitRequest,
+        to new_width : Int32) : SplitRequest
+
+    return SplitRequest.new(new_width) do |i|
+        left[i]? || left.last
+    end
+end
+
+private def self.lay_down_cmp_lt_signed (
+        board,
+        left : SplitRequest,
+        right : SplitRequest) : JoinedRequest
+
+    new_width = left.size + 1
+
+    ext_left = lay_down_sign_extend(left, to: new_width)
+    ext_right = lay_down_sign_extend(right, to: new_width)
+    ext_diff = lay_down_subtract(
+        board,
+        Requests.split_to_joined(board, ext_left),
+        Requests.split_to_joined(board, ext_right),
+        new_width)
 
     ext_diff_bits = Requests.joined_to_split(board, ext_diff)
     return ext_diff_bits.last
@@ -177,6 +215,17 @@ def self.lay_down (expr, on board : Board, using deps : Array(Request)) : Reques
         not_leq = lay_down_cmp_lt(board, right, left, expr.@left.@bitwidth.@width)
         return Requests.joined_add_const(1, not_leq)
 
+    when SignedCmpLT
+        left = Requests.to_split(board, deps[0])
+        right = Requests.to_split(board, deps[1])
+        return lay_down_cmp_lt_signed(board, left, right)
+
+    when SignedCmpLEQ
+        left = Requests.to_split(board, deps[0])
+        right = Requests.to_split(board, deps[1])
+        not_leq = lay_down_cmp_lt_signed(board, right, left)
+        return Requests.joined_add_const(1, not_leq)
+
     when ZeroExtend
         arg = deps[0]
         new_width = expr.@bitwidth.@width
@@ -190,10 +239,7 @@ def self.lay_down (expr, on board : Board, using deps : Array(Request)) : Reques
 
     when SignExtend
         arg = Requests.to_split(board, deps[0])
-        new_width = expr.@bitwidth.@width
-        return SplitRequest.new(new_width) do |i|
-            arg[i]? || arg.last
-        end
+        return lay_down_sign_extend(arg, to: expr.@bitwidth.@width)
 
     when Truncate
         arg = deps[0]

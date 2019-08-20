@@ -542,10 +542,10 @@ class LogicalAnd < BinaryMath
     end
 end
 
-# Less-than compare operation
+# Unsigned less-than compare operation
 class CmpLT < BinaryPredicate
     def initialize (@left, @right)
-        super(:lt, @left, @right)
+        super(:u_lt, @left, @right)
     end
 
     def evaluate(collapser)
@@ -557,7 +557,6 @@ class CmpLT < BinaryPredicate
     end
 
     def self.static_eval (left, right, bitwidth)
-        # unsigned less-than
         (left.to_u64 < right.to_u64) ? 1_i64 : 0_i64
     end
 
@@ -565,10 +564,26 @@ class CmpLT < BinaryPredicate
     def_simplify_right
 end
 
-# Less-than-or-equal compare operation
+# Signed less-than compare operation
+class SignedCmpLT < BinaryPredicate
+    def initialize (@left, @right)
+        super(:s_lt, @left, @right)
+    end
+
+    def self.static_eval (left, right, bitwidth)
+        signed_left = bitwidth.sign_extend_to(left.to_u64, BitWidth.new(64))
+        signed_right = bitwidth.sign_extend_to(right.to_u64, BitWidth.new(64))
+        return signed_left < signed_right ? 1_i64 : 0_i64
+    end
+
+    def_simplify_left
+    def_simplify_right
+end
+
+# Unsigned less-than-or-equal compare operation
 class CmpLEQ < BinaryPredicate
     def initialize (@left, @right)
-        super(:leq, @left, @right)
+        super(:u_le, @left, @right)
     end
 
     def evaluate(collapser)
@@ -580,8 +595,23 @@ class CmpLEQ < BinaryPredicate
     end
 
     def self.static_eval (left, right, bitwidth)
-        # unsigned less-than-or-equal-to
         (left.to_u64 <= right.to_u64) ? 1_i64 : 0_i64
+    end
+
+    def_simplify_left
+    def_simplify_right
+end
+
+# Signed less-than compare operation
+class SignedCmpLEQ < BinaryPredicate
+    def initialize (@left, @right)
+        super(:s_le, @left, @right)
+    end
+
+    def self.static_eval (left, right, bitwidth)
+        signed_left = bitwidth.sign_extend_to(left.to_u64, BitWidth.new(64))
+        signed_right = bitwidth.sign_extend_to(right.to_u64, BitWidth.new(64))
+        return signed_left <= signed_right ? 1_i64 : 0_i64
     end
 
     def_simplify_left
