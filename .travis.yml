@@ -8,12 +8,17 @@ git:
 
 before_install:
   - wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-  - sudo add-apt-repository 'deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-7 main'
+  - sudo add-apt-repository 'deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main'
   - sudo apt-get update
-  - sudo apt-get install -y llvm-7-dev libclang-7-dev
+  - sudo apt-get install -y llvm-8-dev libclang-8-dev clang-8 libprocps-dev
 
 script:
   - shards update
+  - sed '1{s/llvm-7/llvm-8/;s/LLVM-7/LLVM-8/}' -i ./lib/llvm-crystal/src/lib_llvm_c.cr
+  - (cd docker && cp bin/libclang.so.gz /tmp/libclang.so.gz && gzip -d /tmp/libclang.so.gz;)
+  - sudo cp /tmp/libclang.so /usr/lib/x86_64-linux-gnu/libclang-7.so.1
+  - sudo cp /tmp/libclang.so /usr/lib/libclang.so.7
+  - /usr/local/clang-7.0.0/bin/llvm-config --ldflags
   - make
   - ./tests/backend/test-runner
   - ./tests/frontend/test-all
