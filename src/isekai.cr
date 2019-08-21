@@ -54,7 +54,7 @@ module Isekai
 
             inputs, output = parser.parse()         
 
-            #pp output #add: pp output.state  to print the AST
+            pp output #add: pp output.state  to print the AST
             in_file = in_c_program + ".in"   #optional file containing the input values to the program
             in_array = [] of Int32
             if File.exists?(in_file)

@@ -60,6 +60,32 @@ class ArithAddReq < BinaryOpReq
     end
 end
 
+class SubstractReq < BinaryOpReq
+    def initialize(@reqfactory, @expr, @trace_type : String)
+        super(@reqfactory, @expr, @trace_type)
+    end
+
+    def natural_type()
+       return Constants::ARITHMETIC_TRACE
+    end
+
+    def has_constant_opt()
+         return false
+    end
+    
+    def var_impl(*busses)
+        pp "substracting..."
+        rbus = get_bus_from_req(@reqfactory.make_req((@expr.as(Add)).@right, Constants::ARITHMETIC_TRACE))
+        lbus = get_bus_from_req(@reqfactory.make_req((@expr.as(Add)).@left, Constants::ARITHMETIC_TRACE))
+      
+       
+        nbus = ConstantMultiplyBus.new(board(), -1_i64, rbus)
+        @reqfactory.add_extra_bus(nbus)
+        return ArithAddBus.new(board(), to_s(),lbus, rbus)
+    end
+end
+
+
 class ArithMultiplyReq < BinaryOpReq
 	def initialize(@reqfactory, @expr, @trace_type : String)
         super(@reqfactory, @expr, @trace_type)

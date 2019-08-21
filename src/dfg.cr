@@ -294,35 +294,95 @@ end
 # Divide operation
 class Divide < BinaryMath
     def initialize (@left, @right)
-        super("/", OperatorDiv.new, 1, @left, @right)
+        super("/", OperatorDiv.new, nil, @left, @right)
+    end
+
+    def collapse_constants (collapser)
+        basic_collapsing = super(collapser)
+
+        # check if we can collapse out this operation
+        if basic_collapsing.is_a? BinaryMath
+            if right = basic_collapsing.@right.as? Constant 
+                 if right.@value == 1   #no identity for substract but  'x/1' can be simplified nevertheless
+                     basic_collapsing = basic_collapsing.@left
+                 end
+             end
+        end
+ 
+        return basic_collapsing
     end
 end
 
 # Modulo operation
 class Modulo < BinaryMath
     def initialize (@left, @right)
-        super("%", OperatorMod.new, 1, @left, @right)
+        super("%", OperatorMod.new, nil, @left, @right)
+    end
+
+    def collapse_constants (collapser)
+        basic_collapsing = super(collapser)
+
+        # check if we can collapse out this operation
+        if basic_collapsing.is_a? BinaryMath
+            if right = basic_collapsing.@right.as? Constant 
+                 if right.@value == 1   #no identity for modulo but  'x%1' is alway 0
+                     basic_collapsing = Constant.new(0)
+                 end
+             end
+        end
+ 
+        return basic_collapsing
     end
 end
 
 # Exclusive OR operation
 class Xor < BinaryMath
     def initialize (@left, @right)
-        super("^", OperatorXor.new, 1, @left, @right)
+        super("^", OperatorXor.new, 0, @left, @right)
     end
 end
 
 # Left shift operation
 class LeftShift < BinaryMath
     def initialize (@left, @right, @bit_width : Int32)
-        super("<<", LeftShiftOp.new(@bit_width), 0, @left, @right)
+        super("<<", LeftShiftOp.new(@bit_width), nil, @left, @right)
+    end
+
+    def collapse_constants (collapser)
+        basic_collapsing = super(collapser)
+
+        # check if we can collapse out this operation
+        if basic_collapsing.is_a? BinaryMath
+            if right = basic_collapsing.@right.as? Constant 
+                 if right.@value == 0   #no identity for left shift but  'x<<0' can be simplified nevertheless
+                     basic_collapsing = basic_collapsing.@left
+                 end
+             end
+        end
+ 
+        return basic_collapsing
     end
 end
 
 # Right shift operation
 class RightShift < BinaryMath
     def initialize (@left, @right, @bit_width : Int32)
-        super(">>", RightShiftOp.new(@bit_width), 0, @left, @right)
+        super(">>", RightShiftOp.new(@bit_width), nil, @left, @right)
+    end
+
+    def collapse_constants (collapser)
+        basic_collapsing = super(collapser)
+
+        # check if we can collapse out this operation
+        if basic_collapsing.is_a? BinaryMath
+            if right = basic_collapsing.@right.as? Constant 
+                 if right.@value == 0   #no identity for right shift but  'x>>0' can be simplified nevertheless
+                     basic_collapsing = basic_collapsing.@left
+                 end
+             end
+        end
+ 
+        return basic_collapsing
     end
 end
 
