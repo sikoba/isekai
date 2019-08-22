@@ -272,9 +272,11 @@ module Isekai
         # count of previously set bits.
         private def fill_bitmap
             val = @value
+            if (val < 0)
+                val = UInt32.new(val)       #TODO - here we assume 32 bits, should also depends on get_active_bits() plus handling of negative values...
+            end
             biti = 0
             count = 0
-
             while (val != 0)
                 if val & 1 != 0
                     @bit_map[biti] = count
@@ -380,6 +382,7 @@ module Isekai
         end
 
         def get_trace_count()
+        
             return @board.bit_width.truncate(Math.max(0, @bus.get_trace_count() + @left_shift))
         end
 
@@ -393,7 +396,7 @@ module Isekai
 
         def do_trace (i)
             parent_bit = i - @left_shift
-            if parent_bit == 0 || i > get_trace_count()
+            if parent_bit < 0 || i > get_trace_count()
                 return @board.zero_wire
             else
                 return @bus.get_trace(parent_bit)
