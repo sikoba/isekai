@@ -280,7 +280,7 @@ class CmpNEQReqArith < CmpReq
         constant_one = ConstantArithmeticBus.new(board(), 1)  #@reqfactory.@board.get_one_bus()  is not working but I did not investigate why
         @reqfactory.add_extra_bus(constant_one)
         comment = "1 - CmpEQ #{typeof(@expr.as(BinaryOp))}"
-        plus1_bus = ArithAddBus.new(board(), comment, zerop_bus, constant_one)
+        plus1_bus = ArithAddBus.new(board(), comment, neg_bus, constant_one)
         @reqfactory.add_extra_bus(plus1_bus)
         return plus1_bus
      
