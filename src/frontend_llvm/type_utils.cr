@@ -1,92 +1,52 @@
 require "../common/dfg"
 require "../common/bitwidth"
 require "./pointers"
-require "llvm-crystal/lib_llvm_c"
+require "llvm-crystal/lib_llvm"
 
 module Isekai::LLVMFrontend::TypeUtils
 
-# Assuming 'ty' is an integer type, returns its bit width as a 'BitWidth' object.
-def self.get_int_ty_bitwidth_unchecked (ty) : BitWidth
-    width = LibLLVM_C.get_int_type_width(ty)
+# Assuming 'type' is an integer type, returns its bit width as a 'BitWidth' object.
+def self.get_type_bitwidth_unchecked (type) : BitWidth
+    width = type.integer_width
     if width > 64
         raise "Bit widths greater than 64 are not supported"
     end
     return BitWidth.new(width.to_i32)
 end
 
-# If 'ty' is an integer type, returns its bit width as a 'BitWidth' object; raises otherwise.
-def self.get_int_ty_bitwidth (ty) : BitWidth
-    raise "Not an integer type" unless LibLLVM_C.get_type_kind(ty).integer_type_kind?
-    return get_int_ty_bitwidth_unchecked(ty)
+# If 'type' is an integer type, returns its bit width as a 'BitWidth' object; raises otherwise.
+def self.get_type_bitwidth (type) : BitWidth
+    raise "Not an integer type" unless type.integer?
+    return get_type_bitwidth_unchecked(type)
 end
 
-def self.get_complex_type_signature (ty) : {LibLLVM_C::TypeRef, Int32} | Array(LibLLVM_C::TypeRef)
-    kind = LibLLVM_C.get_type_kind(ty)
-    case kind
+def self.make_expr_of_type (type, &block : LibLLVM::Type -> DFGExpr) : DFGExpr
+    case type.kind
+    when .integer_type_kind?, .pointer_type_kind?
+        return block.call type
+
     when .array_type_kind?
-        elem_ty = LibLLVM_C.get_element_type(ty)
-        nelems = LibLLVM_C.get_array_length(ty)
-        return {elem_ty, nelems.to_i32}
+        length = type.array_length
+        elem_type = type.element_type
+        elems = Array.new(length) { make_expr_of_type(elem_type, &block) }
+        return Structure.new(elems: elems, type: type)
+
     when .struct_type_kind?
-        raise "Cannot get signature of an opaque struct" if LibLLVM_C.is_opaque_struct(ty) != 0
-        nelems = LibLLVM_C.count_struct_element_types(ty)
-        return Array(LibLLVM_C::TypeRef).build(nelems) do |buffer|
-            LibLLVM_C.get_struct_element_types(ty, buffer)
-            nelems
-        end
+        elems = type.struct_elems.map { |elem_type| make_expr_of_type(elem_type, &block) }
+        return Structure.new(elems: elems, type: type)
+
     else
-        raise "Unsupported type kind: #{kind}"
+        raise "Unsupported type kind: #{type.kind}"
     end
 end
 
-enum ScalarTypeKind
-    Integer
-    Pointer
-end
-
-def self.make_expr_of_ty (
-        ty : LibLLVM_C::TypeRef,
-        &block : ScalarTypeKind, LibLLVM_C::TypeRef -> DFGExpr) : DFGExpr
-
-    kind = LibLLVM_C.get_type_kind(ty)
-    case kind
-
-    when .integer_type_kind?
-        return block.call ScalarTypeKind::Integer, ty
-
-    when .pointer_type_kind?
-        return block.call ScalarTypeKind::Pointer, ty
-
-    when .array_type_kind?
-        nelems = LibLLVM_C.get_array_length(ty)
-        elem_ty = LibLLVM_C.get_element_type(ty)
-        elems = Array.new(nelems) do
-            make_expr_of_ty(elem_ty, &block)
-        end
-        return Structure.new(elems: elems, ty: ty)
-
-    when .struct_type_kind?
-        raise "Cannot make an opaque struct" if LibLLVM_C.is_opaque_struct(ty) != 0
-        nelems = LibLLVM_C.count_struct_element_types(ty)
-        elems = Array.new(nelems) do |i|
-            elem_ty = LibLLVM_C.struct_get_type_at_index(ty, i)
-            make_expr_of_ty(elem_ty, &block)
-        end
-        return Structure.new(elems: elems, ty: ty)
-
-    else
-        raise "Unsupported type kind: #{kind}"
-    end
-end
-
-def self.make_undef_expr_of_ty (ty)
-    return make_expr_of_ty(ty) do |kind, scalar_ty|
-        case kind
-        when .integer?
-            Constant.new(0, bitwidth: get_int_ty_bitwidth_unchecked(scalar_ty))
-        when .pointer?
-            target_ty = LibLLVM_C.get_element_type(scalar_ty)
-            UndefPointer.new(target_ty: target_ty)
+def self.make_undef_expr_of_type (type)
+    return make_expr_of_type(type) do |scalar_type|
+        case scalar_type.kind
+        when .integer_type_kind?
+            Constant.new(0, bitwidth: get_type_bitwidth_unchecked(scalar_type))
+        when .pointer_type_kind?
+            UndefPointer.new(target_type: scalar_type.element_type)
         else
             raise "unreachable"
         end

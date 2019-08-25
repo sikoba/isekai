@@ -573,7 +573,7 @@ class SignedCmpLT < BinaryPredicate
     def self.static_eval (left, right, bitwidth)
         signed_left = bitwidth.sign_extend_to(left.to_u64, BitWidth.new(64))
         signed_right = bitwidth.sign_extend_to(right.to_u64, BitWidth.new(64))
-        return signed_left < signed_right ? 1_i64 : 0_i64
+        return signed_left.to_i64 < signed_right.to_i64 ? 1_i64 : 0_i64
     end
 
     def_simplify_left
@@ -602,7 +602,7 @@ class CmpLEQ < BinaryPredicate
     def_simplify_right
 end
 
-# Signed less-than compare operation
+# Signed less-than-or-equal compare operation
 class SignedCmpLEQ < BinaryPredicate
     def initialize (@left, @right)
         super(:s_le, @left, @right)
@@ -611,7 +611,7 @@ class SignedCmpLEQ < BinaryPredicate
     def self.static_eval (left, right, bitwidth)
         signed_left = bitwidth.sign_extend_to(left.to_u64, BitWidth.new(64))
         signed_right = bitwidth.sign_extend_to(right.to_u64, BitWidth.new(64))
-        return signed_left <= signed_right ? 1_i64 : 0_i64
+        return signed_left.to_i64 <= signed_right.to_i64 ? 1_i64 : 0_i64
     end
 
     def_simplify_left

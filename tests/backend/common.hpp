@@ -75,8 +75,8 @@ static void parse_uint(Iterator &it, T &out, Base)
     }
 }
 
-template<class T, class Iterator, class Base>
-static void parse_uint_until_nul(Iterator it, T &out, Base base)
+template<class T, class Base>
+static void parse_uint_until_nul(const char *it, T &out, Base base)
 {
     parse_uint(it, out, base);
     if (*it != '\0') {

@@ -8,42 +8,38 @@ require "./structure"
 require "./pointers"
 require "./type_utils"
 require "llvm-crystal/lib_llvm"
-require "llvm-crystal/lib_llvm_c"
 
 module Isekai::LLVMFrontend
-extend self
 
 # Assuming 'value' is a constant integer value, returns its value as a 'Constant' with the
 # appropriate bitwidth.
-def make_constant_unchecked (value) : Constant
-    ty = LibLLVM_C.type_of(value)
+def self.make_constant_unchecked (value) : Constant
     return Constant.new(
-        LibLLVM_C.const_int_get_z_ext_value(value).to_i64,
-        bitwidth: TypeUtils.get_int_ty_bitwidth_unchecked(ty))
+        value.zero_extended_int_value.to_i64,
+        bitwidth: TypeUtils.get_type_bitwidth_unchecked(value.type))
 end
 
-# Assuming 'ins' is a switch instruction, returns the value of the case with number 'i'.
-# 'i' is 1-based if we only consider 'case' statements without 'default', and 0-based if we consider
-# all the successors, of which the zeroth is the default (thus 'i == 0' is not allowed).
-def get_case_value_unchecked (ins, i) : Constant
-    value = LibLLVM_C.get_operand(ins, i * 2)
-    raise "Case value is not an integer constant" unless
-        LibLLVM_C.get_value_kind(value).constant_int_value_kind?
+# Assuming 'operands' are operands of a 'switch' instruction, returns the value of the case with
+# number 'i'. 'i' is 1-based if we only consider 'case' statements without 'default', and 0-based if
+# we consider all the successors, of which the zeroth is the default (thus 'i == 0' is not allowed).
+def self.get_case_value (operands, i) : Constant
+    value = operands[i * 2]
+    raise "Case value is not an integer constant" unless value.kind.constant_int_value_kind?
     return make_constant_unchecked(value)
 end
 
-def make_input_expr_of_ty (ty, which : InputBase::Kind) : DFGExpr
+def self.make_input_expr_of_type (type, which : InputBase::Kind) : DFGExpr
     offset = 0
-    return TypeUtils.make_expr_of_ty(ty) do |kind, scalar_ty|
-        case kind
-        when .integer?
+    return TypeUtils.make_expr_of_type(type) do |scalar_type|
+        case scalar_type.kind
+        when .integer_type_kind?
             result = InputBase.new(
                 which: which,
                 idx: offset,
-                bitwidth: TypeUtils.get_int_ty_bitwidth_unchecked(scalar_ty))
+                bitwidth: TypeUtils.get_type_bitwidth_unchecked(scalar_type))
             offset += 1
             result
-        when .pointer?
+        when .pointer_type_kind?
             raise "Input structure contains a pointer"
         else
             raise "unreachable"
@@ -51,11 +47,11 @@ def make_input_expr_of_ty (ty, which : InputBase::Kind) : DFGExpr
     end
 end
 
-def make_input_array (s : Structure?)
+def self.make_input_array (s : Structure?)
     return s ? s.flattened.map &.@bitwidth : [] of BitWidth
 end
 
-def make_output_array (s : Structure?)
+def self.make_output_array (s : Structure?)
     return s ? s.flattened : [] of DFGExpr
 end
 
@@ -85,49 +81,15 @@ class Parser
         end
     end
 
-    private struct World
-        @hash = {} of LibLLVM_C::ValueRef => DFGExpr
-
-        @[AlwaysInline]
-        def [] (k : LibLLVM_C::ValueRef)
-            @hash[k]
-        end
-
-        @[AlwaysInline]
-        def [] (k : LibLLVM::Instruction)
-            @hash[k.to_unsafe]
-        end
-
-        @[AlwaysInline]
-        def []= (k : LibLLVM_C::ValueRef, v)
-            @hash[k] = v
-        end
-
-        @[AlwaysInline]
-        def []= (k : LibLLVM::Instruction, v)
-            @hash[k.to_unsafe] = v
-        end
-
-        @[AlwaysInline]
-        def fetch (k : LibLLVM_C::ValueRef)
-            @hash.fetch(k) { yield }
-        end
-
-        @[AlwaysInline]
-        def fetch (k : LibLLVM::Instruction)
-            @hash.fetch(k.to_unsafe) { yield }
-        end
-    end
-
     enum OutsourceParam
         Input
         NizkInput
         Output
     end
 
-    @arguments = World.new
-    @locals = World.new
-    @cached_undef_exprs = World.new
+    @arguments = {} of LibLLVM::Any => DFGExpr
+    @locals = {} of LibLLVM::Any => DFGExpr
+    @cached_undef_exprs = {} of LibLLVM::Any => DFGExpr
 
     # junction => {sink, is_loop}
     @preproc_data = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
@@ -135,47 +97,45 @@ class Parser
     @assumption = Assumption.new
     @unroll_ctls = [] of UnrollCtl
 
-    @unroll_hint_func : LibLLVM_C::ValueRef? = nil
+    @unroll_hint_func : LibLLVM::Any? = nil
 
     @input_struct : Structure? = nil
     @nizk_input_struct : Structure? = nil
     @output_struct : Structure? = nil
 
-    @ir_module : LibLLVM::IrModule
+    @llvm_module : LibLLVM::Module
 
     def initialize (input_file : String, @loop_sanity_limit : Int32)
-        @ir_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
+        @llvm_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
     end
 
-    private def make_undef_expr_of_ty_cached (ty, cache_token)
+    private def make_undef_expr_of_type_cached (type, cache_token)
         return @cached_undef_exprs.fetch(cache_token) do
-            @cached_undef_exprs[cache_token] = TypeUtils.make_undef_expr_of_ty(ty)
+            @cached_undef_exprs[cache_token] = TypeUtils.make_undef_expr_of_type(type)
         end
     end
 
-    private def inspect_outsource_param (value, which_param : OutsourceParam) : Nil
-        ty = LibLLVM_C.type_of(value)
-        raise "outsource() parameter is not a pointer" unless
-            LibLLVM_C.get_type_kind(ty).pointer_type_kind?
+    private def inspect_outsource_param (value : LibLLVM::Any, which_param : OutsourceParam) : Nil
+        type = value.type
+        raise "outsource() parameter is not a pointer" unless type.pointer?
 
-        s_ty = LibLLVM_C.get_element_type(ty)
+        struct_type = type.element_type
 
-        raise "outsource() parameter is a pointer to non-struct" unless
-            LibLLVM_C.get_type_kind(s_ty).struct_type_kind?
+        raise "outsource() parameter is a pointer to non-struct" unless struct_type.struct?
 
         case which_param
         when .input?
-            expr = LLVMFrontend.make_input_expr_of_ty(s_ty, InputBase::Kind::Input)
+            expr = LLVMFrontend.make_input_expr_of_type(struct_type, InputBase::Kind::Input)
             raise "unreachable" unless expr.is_a? Structure
             @input_struct = expr
 
         when .nizk_input?
-            expr = LLVMFrontend.make_input_expr_of_ty(s_ty, InputBase::Kind::NizkInput)
+            expr = LLVMFrontend.make_input_expr_of_type(struct_type, InputBase::Kind::NizkInput)
             raise "unreachable" unless expr.is_a? Structure
             @nizk_input_struct = expr
 
         when .output?
-            expr = TypeUtils.make_undef_expr_of_ty(s_ty)
+            expr = TypeUtils.make_undef_expr_of_type(struct_type)
             raise "unreachable" unless expr.is_a? Structure
             @output_struct = expr
 
@@ -186,9 +146,8 @@ class Parser
         @arguments[value] = StaticPointer.new(expr)
     end
 
-    private def as_expr (value) : DFGExpr
-        kind = LibLLVM_C.get_value_kind(value)
-        case kind
+    private def as_expr (value : LibLLVM::Any) : DFGExpr
+        case value.kind
         when .argument_value_kind?
             expr = @arguments[value]
         when .instruction_value_kind?
@@ -197,17 +156,15 @@ class Parser
         when .constant_int_value_kind?
             expr = LLVMFrontend.make_constant_unchecked(value)
         else
-            raise "Unsupported value kind: #{kind}"
+            raise "Unsupported value kind: #{value.kind}"
         end
-        expr = @assumption.reduce(expr)
-        return expr
+        @assumption.reduce(expr)
     end
 
     private def store (at ptr : DFGExpr, value : DFGExpr) : Nil
         case ptr
         when AbstractPointer
-            old_expr = ptr.load()
-            ptr.store!(@assumption.conditionalize(old_expr, value))
+            ptr.store!(value, @assumption)
         when Conditional
             @assumption.push(ptr.@cond, true)
             store(at: ptr.@valtrue, value: value)
@@ -224,7 +181,7 @@ class Parser
     private def load (from ptr : DFGExpr) : DFGExpr
         case ptr
         when AbstractPointer
-            return ptr.load()
+            return ptr.load(@assumption)
         when Conditional
             return Conditional.bake(
                 ptr.@cond,
@@ -263,18 +220,15 @@ class Parser
         end
     end
 
-    private def get_element_ptr (base : DFGExpr) : DFGExpr
-        result = base
-
-        offset = yield
-        return result unless offset
+    private def get_element_ptr (operands) : DFGExpr
+        result = as_expr(operands[0])
+        offset = as_expr(operands[1])
         result = move_ptr(result, by: offset)
-
-        while field = yield
+        (2...operands.size).each do |i|
             result = load(from: result)
-            result = get_field_ptr(base: result, field: field)
+            result = get_field_ptr(base: result, field: as_expr(operands[i]))
         end
-        return result
+        result
     end
 
     private def inspect_basic_block_until (
@@ -287,92 +241,85 @@ class Parser
         end
     end
 
-    private def get_phi_value (ins) : DFGExpr
+    private def get_phi_value (ins : LibLLVM::Instruction) : DFGExpr
         # Note no 'as_expr()' here, as it calls '@assumption.reduce' on the result, which we
         # don't want here.
-        return @locals.fetch(ins) do
-            make_undef_expr_of_ty_cached(LibLLVM_C.type_of(ins), cache_token: ins)
+        return @locals.fetch(ins.to_any) do
+            make_undef_expr_of_type_cached(ins.type, cache_token: ins.to_any)
         end
     end
 
     private def produce_phi_copies (from : LibLLVM::BasicBlock, to : LibLLVM::BasicBlock)
         to.instructions.each do |ins|
-            break unless LibLLVM_C.get_instruction_opcode(ins).phi?
+            break unless ins.opcode.phi?
             ins.incoming.each do |(block, value)|
                 next unless block == from
-                old_expr = get_phi_value(ins)
-                @locals[ins] = @assumption.conditionalize(old_expr, as_expr(value))
+                @locals[ins.to_any] = @assumption.conditionalize(
+                    old_expr: get_phi_value(ins),
+                    new_expr: as_expr(value))
             end
         end
     end
 
     private def unroll_hint_called (ins)
-        raise "_unroll_hint() must be called with 1 argument" unless
-            LibLLVM_C.get_num_arg_operands(ins) == 1
-
-        arg = as_expr(LibLLVM_C.get_operand(ins, 0))
-
+        raise "_unroll_hint() must be called with 1 argument" unless ins.call_nargs == 1
+        operands = ins.operands
+        arg = as_expr(operands[0])
         raise "_unroll_hint() argument is not constant" unless arg.is_a? Constant
-        value = arg.@value.to_i32
-        raise "_unroll_hint() argument is out of bounds" if value < 0
-        @loop_sanity_limit = value
+        value = arg.@value
+        raise "_unroll_hint() argument is out of bounds" unless 0 <= value < Int32::MAX
+        @loop_sanity_limit = value.to_i32
     end
 
     @[AlwaysInline]
     private def set_binary (ins, klass)
-        left = as_expr(LibLLVM_C.get_operand(ins, 0))
-        right = as_expr(LibLLVM_C.get_operand(ins, 1))
-        @locals[ins] = klass.bake(left, right)
+        operands = ins.operands
+        left = as_expr(operands[0])
+        right = as_expr(operands[1])
+        @locals[ins.to_any] = klass.bake(left, right)
     end
 
     @[AlwaysInline]
     private def set_binary_swapped (ins, klass)
-        left = as_expr(LibLLVM_C.get_operand(ins, 1))
-        right = as_expr(LibLLVM_C.get_operand(ins, 0))
-        @locals[ins] = klass.bake(left, right)
+        operands = ins.operands
+        left = as_expr(operands[1])
+        right = as_expr(operands[0])
+        @locals[ins.to_any] = klass.bake(left, right)
     end
 
     @[AlwaysInline]
     private def set_bitwidth_cast (ins, klass)
-        arg = as_expr(LibLLVM_C.get_operand(ins, 0))
-        new_bitwidth = TypeUtils.get_int_ty_bitwidth(LibLLVM_C.type_of(ins))
-        @locals[ins] = klass.bake(arg, new_bitwidth)
+        operands = ins.operands
+        arg = as_expr(operands[0])
+        new_bitwidth = TypeUtils.get_type_bitwidth(ins.type)
+        @locals[ins.to_any] = klass.bake(arg, new_bitwidth)
     end
 
     private def inspect_basic_block (bb) : LibLLVM::BasicBlock?
         bb.instructions.each do |ins|
-            case LibLLVM_C.get_instruction_opcode(ins)
+            case ins.opcode
 
             when .alloca?
-                ty = LibLLVM_C.get_allocated_type(ins)
-                expr = make_undef_expr_of_ty_cached(ty, cache_token: ins)
-                @locals[ins] = StaticPointer.new(expr)
+                expr = make_undef_expr_of_type_cached(ins.alloca_type, cache_token: ins.to_any)
+                @locals[ins.to_any] = StaticPointer.new(expr)
 
             when .store?
-                src = as_expr(LibLLVM_C.get_operand(ins, 0))
-                dst = as_expr(LibLLVM_C.get_operand(ins, 1))
+                operands = ins.operands
+                src = as_expr(operands[0])
+                dst = as_expr(operands[1])
                 store(at: dst, value: src)
 
             when .load?
-                src = as_expr(LibLLVM_C.get_operand(ins, 0))
-                @locals[ins] = load(from: src)
+                operands = ins.operands
+                src = as_expr(operands[0])
+                @locals[ins.to_any] = load(from: src)
 
             when .phi?
-                @locals[ins] = get_phi_value(ins)
+                @locals[ins.to_any] = get_phi_value(ins)
 
             when .get_element_ptr?
-                n_operands = LibLLVM_C.get_num_operands(ins)
-                base = as_expr(LibLLVM_C.get_operand(ins, 0))
-                i = 1
-                @locals[ins] = get_element_ptr(base) do
-                    if i == n_operands
-                        nil
-                    else
-                        expr = as_expr(LibLLVM_C.get_operand(ins, i))
-                        i += 1
-                        expr
-                    end
-                end
+                operands = ins.operands
+                @locals[ins.to_any] = get_element_ptr(operands)
 
             when .add?   then set_binary(ins, Add)
             when .sub?   then set_binary(ins, Subtract)
@@ -393,8 +340,7 @@ class Parser
             when .u_rem? then set_binary(ins, Modulo)
 
             when .i_cmp?
-                pred = LibLLVM_C.get_i_cmp_predicate(ins)
-                case pred
+                case ins.icmp_predicate
 
                 when .int_eq? then set_binary(ins, CmpEQ)
                 when .int_ne? then set_binary(ins, CmpNEQ)
@@ -419,17 +365,18 @@ class Parser
             when .trunc? then set_bitwidth_cast(ins, Truncate)
 
             when .select?
-                pred = as_expr(LibLLVM_C.get_operand(ins, 0))
-                val_true = as_expr(LibLLVM_C.get_operand(ins, 1))
-                val_false = as_expr(LibLLVM_C.get_operand(ins, 2))
-                @locals[ins] = Conditional.bake(pred, val_true, val_false)
+                operands = ins.operands
+                pred = as_expr(operands[0])
+                val_true = as_expr(operands[1])
+                val_false = as_expr(operands[2])
+                @locals[ins.to_any] = Conditional.bake(pred, val_true, val_false)
 
             when .call?
-                called = LibLLVM_C.get_called_value(ins)
-                if called == @unroll_hint_func
+                callee = ins.callee
+                if callee == @unroll_hint_func
                     unroll_hint_called(ins)
                 else
-                    raise "Unsupported function call"
+                    raise "Unsupported function called: #{callee.name}"
                 end
 
             when .br?
@@ -437,7 +384,7 @@ class Parser
                 successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
 
                 if ins.conditional?
-                    cond = as_expr(LibLLVM_C.get_condition(ins))
+                    cond = as_expr(ins.condition)
                     if_true, if_false = successors
 
                     if cond.is_a? Constant
@@ -495,12 +442,12 @@ class Parser
                 successors = ins.successors.to_a
                 successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
 
-                arg = as_expr(LibLLVM_C.get_operand(ins, 0))
+                operands = ins.operands
+                arg = as_expr(operands[0])
                 if arg.is_a? Constant
                     (1...successors.size).each do |i|
-                        if LLVMFrontend.get_case_value_unchecked(ins, i).@value == arg.@value
-                            return successors[i]
-                        end
+                        case_value = LLVMFrontend.get_case_value(operands, i)
+                        return successors[i] if case_value.@value == arg.@value
                     end
                     return successors[0]
                 end
@@ -508,7 +455,7 @@ class Parser
                 sink, _ = @preproc_data[bb]
                 # inspect each case
                 (1...successors.size).each do |i|
-                    cond = CmpEQ.bake(arg, LLVMFrontend.get_case_value_unchecked(ins, i))
+                    cond = CmpEQ.bake(arg, LLVMFrontend.get_case_value(operands, i))
 
                     @assumption.push(cond, true)
                     inspect_basic_block_until(successors[i], terminator: sink)
@@ -532,13 +479,11 @@ class Parser
     end
 
     private def inspect_outsource_func (func)
-        ret_ty, params, is_var_arg = func.signature
+        signature = func.function_type
+        raise "outsource() return type is not void" unless signature.return_type.void?
+        raise "outsource() is a var arg function" if signature.var_args?
 
-        raise "outsource() return type is not void" unless
-            LibLLVM_C.get_type_kind(ret_ty).void_type_kind?
-
-        raise "outsource() is a var arg function" if is_var_arg
-
+        params = func.params
         case params.size
         when 2
             inspect_outsource_param(params[0], OutsourceParam::Input)
@@ -563,30 +508,25 @@ class Parser
     end
 
     private def inspect_unroll_hint_func (func)
-        ret_ty, params, is_var_arg = func.signature
+        signature = func.function_type
+        raise "_unroll_hint() return type is not void" unless signature.return_type.void?
+        raise "_unroll_hint() is a var arg function" if signature.var_args?
 
-        raise "_unroll_hint() return type is not void" unless
-            LibLLVM_C.get_type_kind(ret_ty).void_type_kind?
+        params = func.params
+        raise "_unroll_hint() takes #{params.size} parameters, expected 1" unless params.size == 1
 
-        raise "_unroll_hint() is a var arg function" if is_var_arg
+        raise "_unroll_hint() parameter has non-integer type" unless params[0].type.integer?
 
-        raise "_unroll_hint() takes #{params.size} parameters, expected 1" unless
-            params.size == 1
-
-        ty = LibLLVM_C.type_of(params[0])
-        raise "_unroll_hint() parameter has non-integer type" unless
-            LibLLVM_C.get_type_kind(ty).integer_type_kind?
-
-        @unroll_hint_func = func.to_unsafe
+        @unroll_hint_func = func.to_any
     end
 
     def parse ()
-        @ir_module.functions.each do |func|
+        @llvm_module.functions.each do |func|
             if func.declaration? && func.name == "_unroll_hint"
                 inspect_unroll_hint_func(func)
             end
         end
-        @ir_module.functions.each do |func|
+        @llvm_module.functions.each do |func|
             next if func.declaration?
             raise "Unexpected function defined: #{func.name}" unless func.name == "outsource"
             return inspect_outsource_func(func)

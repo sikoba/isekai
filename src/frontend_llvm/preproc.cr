@@ -2,7 +2,6 @@ require "./cfg"
 require "./graph_utils"
 require "./containers"
 require "llvm-crystal/lib_llvm"
-require "llvm-crystal/lib_llvm_c"
 
 module Isekai::LLVMFrontend
 
@@ -38,7 +37,7 @@ private class Preprocessor
         ins = bb.terminator
         successors = ins.successors.to_a
 
-        case LibLLVM_C.get_instruction_opcode(ins)
+        case ins.opcode
         when .br?
             if ins.conditional?
                 if_true, if_false = successors

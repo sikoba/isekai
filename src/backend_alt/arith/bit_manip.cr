@@ -1,6 +1,6 @@
 require "intrinsics"
 
-module Isekai::AltBackend::BitManip
+module Isekai::AltBackend::Arith::BitManip
 
 @[AlwaysInline]
 def self.nbits (c : UInt128) : Int32

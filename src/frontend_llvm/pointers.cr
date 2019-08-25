@@ -1,14 +1,14 @@
 require "../common/dfg"
 require "../common/bitwidth"
+require "./assumption"
 require "./structure"
 require "./type_utils"
-require "llvm-crystal/lib_llvm_c"
+require "llvm-crystal/lib_llvm"
 
 module Isekai::LLVMFrontend
-extend self
 
 # Assumes that both 'a' and 'b' are of integer type.
-def bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
+def self.bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
     case a.@bitwidth <=> b.@bitwidth
     when .< 0
         a = SignExtend.bake(a, b.@bitwidth)
@@ -18,17 +18,10 @@ def bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
     return Add.bake(a, b)
 end
 
-def make_undef_array_elem (arr : Structure) : DFGExpr
-    sig = TypeUtils.get_complex_type_signature(arr.@ty)
-    case sig
-    when {LibLLVM_C::TypeRef, Int32}
-        # array
-        elem_ty, nelems = sig
-        return TypeUtils.make_undef_expr_of_ty(elem_ty)
-    else
-        # structure or something
-        raise "unreachable"
-    end
+def self.make_undef_array_elem (arr : Structure) : DFGExpr
+    type = arr.@type
+    raise "unreachable" unless type.array?
+    return TypeUtils.make_undef_expr_of_type(type.element_type)
 end
 
 abstract class AbstractPointer < DFGExpr
@@ -36,27 +29,27 @@ abstract class AbstractPointer < DFGExpr
         super(bitwidth: BitWidth.new_for_undefined)
     end
 
-    # Should return '*ptr'
-    abstract def load : DFGExpr
+    # Should return '*ptr' under the given assumption
+    abstract def load (assumption : Assumption) : DFGExpr
 
-    # Should perform '*ptr = value'
-    abstract def store! (value : DFGExpr)
+    # Should perform '*ptr = value' under the given assumption
+    abstract def store! (value : DFGExpr, assumption : Assumption) : Nil
 
     # Should return 'ptr + offset'
     abstract def move (by offset : DFGExpr) : DFGExpr
 end
 
 class UndefPointer < AbstractPointer
-    def initialize (@target_ty : LibLLVM_C::TypeRef)
+    def initialize (@target_type : LibLLVM::Type)
         super()
     end
 
-    def load : DFGExpr
+    def load (assumption : Assumption) : DFGExpr
         Log.log.info("possible undefined behavior: load from uninitialized pointer")
-        return TypeUtils.make_undef_expr_of_ty(@target_ty)
+        return TypeUtils.make_undef_expr_of_type(@target_type)
     end
 
-    def store! (value : DFGExpr)
+    def store! (value : DFGExpr, assumption : Assumption) : Nil
         Log.log.info("possible undefined behavior: store at uninitialized pointer")
     end
 
@@ -72,12 +65,14 @@ class StaticPointer < AbstractPointer
         super()
     end
 
-    def load : DFGExpr
-        @target
+    def load (assumption : Assumption) : DFGExpr
+        assumption.reduce(@target)
     end
 
-    def store! (value : DFGExpr)
-        @target = value
+    def store! (value : DFGExpr, assumption : Assumption) : Nil
+        @target = assumption.conditionalize(
+            old_expr: @target,
+            new_expr: value)
     end
 
     def move (by offset : DFGExpr) : DFGExpr
@@ -97,20 +92,22 @@ class StaticFieldPointer < AbstractPointer
         0 <= @field < @base.@elems.size
     end
 
-    def load : DFGExpr
+    def load (assumption : Assumption) : DFGExpr
         unless valid?
             Log.log.info("possible undefined behavior: array index is out of bounds")
             return LLVMFrontend.make_undef_array_elem(@base)
         end
-        @base.@elems[@field]
+        assumption.reduce(@base.@elems[@field])
     end
 
-    def store! (value : DFGExpr)
+    def store! (value : DFGExpr, assumption : Assumption) : Nil
         unless valid?
             Log.log.info("possible undefined behavior: array index is out of bounds")
             return
         end
-        @base.@elems[@field] = value
+        @base.@elems[@field] = assumption.conditionalize(
+            old_expr: @base.@elems[@field],
+            new_expr: value)
     end
 
     def move (by offset : DFGExpr) : DFGExpr
@@ -139,53 +136,56 @@ class DynamicFieldPointer < AbstractPointer
         end
     end
 
-    private def make_bsearch_expr (left, right)
+    private def make_bsearch_expr (left, right, assumption)
         n = right - left
         case n
         when 1
-            return @base.@elems[left]
+            return assumption.reduce(@base.@elems[left])
 
-        # A micro-optimization: 'CmpEQ' is lighter resourse-wise.
-        when 2, 3
+        # 'CmpEQ' is lighter resourse-wise than 'CmpLT' 33-fold.
+        when 2...66
             left_const = Constant.new(left.to_i64, bitwidth: @field.@bitwidth)
             return Conditional.bake(
                 CmpEQ.bake(@field, left_const),
-                @base.@elems[left],
-                make_bsearch_expr(left + 1, right))
+                assumption.reduce(@base.@elems[left]),
+                make_bsearch_expr(left + 1, right, assumption))
 
         else
             pivot = left + n // 2
             pivot_const = Constant.new(pivot.to_i64, bitwidth: @field.@bitwidth)
             return Conditional.bake(
                 CmpLT.bake(@field, pivot_const),
-                make_bsearch_expr(left, pivot),
-                make_bsearch_expr(pivot, right))
+                make_bsearch_expr(left, pivot, assumption),
+                make_bsearch_expr(pivot, right, assumption))
         end
     end
 
-    def load : DFGExpr
+    def load (assumption : Assumption) : DFGExpr
         unless (n = @max_size)
             Log.log.info("possible undefined behavior: index is undefined or always invalid")
             return LLVMFrontend.make_undef_array_elem(@base)
         end
-        return make_bsearch_expr(0, n)
+        return make_bsearch_expr(0, n, assumption)
     end
 
-    def store! (value : DFGExpr)
+    def store! (value : DFGExpr, assumption : Assumption) : Nil
         unless (n = @max_size)
             Log.log.info("possible undefined behavior: index is undefined or always invalid")
             return
         end
 
         if n == 1
-            @base.@elems[0] = value
+            @base.@elems[0] = assumption.conditionalize(
+                old_expr: @base.@elems[0],
+                new_expr: value)
         else
             (0...n).each do |i|
                 i_const = Constant.new(i.to_i64, bitwidth: @field.@bitwidth)
-                @base.@elems[i] = Conditional.bake(
-                    CmpEQ.bake(@field, i_const),
-                    value,
-                    @base.@elems[i])
+                assumption.push(CmpEQ.bake(@field, i_const), true)
+                @base.@elems[i] = assumption.conditionalize(
+                    old_expr: @base.@elems[i],
+                    new_expr: value)
+                assumption.pop
             end
         end
     end
@@ -204,6 +204,6 @@ module PointerFactory
             return DynamicFieldPointer.new(base: base, field: field)
         end
     end
-end # module PointerFactory
+end # module Isekai::LLVMFrontend::PointerFactory
 
 end # module Isekai::LLVMFrontend

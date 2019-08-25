@@ -8,8 +8,13 @@ require "./zksnark/libsnark.cr"
 require "file_utils"
 require "option_parser"
 # TODO require "./crystal/ast_dump"
-require "./backend_alt/board"
-require "./backend_alt/backend"
+require "./backend_alt/arith/board"
+require "./backend_alt/arith/req_factory"
+require "./backend_alt/arith/backend"
+require "./backend_alt/boolean/board"
+require "./backend_alt/boolean/req_factory"
+require "./backend_alt/boolean/backend"
+require "./backend_alt/lay_down_output"
 require "./backend_alt/utils"
 require "./fmtconv"
 
@@ -84,16 +89,41 @@ private def read_input_values (source_filename) : Array(Int32)
     return values
 end
 
-private def run_alt_backend (inputs, nizk_inputs, outputs, input_values, arith_outfile, options)
-    File.open(arith_outfile, "w") do |file|
-        board = AltBackend::Board.new(
-            inputs,
-            nizk_inputs,
-            output: file,
-            p_bits: options.p_bits)
-        AltBackend::Backend.new(board).lay_down_outputs!(outputs)
+private def run_alt_backend (
+        inputs, nizk_inputs, outputs,
+        input_values,
+        arith_outfile, bool_outfile, options)
+
+    unless arith_outfile.empty?
+        File.open(arith_outfile, "w") do |file|
+            board = AltBackend::Arith::Board.new(
+                inputs,
+                nizk_inputs,
+                output: file,
+                p_bits: options.p_bits)
+            req_factory = AltBackend::Arith::RequestFactory.new(
+                board,
+                sloppy: options.ignore_overflow)
+            backend = AltBackend::Arith::Backend.new(req_factory)
+            outputs.each { |expr| AltBackend.lay_down_output(backend, expr) }
+            board.done!
+        end
+        AltBackend.arith_write_inputs(arith_outfile, input_values, inputs, nizk_inputs)
     end
-    AltBackend::Utils.write_input_values(arith_outfile, input_values, inputs, nizk_inputs)
+
+    unless bool_outfile.empty?
+        File.open(bool_outfile, "w") do |file|
+            board = AltBackend::Boolean::Board.new(
+                inputs,
+                nizk_inputs,
+                output: file)
+            req_factory = AltBackend::Boolean::RequestFactory.new(board)
+            backend = AltBackend::Boolean::Backend.new(req_factory)
+            outputs.each { |expr| AltBackend.lay_down_output(backend, expr) }
+            board.done!
+        end
+        AltBackend.boolean_write_inputs(bool_outfile, input_values, inputs, nizk_inputs)
+    end
 end
 
 private def run_primary_backend (
@@ -141,7 +171,7 @@ class ParserProgram
             else
                 run_alt_backend(
                     inputs, nizk_inputs, outputs,
-                    input_values, arith_outfile, options)
+                    input_values, arith_outfile, bool_outfile, options)
             end
 
         when .c?
