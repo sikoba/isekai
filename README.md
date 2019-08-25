@@ -1,4 +1,4 @@
-[![Build Status](https://api.travis-ci.com/shdown/isekai.svg?branch=develop)](https://travis-ci.org/shdown/isekai)
+[![Build Status](https://api.travis-ci.com/shdown/isekai.svg?branch=develop)](https://travis-ci.com/shdown/isekai)
 
 # isekai
 
