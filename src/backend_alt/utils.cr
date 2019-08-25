@@ -23,7 +23,7 @@ private class InputWriter
 end
 
 private def self.each_logical_input (
-        values : Array(Int32),
+        values,
         inputs : Array(BitWidth),
         nizk_inputs : Array(BitWidth))
 
@@ -33,13 +33,13 @@ private def self.each_logical_input (
     (0...n_total).each do |i|
         case i <=> n_inputs
         when .< 0
-            value = values[i]? || 0_i32
+            value = values[i]? || 0
             bitwidth = inputs[i]
         when .== 0
-            value = 1_i32
+            value = 1
             bitwidth = BitWidth.new(1)
         else
-            value = values[i - 1]? || 0_i32
+            value = values[i - 1]? || 0
             bitwidth = nizk_inputs[i - 1 - n_inputs]
         end
         unsigned_value = bitwidth.truncate(value.to_u64)

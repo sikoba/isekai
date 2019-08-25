@@ -136,36 +136,20 @@ class DynamicFieldPointer < AbstractPointer
         end
     end
 
-    private def make_bsearch_expr (left, right, assumption)
-        n = right - left
-        case n
-        when 1
-            return assumption.reduce(@base.@elems[left])
-
-        # 'CmpEQ' is lighter resourse-wise than 'CmpLT' 33-fold.
-        when 2...66
-            left_const = Constant.new(left.to_i64, bitwidth: @field.@bitwidth)
-            return Conditional.bake(
-                CmpEQ.bake(@field, left_const),
-                assumption.reduce(@base.@elems[left]),
-                make_bsearch_expr(left + 1, right, assumption))
-
-        else
-            pivot = left + n // 2
-            pivot_const = Constant.new(pivot.to_i64, bitwidth: @field.@bitwidth)
-            return Conditional.bake(
-                CmpLT.bake(@field, pivot_const),
-                make_bsearch_expr(left, pivot, assumption),
-                make_bsearch_expr(pivot, right, assumption))
-        end
-    end
-
     def load (assumption : Assumption) : DFGExpr
         unless (n = @max_size)
             Log.log.info("possible undefined behavior: index is undefined or always invalid")
             return LLVMFrontend.make_undef_array_elem(@base)
         end
-        return make_bsearch_expr(0, n, assumption)
+        result = assumption.reduce(@base.@elems[0])
+        (1...n).each do |i|
+            i_const = Constant.new(i.to_i64, bitwidth: @field.@bitwidth)
+            result = Conditional.bake(
+                CmpEQ.bake(@field, i_const),
+                assumption.reduce(@base.@elems[i]),
+                result)
+        end
+        return result
     end
 
     def store! (value : DFGExpr, assumption : Assumption) : Nil

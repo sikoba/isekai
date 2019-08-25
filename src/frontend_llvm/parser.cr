@@ -66,9 +66,7 @@ class Parser
             @n_dynamic_iters = is_dynamic ? 1 : 0
         end
 
-        def n_dynamic_iters
-            @n_dynamic_iters
-        end
+        getter n_dynamic_iters, junction, limit
 
         def done?
             @counter == @limit
@@ -118,9 +116,7 @@ class Parser
     private def inspect_outsource_param (value : LibLLVM::Any, which_param : OutsourceParam) : Nil
         type = value.type
         raise "outsource() parameter is not a pointer" unless type.pointer?
-
         struct_type = type.element_type
-
         raise "outsource() parameter is a pointer to non-struct" unless struct_type.struct?
 
         case which_param
@@ -395,7 +391,7 @@ class Parser
                     if is_loop
                         to_loop = (sink == if_true) ? if_false : if_true
 
-                        if !@unroll_ctls.empty? && @unroll_ctls[-1].@junction == bb
+                        if !@unroll_ctls.empty? && @unroll_ctls[-1].junction == bb
                             ctl = @unroll_ctls[-1]
                             if ctl.done? || static_branch == sink
                                 # Stop generating iterations
@@ -511,12 +507,9 @@ class Parser
         signature = func.function_type
         raise "_unroll_hint() return type is not void" unless signature.return_type.void?
         raise "_unroll_hint() is a var arg function" if signature.var_args?
-
         params = func.params
         raise "_unroll_hint() takes #{params.size} parameters, expected 1" unless params.size == 1
-
         raise "_unroll_hint() parameter has non-integer type" unless params[0].type.integer?
-
         @unroll_hint_func = func.to_any
     end
 

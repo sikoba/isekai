@@ -14,12 +14,12 @@ outsource(struct Input *input, struct Output *output)
     int i = input->i;
     int x = 0;
 
-    if (i == 0) {
-        x = input->a_0;
+    if (i == 2) {
+        x = input->a_2;
     } else if (i == 1) {
         x = input->a_1;
     } else {
-        x = input->a_2;
+        x = input->a_0;
     }
     output->x = x;
 }
