@@ -59,7 +59,7 @@ static void print_usage_and_exit(const std::string &msg = "")
     if (!msg.empty()) {
         fprintf(stderr, "Error: %s.\n", msg.c_str());
     }
-    fprintf(stderr, "USAGE: judge [-w <width>] [-c <fd>] <arithmetic circuit file>\n");
+    fprintf(stderr, "USAGE: judge [-w <width>] [-c <fd>] [-s <width>] <arithmetic circuit file>\n");
     exit(2);
 }
 
@@ -67,13 +67,17 @@ int main(int argc, char **argv)
 {
     unsigned output_width = 64;
     unsigned cost_fd = 2; // stderr
-    for (int c; (c = getopt(argc, argv, "w:c:")) != -1;) {
+    unsigned split_check_bits = 1024;
+    for (int c; (c = getopt(argc, argv, "w:c:s:")) != -1;) {
         switch (c) {
         case 'w':
             parse_uint_until_nul(optarg, output_width, BaseDec{});
             break;
         case 'c':
             parse_uint_until_nul(optarg, cost_fd, BaseDec{});
+            break;
+        case 's':
+            parse_uint_until_nul(optarg, split_check_bits, BaseDec{});
             break;
         default:
             print_usage_and_exit();
@@ -153,9 +157,9 @@ int main(int argc, char **argv)
                 for (size_t i = 0; i < noutputs; ++i) {
                     wires.at(command.outputs[i]) = v.getBit(i, R1P);
                 }
-                for (size_t i = noutputs; i < 1024; ++i) {
+                for (unsigned i = noutputs; i < split_check_bits; ++i) {
                     if (v.getBit(i, R1P)) {
-                        fprintf(stderr, "ERROR: invalid split: into %zu, found set bit at %zu.\n",
+                        fprintf(stderr, "ERROR: invalid split: into %zu, found set bit at %u.\n",
                                 noutputs, i);
                         return 1;
                     }

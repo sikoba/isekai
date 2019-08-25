@@ -16,5 +16,5 @@ script:
   - sed '1{s/llvm-7/llvm-8/;s/LLVM-7/LLVM-8/}' -i ./lib/llvm-crystal/src/lib_llvm_c.cr
   - crystal build --release -Ddisable_cfront src/isekai.cr
   - crystal build --release src/boilerplate_gen.cr
-  - (cd tests/backend/ && cmake . && make;)
+  - (cd tests/backend && cmake -DCMAKE_BUILD_TYPE=Release . && make;)
   - ./tests/backend/test-runner
