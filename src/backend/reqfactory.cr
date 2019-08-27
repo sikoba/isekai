@@ -182,6 +182,14 @@ module Isekai
                     if i < @circuit_inputs_val.size
                         val = @circuit_inputs_val[i];
                     end
+                    ################TODO - workaround to have -1 in hexa, because the to_s(16) is giving -1 instead of FFFFFFFF
+                    if (val < 0)
+                        val = UInt32.new(val)
+                        if (@board.bit_width() == 64)
+                            val = UInt64.new(val)       #TODO handle other bit_width
+                        end
+                    end
+                    #############################################################################
                     file.print("#{i} #{val.to_s(16)}\n")  #No value..yet...
                     i += 1                   
                 end

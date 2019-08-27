@@ -5,8 +5,7 @@ require "./backend/booleanfactory"
 require "file_utils"
 require "./zksnark/libsnark.cr"
 # TODO require "./crystal/ast_dump"
-
-
+require "./r1cs.cr"
 
 module Isekai
     # Structure holding the options passed by the user
@@ -64,6 +63,7 @@ module Isekai
             end
             in_array << 0
             ArithFactory.new(out_circuit, inputs, parser.@nizk_inputs, output, options.bit_width, in_array)
+            return inputs.size()
         #    if options.arith_file != ""
          #       ArithFactory.new(options.arith_file, inputs, parser.@nizk_inputs, output, options.bit_width, in_array)
           #  end
@@ -153,6 +153,7 @@ module Isekai
                 end
             end
             Log.setup(opts.progress)
+            inputs_nb = -1
             #Generate the arithmetic circuit if arith option is set or r1cs option is set (a temp arith file) and none is provided
             if arith_input == false
                 tempArith = ""
@@ -161,7 +162,7 @@ module Isekai
                 elsif opts.r1cs_file != ""
                     tempArith = File.tempfile("arith").path
                 end
-                create_circuit(filename, tempArith, opts)
+                inputs_nb = create_circuit(filename, tempArith, opts)
               
             else
                 tempArith = filename
@@ -175,6 +176,16 @@ module Isekai
                     puts "inputs file #{tempIn} is missing\n"
                 else
                     LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
+                    #post - processing
+                    r1 = R1CS.new(opts.bit_width)
+                    if (inputs_nb == -1)
+                        ##count the number of inputs - we start with -1 because of the 1 constant
+                        File.each_line(tempIn) do |line|
+                            inputs_nb += 1
+                        end
+                    end
+                    r1.postprocess(opts.r1cs_file + ".in" , inputs_nb)
+
                 end
                 #clean-up
                 if opts.arith_file == "" && arith_input == false
