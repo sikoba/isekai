@@ -40,7 +40,7 @@ def self.make_expr_of_type (type, &block : LibLLVM::Type -> DFGExpr) : DFGExpr
     end
 end
 
-def self.make_undef_expr_of_type (type)
+def self.make_undef_expr_of_type (type) : DFGExpr
     return make_expr_of_type(type) do |scalar_type|
         case scalar_type.kind
         when .integer_type_kind?

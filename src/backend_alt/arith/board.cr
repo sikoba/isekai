@@ -202,7 +202,28 @@ struct OverflowPolicy
     end
 end
 
-alias TruncatePolicy = Int32?
+struct TruncatePolicy
+    @width : Int32
+
+    def initialize (@width)
+    end
+
+    def self.new_to_width (width : Int32)
+        self.new(width)
+    end
+
+    def self.new_no_truncate
+        self.new(-1)
+    end
+
+    def no_truncate?
+        @width == -1
+    end
+
+    def truncate_to_width : Int32?
+        @width unless no_truncate?
+    end
+end
 
 struct Board
     @one_const : Wire
@@ -313,8 +334,8 @@ struct Board
         end
     end
 
-    def zerop (w : Wire, width : TruncatePolicy) : Wire
-        if width
+    def zerop (w : Wire, policy : TruncatePolicy) : Wire
+        if (width = policy.truncate_to_width)
             arg = truncate(w, to: width)
             return arg unless may_exceed?(arg, 1)
         else
@@ -467,9 +488,9 @@ struct Board
         result
     end
 
-    def const_mul_neg (c : UInt128, w : Wire, width : TruncatePolicy) : Wire
+    def const_mul_neg (c : UInt128, w : Wire, policy : TruncatePolicy) : Wire
         raise "Missed optimization" if c == 0
-        if width
+        if (width = policy.truncate_to_width)
             arg = truncate(w, to: width)
         else
             arg = w
@@ -503,13 +524,16 @@ struct Board
         end
     end
 
-    def add_output! (w : Wire, width : TruncatePolicy) : Nil
-        if width
+    def add_output! (w : Wire, policy : TruncatePolicy) : Nil
+        if (width = policy.truncate_to_width)
             arg = truncate(w, to: width)
         else
             arg = w
         end
-        @outbuf.write_output arg
+        # do the output-cast thing
+        o = allocate_wire! @dynamic_ranges[arg.@index]
+        @outbuf.write_mul(arg, @one_const, output: o)
+        @outbuf.write_output o
     end
 
     def done! : Nil

@@ -27,10 +27,12 @@ class StructDecl
 
     def add_field (field : Field)
         @fields << field
+        self
     end
 
     def to_s (io)
         io << "struct " << @name
+        self
     end
 end
 
@@ -42,10 +44,12 @@ class Program
 
     def add_struct_decl (decl : StructDecl)
         @struct_decls << decl
+        self
     end
 
     def add_field_to_last_struct (field : Field)
         @struct_decls.last.add_field(field)
+        self
     end
 
     def find_struct_by_name (name : String) : StructDecl?
@@ -85,6 +89,7 @@ class CodeGen
 
         def to_s (io)
             io << @name
+            self
         end
 
         getter name, type
@@ -129,18 +134,21 @@ class CodeGen
 
     def read_input (into expr)
         puts "#{expr} = test_read();"
+        self
     end
 
     def write_output (expr)
         puts "test_write(#{expr});"
+        self
     end
 
-    def reference (expr)
+    def reference (expr) : String
         "&#{expr}"
     end
 
     def invoke_func (name, args)
         puts "#{name}(#{args.join ", "});"
+        self
     end
 
     def create_program
@@ -188,6 +196,7 @@ END
     return 0; // tcc miscompiles the program without this
 }
 END
+        self
     end
 end
 

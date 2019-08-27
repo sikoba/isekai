@@ -18,6 +18,7 @@ class Structure < DFGExpr
                 block.call elem
             end
         end
+        self
     end
 
     def flattened

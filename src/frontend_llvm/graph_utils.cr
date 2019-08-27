@@ -7,6 +7,7 @@ class IncidenceList
 
     def add_edge! (from : Int32, to : Int32)
         @edges[from] << to
+        self
     end
 
     def nvertices

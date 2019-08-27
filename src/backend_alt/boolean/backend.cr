@@ -22,7 +22,7 @@ struct Backend
         Request.new(width) { |i| Bit.new_for_const(0 != ((c >> i) & 1)) }
     end
 
-    def visit_dependencies (expr : DFGExpr)
+    def visit_dependencies (expr : DFGExpr) : Nil
         case expr
         when InputBase, Constant
             # no dependencies

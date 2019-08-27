@@ -24,7 +24,7 @@ private class Preprocessor
         return {@cfg.idx_to_block(lca), is_loop}
     end
 
-    private def inspect_until (bb : LibLLVM::BasicBlock, terminator : LibLLVM::BasicBlock?)
+    private def inspect_until (bb : LibLLVM::BasicBlock, terminator : LibLLVM::BasicBlock?) : Nil
         while bb != terminator
             raise InvalidGraph.new unless bb
             bb = inspect(bb)

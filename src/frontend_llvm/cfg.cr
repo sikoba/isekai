@@ -7,7 +7,7 @@ private class ControlFlowGraph
     @block2idx = {} of LibLLVM::BasicBlock => Int32
     @final_idx : Int32 = -1
 
-    private def discover (bb : LibLLVM::BasicBlock)
+    private def discover (bb : LibLLVM::BasicBlock) : Nil
         return if @block2idx.has_key? bb
 
         idx = @blocks.size

@@ -47,11 +47,11 @@ def self.make_input_expr_of_type (type, which : InputBase::Kind) : DFGExpr
     end
 end
 
-def self.make_input_array (s : Structure?)
+def self.make_input_array (s : Structure?) : Array(BitWidth)
     return s ? s.flattened.map &.@bitwidth : [] of BitWidth
 end
 
-def self.make_output_array (s : Structure?)
+def self.make_output_array (s : Structure?) : Array(DFGExpr)
     return s ? s.flattened : [] of DFGExpr
 end
 
@@ -221,15 +221,14 @@ class Parser
         offset = as_expr(operands[1])
         result = move_ptr(result, by: offset)
         (2...operands.size).each do |i|
-            result = load(from: result)
-            result = get_field_ptr(base: result, field: as_expr(operands[i]))
+            result = get_field_ptr(base: load(from: result), field: as_expr(operands[i]))
         end
         result
     end
 
     private def inspect_basic_block_until (
             bb : LibLLVM::BasicBlock,
-            terminator : LibLLVM::BasicBlock?)
+            terminator : LibLLVM::BasicBlock?) : Nil
 
         while bb != terminator
             raise "terminator not found (end of function reached)" unless bb
@@ -245,7 +244,7 @@ class Parser
         end
     end
 
-    private def produce_phi_copies (from : LibLLVM::BasicBlock, to : LibLLVM::BasicBlock)
+    private def produce_phi_copies (from : LibLLVM::BasicBlock, to : LibLLVM::BasicBlock) : Nil
         to.instructions.each do |ins|
             break unless ins.opcode.phi?
             ins.incoming.each do |(block, value)|
@@ -257,7 +256,7 @@ class Parser
         end
     end
 
-    private def unroll_hint_called (ins)
+    private def unroll_hint_called (ins : LibLLVM::Instruction) : Nil
         raise "_unroll_hint() must be called with 1 argument" unless ins.call_nargs == 1
         operands = ins.operands
         arg = as_expr(operands[0])
@@ -268,7 +267,7 @@ class Parser
     end
 
     @[AlwaysInline]
-    private def set_binary (ins, klass)
+    private def set_binary (ins, klass) : Nil
         operands = ins.operands
         left = as_expr(operands[0])
         right = as_expr(operands[1])
@@ -276,7 +275,7 @@ class Parser
     end
 
     @[AlwaysInline]
-    private def set_binary_swapped (ins, klass)
+    private def set_binary_swapped (ins, klass) : Nil
         operands = ins.operands
         left = as_expr(operands[1])
         right = as_expr(operands[0])
@@ -284,7 +283,7 @@ class Parser
     end
 
     @[AlwaysInline]
-    private def set_bitwidth_cast (ins, klass)
+    private def set_bitwidth_cast (ins, klass) : Nil
         operands = ins.operands
         arg = as_expr(operands[0])
         new_bitwidth = TypeUtils.get_type_bitwidth(ins.type)
@@ -474,7 +473,7 @@ class Parser
         end
     end
 
-    private def inspect_outsource_func (func)
+    private def inspect_outsource_func (func) : Nil
         signature = func.function_type
         raise "outsource() return type is not void" unless signature.return_type.void?
         raise "outsource() is a var arg function" if signature.var_args?
@@ -495,15 +494,9 @@ class Parser
         @preproc_data = Preprocessor.new(func.entry_basic_block).data
         inspect_basic_block_until(func.entry_basic_block, terminator: nil)
         raise "Sanity-check failed" unless @assumption.empty?
-
-        return {
-            LLVMFrontend.make_input_array(@input_struct),
-            LLVMFrontend.make_input_array(@nizk_input_struct),
-            LLVMFrontend.make_output_array(@output_struct),
-        }
     end
 
-    private def inspect_unroll_hint_func (func)
+    private def inspect_unroll_hint_func (func) : Nil
         signature = func.function_type
         raise "_unroll_hint() return type is not void" unless signature.return_type.void?
         raise "_unroll_hint() is a var arg function" if signature.var_args?
@@ -522,9 +515,13 @@ class Parser
         @llvm_module.functions.each do |func|
             next if func.declaration?
             raise "Unexpected function defined: #{func.name}" unless func.name == "outsource"
-            return inspect_outsource_func(func)
+            inspect_outsource_func(func)
+            return {
+                LLVMFrontend.make_input_array(@input_struct),
+                LLVMFrontend.make_input_array(@nizk_input_struct),
+                LLVMFrontend.make_output_array(@output_struct),
+            }
         end
-
         raise "No 'outsource' function found"
     end
 end

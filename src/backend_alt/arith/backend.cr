@@ -20,7 +20,7 @@ struct Backend
     def initialize (@req_factory)
     end
 
-    def visit_dependencies (expr : DFGExpr)
+    def visit_dependencies (expr : DFGExpr) : Nil
         case expr
         when InputBase, Constant
             # no dependencies
@@ -38,45 +38,33 @@ struct Backend
         end
     end
 
-    private def lay_down_zero_extend (
-            expr : DFGExpr,
-            to new_width : Int32,
-            force_joined : Bool = false) : JoinedRequest | SplitRequest
-
+    private def lay_down_zero_extend (expr : DFGExpr, to new_width : Int32) : JoinedRequest | SplitRequest
         old_width = expr.@bitwidth.@width
         joined_req, split_req = get_both(expr)
         if split_req
-            result = SplitRequest.new(new_width) do |i|
+            return SplitRequest.new(new_width) do |i|
                 split_req[i]? || @req_factory.bake_const(0, width: 1)
             end
-            if force_joined
-                result = @req_factory.split_to_joined(result)
-                cache_joined! expr, @req_factory.joined_trunc(result, to: old_width)
-            end
-            return result
         end
 
-        raise "unreachable" unless joined_req
-        result = @req_factory.joined_zero_extend(joined_req, to: new_width)
+        result = @req_factory.joined_zero_extend(joined_req.not_nil!, to: new_width)
         if result.is_a? SplitRequest
             cache_split! expr, result.first(old_width)
-            if force_joined
-                result = @req_factory.split_to_joined(result)
-            end
         end
         result
     end
 
-    private def trunc_to_joined (expr : DFGExpr, to new_width : Int32) : JoinedRequest
-        joined_req, split_req = get_both(expr)
-        if joined_req
-            return @req_factory.joined_trunc(joined_req, to: new_width)
+    private def zero_extend_to_joined (expr : DFGExpr, to new_width : Int32) : JoinedRequest
+        result = lay_down_zero_extend(expr, to: new_width)
+        if result.is_a? SplitRequest
+            result = @req_factory.split_to_joined(result)
+            old_width = expr.@bitwidth.@width
+            cache_joined! expr, @req_factory.joined_trunc(result, to: old_width)
         end
-        raise "unreachable" unless split_req
-        return @req_factory.split_to_joined(split_req.first(new_width))
+        result
     end
 
-    private def sub_to_split (left : JoinedRequest, right : JoinedRequest) : SplitRequest
+    private def subtract_for_cmp (left : JoinedRequest, right : JoinedRequest) : SplitRequest
         result = @req_factory.joined_sub(left, right, force_correct: true)
         if result.is_a? JoinedRequest
             @req_factory.joined_to_split(result)
@@ -85,35 +73,12 @@ struct Backend
         end
     end
 
-    private def dynamic_width_best_estimate (expr : DFGExpr) : Int32
-        joined_req, split_req = get_both(expr)
-        result = Int32::MAX
-        if joined_req
-            result = @req_factory.joined_dynamic_width(joined_req)
-        end
-        if split_req
-            result = BitManip.min(result, @req_factory.split_dynamic_width(split_req))
-        end
-        result
-    end
-
     private def lay_down_cmp_lt (left : DFGExpr, right : DFGExpr) : JoinedRequest
         old_width = left.@bitwidth.@width
-        left_nbits = dynamic_width_best_estimate(left)
-        right_nbits = dynamic_width_best_estimate(right)
-        new_width = BitManip.max(left_nbits, right_nbits) + 1
-
-        if new_width >= old_width
-            new_left_req  = lay_down_zero_extend(left, to: new_width, force_joined: true)
-                .as(JoinedRequest)
-            new_right_req = lay_down_zero_extend(right, to: new_width, force_joined: true)
-                .as(JoinedRequest)
-        else
-            new_left_req  = trunc_to_joined(left, to: new_width)
-            new_right_req = trunc_to_joined(right, to: new_width)
-        end
-
-        diff_bits = sub_to_split(new_left_req, new_right_req)
+        new_width = old_width + 1
+        ext_left_req  = zero_extend_to_joined(left, to: new_width)
+        ext_right_req = zero_extend_to_joined(right, to: new_width)
+        diff_bits = subtract_for_cmp(ext_left_req, ext_right_req)
         return diff_bits.last
     end
 
@@ -128,7 +93,7 @@ struct Backend
 
         ext_left = lay_down_sign_extend(left, to: new_width)
         ext_right = lay_down_sign_extend(right, to: new_width)
-        diff_bits = sub_to_split(
+        diff_bits = subtract_for_cmp(
             @req_factory.split_to_joined(ext_left),
             @req_factory.split_to_joined(ext_right))
         return diff_bits.last
