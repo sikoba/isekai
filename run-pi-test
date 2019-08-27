@@ -43,7 +43,7 @@ for n in $(seq 20); do
     tcc -run pi-test/temp.c < prog_new.arci.in > out_native.txt
 
     compare_files out_judge_new.txt out_native.txt
-    compare_files out_judge_old.txt out_native.txt || true
+    compare_files out_judge_old.txt out_native.txt
 
     echo "$n    old:$(extract_cost cost_old)    new:$(extract_cost cost_new)"
 done
