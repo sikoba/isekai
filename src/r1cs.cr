@@ -20,13 +20,13 @@ class R1CS
        
         i = 0
         json["inputs"].as_a.each do |val_str|
-            val = BigInt.new(val_str.as_s) 
-            i+=1
+            val = BigInt.new(val_str.as_s)         
             if (i<input_nb)
                 inputs.push(decomplement(val))
             elsif (i > input_nb) #We ignore the '1' constant. TODO: when we will build the r1cs ourself, the 1 constant will not be there anymore
                 outputs.push(decomplement(val))    #last values are for the output
             end
+            i+=1
         end
      
         #We re-create the results field and overwrites it
