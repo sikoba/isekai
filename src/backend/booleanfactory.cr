@@ -1,9 +1,9 @@
 require "./reqfactory"
 require "./bus"
 require "./booleanbusreq"
-require "../dfg"
+require "../common/dfg"
 
-module Isekai
+module Isekai::Backend
 
 # Check ReqFactory's documentation.
 class BooleanFactory < RequestFactory
@@ -21,16 +21,22 @@ class BooleanFactory < RequestFactory
     end
 
 	def make_input_req(expr)
-		return BooleanInputReq.new(self, expr.as(InputBase), type())
+		return BooleanInputReq.new(self, expr.as(Field), type())
     end
 
 	def make_output_bus(expr_bus : Bus, idx)
 		return BooleanOutputBus.new(get_board(), expr_bus, idx)
     end
 
+    private def get_input_storage!
+        return nil if @circuit_inputs.empty?
+        return @circuit_inputs[0].as(Field).@key.@storage
+    end
+
     def make_req(expr, type : String) : BaseReq
         case expr
-        when .is_a? Input
+        when .is_a? Field
+            raise "Unsupported storage" unless expr.@key.@storage == get_input_storage!
             result = BooleanInputReq.new(self, expr, type)
         when .is_a?  Constant
                 result = ConstantReq.new(self, expr, type)

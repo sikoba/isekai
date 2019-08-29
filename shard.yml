@@ -5,9 +5,11 @@ authors:
   - Nemanja Boric <nemanja@nemanjaboric.com>
   - Guillaume Drevon <gd@sikoba.com>
 
-targets: 
+targets:
   isekai:
     main: src/isekai.cr
+  boilerplate_gen:
+    main: src/boilerplate_gen.cr
 
 crystal: 0.26.1
 
@@ -19,4 +21,7 @@ dependencies:
     branch: master
   linked_list:
     github: abvdasker/crystal-linked-list
+    branch: master
+  llvm-crystal:
+    github: shdown/llvm-crystal
     branch: master

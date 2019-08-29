@@ -1,6 +1,6 @@
 require "./wire"
 
-module Isekai
+module Isekai::Backend
     # Note: FieldOps don't contain any logic by themselves. They just contain the
     # definition that's output in the output file.
 

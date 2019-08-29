@@ -1,9 +1,9 @@
 require "./board.cr"
 require "./wire.cr"
-require "../helpers.cr"
+require "./helpers.cr"
 require "math"
 
-module Isekai
+module Isekai::Backend
     # Set of constants used through the backend
     class Constants
         # These constants specify the ordering between
@@ -163,14 +163,14 @@ module Isekai
 
     # Boolean bus always carrying a same value
     class ConstantBooleanBus < BooleanBus
-        def initialize (@board, @value : Int32)
+        def initialize (@board, @value : Int64)
             super(@board, Constants::MAJOR_LOGIC)
         end
 
         # Number of traces needed for representing the
         # value in binary form
         def get_trace_count
-            return Isekai.ceillg2(@value)
+            return Isekai::Backend.ceillg2(@value)
         end
 
         def get_wire_count
@@ -200,13 +200,13 @@ module Isekai
 
     # Bus that performs AND on boolean bus and the constant value
     class ConstBitAndBus < BooleanBus
-        def initialize (@board, @value : Int32, @bus : Bus)
+        def initialize (@board, @value : Int64, @bus : Bus)
             super(@board, Constants::MAJOR_LOGIC)
             raise "Can't AND non-boolean buses" if @bus.get_trace_type != Constants::BOOLEAN_TRACE
         end
 
         def get_trace_count 
-            return Math.min(Isekai.ceillg2(@value), @bus.get_trace_count)
+            return Math.min(Isekai::Backend.ceillg2(@value), @bus.get_trace_count)
         end
 
         def get_wire_count
@@ -230,13 +230,13 @@ module Isekai
 
     # Bus that performs OR on boolean bus and the constant value
     class ConstBitOrBus < BooleanBus
-        def initialize (@board, @value : Int32, @bus : Bus)
+        def initialize (@board, @value : Int64, @bus : Bus)
             super(@board, Constants::MAJOR_LOGIC)
             raise "Can't OR non-boolean buses" if @bus.get_trace_type != Constants::BOOLEAN_TRACE
         end
 
         def get_trace_count 
-            return Math.max(Isekai.ceillg2(@value), @bus.get_trace_count)
+			return Math.max(Isekai::Backend.ceillg2(@value), @bus.get_trace_count)
         end
 
         def get_wire_count
@@ -260,7 +260,8 @@ module Isekai
 
     # Bus that performs XOR on boolean bus and the constant value
     abstract class ConstantBitXorBusBase < BooleanBus
-        def initialize (@board, @value : Int32, @bus : Bus)
+
+        def initialize (@board, @value : Int64, @bus : Bus)
             super(@board, Constants::MAJOR_LOGIC)
             raise "Can't OR non-boolean buses" if @bus.get_trace_type != Constants::BOOLEAN_TRACE
 
@@ -288,7 +289,7 @@ module Isekai
         end
 
         def get_trace_count 
-            return Math.max(Isekai.ceillg2(@value), @bus.get_trace_count)
+            return Math.max(Isekai::Backend.ceillg2(@value), @bus.get_trace_count)
         end
 
         private def bit_value (i)
@@ -319,7 +320,8 @@ module Isekai
         def get_field_ops
             cmds = Array(FieldOp).new()
             k = wires_per_xor()
-            if (w = @wire_list )
+
+            if (w = @wire_list)
                 (0..get_trace_count()-1).each do |i|
                     if count = @bit_map[i]?
                         cmds.concat(invert_field_op(

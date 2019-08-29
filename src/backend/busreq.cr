@@ -1,7 +1,7 @@
 require "./bus.cr"
-require "../dfg.cr"
+require "../common/dfg.cr"
 
-module Isekai
+module Isekai::Backend
     # Request to lay down the buses. Used to transform the intermediate representation
     # into the bus. It implements Collapser's element's interface (get_dependencies)
     # so it can be used with Collapser to recursively resolve all dependencies and convert
@@ -164,7 +164,7 @@ module Isekai
     abstract class NotFamily < BusReq
         # bitwise not - XOR(bus, 1111...11111)
         def make_bitnot (bus)
-           return @reqfactory.get_ConstantBitXorBus_class.new(board(), board().bit_width.get_neg1().to_i32, bus)    #TODO to check it is correect for all width!
+           return @reqfactory.get_ConstantBitXorBus_class.new(board(), board().bit_width.get_neg1().to_i64, bus)    #TODO to check it is correect for all width!
         end
 
         # Makes logical not - uses BitXorBus with -1 (all ones)
@@ -299,8 +299,9 @@ module Isekai
             return ConstBitOrBus.new(board(), const_expr.@value, variable_bus)
         end
 
-        def var_impl (*busses)
-            return @reqfactory.get_BitAndBus_class().new(board(), *busses)
+        def var_impl (left, right)
+            #return @reqfactory.get_BitOrBus_class().new(board(), left, right)
+            return ArithBitOrBus.new(board(), left, right)
         end
     end
     

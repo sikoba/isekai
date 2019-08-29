@@ -1,10 +1,10 @@
-require "../collapser.cr"
 require "./board.cr"
-require "../dfg.cr"
 require "./busreq.cr"
 require "./bus.cr"
+require "../common/collapser.cr"
+require "../common/dfg.cr"
 
-module Isekai
+module Isekai::Backend
     # Request factory - the core of the backend. This Collapser recursively converts
     # all dependencies of the output into the Buses.
     # The translation from DFGExpr into BusReq is inside make_req.
@@ -59,6 +59,8 @@ module Isekai
                 result = LeftShiftReq.new(self, expr.as(LeftShift), trace_type)
             when .is_a? RightShift
                 result = RightShiftReq.new(self, expr.as(RightShift), trace_type)
+            when .is_a? ZeroExtend # FIXME
+                result = make_req(expr.@expr, trace_type)
             else
                 raise "Not supported expr: #{expr}"
             end
@@ -182,15 +184,14 @@ module Isekai
                     if i < @circuit_inputs_val.size
                         val = @circuit_inputs_val[i];
                     end
-                    ################TODO - workaround to have -1 in hexa, because the to_s(16) is giving -1 instead of FFFFFFFF
-                    if (val < 0)
-                        val = UInt32.new(val)
-                        if (@board.bit_width() == 64)
-                            val = UInt64.new(val)       #TODO handle other bit_width
-                        end
-                    end
-                    #############################################################################
-                    file.print("#{i} #{val.to_s(16)}\n")  #No value..yet...
+
+					## workaround to have -1 in hexa, because the to_s(16) is giving -1 instead of FFFFFFFF
+					if (@board.bit_width() == 64)		 #TODO handle other bit_width
+						file.print("#{i} #{val.to_u64.to_s(16)}\n")  #No value..yet...
+					else
+						file.print("#{i} #{val.to_u32.to_s(16)}\n")  #No value..yet...
+					end
+
                     i += 1                   
                 end
                 file.print("#{i} 1\n")      # the ONE constant
@@ -202,7 +203,7 @@ module Isekai
                         if ni < @circuit_inputs_val.size
                             val = @circuit_inputs_val[ni];
                         end
-                        file.print("#{i} #{val.to_s(16)}\n")  #No value..yet...
+                        file.print("#{i} #{val.to_u32.to_s(16)}\n")  #No value..yet...
                         i += 1  
                         ni += 1                 
                     end

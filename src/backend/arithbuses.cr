@@ -1,9 +1,9 @@
 require "./bus"
 require "./arithmeticfieldops"
-require "../helpers"
+require "./helpers"
 require "math"
 
-module Isekai
+module Isekai::Backend
 
 # Base for the arithmetic bus.
 abstract class ArithmeticBus < Bus
@@ -185,12 +185,12 @@ end
 
 # Constant value
 class ConstantArithmeticBus < ArithmeticBus
-	def initialize (@board, @value : Int32)
+	def initialize (@board, @value : Int64)
         super(@board, Constants::MAJOR_LOGIC)
     end
 
 	def get_active_bits()
-		return Isekai.ceillg2(@value)
+		return Isekai::Backend.ceillg2(@value)
     end
 
 	def get_wire_count()
@@ -213,7 +213,7 @@ class ConstantMultiplyBus < ArithmeticBus
         else
             @value = (BigInt.new(value) & @board.bit_width.get_neg1()).to_i64
         end
-        @active_bits = Isekai.ceillg2(@value) + @bus.get_active_bits()
+        @active_bits = Isekai::Backend.ceillg2(@value) + @bus.get_active_bits()
     end
 
 	def get_active_bits()
@@ -235,7 +235,7 @@ class ConstantNegBus < ArithmeticBus
 
 	def initialize (@board, @value : Int64, @bus : Bus)
         super(@board, Constants::MAJOR_LOGIC)
-        @active_bits = Isekai.ceillg2(@value) + @bus.get_active_bits()
+        @active_bits = Isekai::Backend.ceillg2(@value) + @bus.get_active_bits()
     end
 
 	def get_active_bits()
@@ -668,13 +668,13 @@ class OrFamilyBus < BinaryBooleanBus
         return cmds
     end
 
-	def do_trace(j)
+    def do_trace(j)
         return @wire_list.as(WireList)[j*4+3]
     end
 end
 
 class ArithBitOrBus < OrFamilyBus
-	def initialize (@board, bus_left, bus_right)
+    def initialize (@board, bus_left, bus_right)
         super(@board, bus_left, bus_right, -1, "or")
     end
 end
@@ -684,5 +684,5 @@ class ArithXorBus < OrFamilyBus
         super(@board, bus_left, bus_right, -2, "xor")
     end
 end
-			
+
 end

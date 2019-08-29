@@ -2,7 +2,7 @@ require "./busreq.cr"
 require "./bus.cr"
 require "./booleanbus.cr"
 
-module Isekai
+module Isekai::Backend
     # Requests to lay down the boolean circuit buses.
 
     abstract class BooleanReq < BusReq
@@ -12,7 +12,7 @@ module Isekai
     end
 
     class BooleanInputReq < BooleanReq
-        def initialize (@reqfactory, @expr : InputBase, @type : String)
+        def initialize (@reqfactory, @expr, @type : String)
             super(@reqfactory, @expr, @type)
         end
 
@@ -21,7 +21,7 @@ module Isekai
         end
 
         def natural_impl
-            return BooleanInputBus.new(board(), @expr.as(Input).@storage_key.@idx)
+            return BooleanInputBus.new(board(), @expr.as(Field).@key.@idx)
         end
     end
 

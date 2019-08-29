@@ -4,7 +4,7 @@ require "./booleanbusreq.cr"
 require "./booleanfieldops"
 require "math"
 
-module Isekai
+module Isekai::Backend
     # boolean bitwise input bus.
     class BooleanInputBus < BooleanBus
         @used : Bool?

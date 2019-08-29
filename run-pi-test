@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+set -e
+
+extract_cost() {
+    read _ cost < "$1"
+    echo "$cost"
+}
+
+gen_small_rands() {
+    local i
+    for (( i = 0; i < $1; ++i )); do
+        echo $(( RANDOM % 100 ))
+    done
+}
+
+compare_files() {
+    if ! cmp -- "$1" "$2"; then
+        echo >&2 "ERROR: files '$1' and '$2' differ:"
+        echo >&2
+        diff -u -- "$1" "$2"
+        return 1
+    fi
+}
+
+die() {
+    printf >&2 '%s\n' "$*"
+    exit 1
+}
+
+SRC=${1?}
+
+for n in $(seq 20); do
+    sed -r "1s/NINPUT = [0-9]+/NINPUT = $n/" -i "$SRC"
+    clang -O0 -emit-llvm -c "$SRC" -o prog.bc
+    gen_small_rands 10000 > prog.bc.in
+    ./isekai --arith=prog_new.arci --ignore-overflow prog.bc
+    ./isekai --arith=prog_old.arci --primary-backend prog.bc
+
+    ./tests/backend/judge -w 32 -c 3 prog_old.arci > out_judge_old.txt 3> cost_old || die 'judge old failed'
+    ./tests/backend/judge -w 32 -c 3 prog_new.arci > out_judge_new.txt 3> cost_new || die 'judge new failed'
+    { cat < "$SRC"; ./boilerplate_gen "$SRC"; } > pi-test/temp.c
+    tcc -run pi-test/temp.c < prog_new.arci.in > out_native.txt
+
+    compare_files out_judge_new.txt out_native.txt
+    compare_files out_judge_old.txt out_native.txt
+
+    echo "$n    old:$(extract_cost cost_old)    new:$(extract_cost cost_new)"
+done

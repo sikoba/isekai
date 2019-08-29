@@ -1,9 +1,9 @@
 require "./bus.cr"
 require "./arithbuses.cr"
-require "../dfg.cr"
 require "./busreq.cr"
+require "../common/dfg.cr"
 
-module Isekai
+module Isekai::Backend
 
 # Refer to BusReq's documentation for more explanation.
 
@@ -20,7 +20,7 @@ class ArithmeticInputReq < BusReq
     end
 
 	def natural_impl()
-        return ArithmeticInputBus.new(board(), @expr.as(InputBase).@storage_key.@idx)
+        return ArithmeticInputBus.new(board(), @expr.as(Field).@key.@idx)
     end
 end
 
@@ -38,7 +38,7 @@ class ArithmeticNIZKInputReq < BusReq
     end
 
 	def natural_impl()
-        return ArithmeticNIZKInputBus.new(board(), @expr.as(InputBase).@storage_key.@idx)
+        return ArithmeticNIZKInputBus.new(board(), @expr.as(Field).@key.@idx)
     end
 end
 
@@ -261,7 +261,6 @@ class CmpEQReqArith < CmpReq
             return zerop_bus
     end
 end
-
 
 # Not equal operator : a != b
 # We implement it doing 1- zeroPBus(a,b)

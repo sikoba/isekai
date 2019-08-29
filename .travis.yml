@@ -1,0 +1,20 @@
+dist: bionic
+language: crystal
+crystal:
+  - latest
+  - nightly
+
+before_install:
+  - wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+  - sudo add-apt-repository 'deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main'
+  - sudo apt-get update
+  - sudo apt-get install -y llvm-8-dev libclang-8-dev clang-8 libprocps-dev libgmp-dev
+
+script:
+  - sed 's/Burgos/crystal-lang/' -i shard.yml
+  - shards update
+  - sed '1{s/llvm-7/llvm-8/;s/LLVM-7/LLVM-8/}' -i ./lib/llvm-crystal/src/lib_llvm_c.cr
+  - crystal build --release -Ddisable_cfront src/isekai.cr
+  - crystal build --release src/boilerplate_gen.cr
+  - (cd tests/backend && cmake -DCMAKE_BUILD_TYPE=Release . && make;)
+  - ./tests/backend/test-runner
