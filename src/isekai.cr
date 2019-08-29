@@ -9,7 +9,7 @@ require "file_utils"
 require "option_parser"
 # TODO require "./crystal/ast_dump"
 
-require "./r1cs.cr"
+require "./r1cs/r1cs.cr"
 
 require "./backend_alt/arith/board"
 require "./backend_alt/arith/req_factory"
@@ -203,6 +203,8 @@ class ParserProgram
         else
             raise "Unsupported input file extension"
         end
+
+        return input_values.size()
     end
 
     # Main
@@ -276,9 +278,8 @@ class ParserProgram
         Log.setup(opts.progress)
 
         input_file = InputFile.new(filename)
-
+        inputs_nb = -1
         # Generate the arithmetic circuit if arith option is set or r1cs option is set (a temp arith file) and none is provided
-
         unless input_file.@kind.arith?
             tempArith = ""
             if opts.arith_file != ""
@@ -286,7 +287,7 @@ class ParserProgram
             elsif opts.r1cs_file != ""
                 tempArith = File.tempfile("arith").path
             end
-            create_circuit(input_file, tempArith, opts.bool_file, opts)
+            inputs_nb = create_circuit(input_file, tempArith, opts.bool_file, opts)
         else
             tempArith = input_file.@filename
         end
@@ -298,6 +299,15 @@ class ParserProgram
                 puts "inputs file #{tempIn} is missing\n"
             else
                 LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
+                #post - processing
+                r1 = R1CS.new(opts.bit_width)
+                if (inputs_nb == -1)
+                    ##count the number of inputs - we start with -1 because of the 1 constant
+                    File.each_line(tempIn) do |line|
+                        inputs_nb += 1
+                    end
+                end
+                r1.postprocess(opts.r1cs_file + ".in" , inputs_nb)
             end
             #clean-up
             if opts.arith_file == "" && input_file.@kind.arith? == false
