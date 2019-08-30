@@ -23,7 +23,10 @@
 #include <termios.h>
 #include <unistd.h>
 #include <stdio.h>
+
+#ifndef NO_PROCPS				 
 #include <proc/readproc.h>
+#endif	  
 
 using namespace libsnark;
 using namespace gadgetlib2;
@@ -92,10 +95,11 @@ private:
 	void addAssertionConstraint(char*, char*);
 
 	void addSplitConstraint(char*, char*, unsigned short);
-	void addPackConstraint(char*, char*, unsigned short);
+	//void addPackConstraint(char*, char*, unsigned short);
 	void addNonzeroCheckConstraint(char*, char*);
 
 	void handleAddition(char*, char*);
+	void handlePackOperation(char*, char*, unsigned short);													
 	void handleMulConst(char*, char*, char*);
 	void handleMulNegConst(char*, char*, char*);
 
