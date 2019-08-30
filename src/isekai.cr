@@ -204,7 +204,8 @@ class ParserProgram
             raise "Unsupported input file extension"
         end
 
-        return input_values.size()
+        return input_values.size()  #TODO - We should use the input size coming from the code parsing,
+        # because if one provide more input values in the input file, the post-processing will fail while the rest is working fine
     end
 
     # Main
