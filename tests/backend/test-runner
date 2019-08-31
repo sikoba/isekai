@@ -31,7 +31,7 @@ done
 
 # $1: test case directory
 run_on_dir() {
-    utils_test_case_prepare "$1"/prog.c || exit $?
+    utils_test_case_prepare "$1" || exit $?
     local f rc
     for f in "$1"/*.in; do
         echo >&2 "{{<<==--•• RUNNING ON “$f” ••--==>>}}"
@@ -43,10 +43,10 @@ run_on_dir() {
     done
 }
 
-# $1: C source file
+# $1: source file
 # $2: file with input values
 run_on_pair() {
-    utils_test_case_prepare "$1" || exit $?
+    utils_test_case_prepare_for_file "$1" || exit $?
     utils_test_case_run "$2" "$OUTPUT_BIT_WIDTH" "${ISEKAI_ARGS[@]}" || exit $?
 }
 

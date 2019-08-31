@@ -4,7 +4,6 @@ utils_TEMP_DIR=./cruft
 utils_BACKEND_TEST_ROOT=./backend
 
 utils_CLANG=( clang )
-utils_NATIVE_CC=( clang -O0 -Wall -Wextra -fsanitize=undefined )
 utils_ISEKAI=( "$utils_REPO_ROOT"/isekai )
 utils_BOILERPLATE_GEN=( "$utils_REPO_ROOT"/boilerplate_gen )
 utils_JUDGE=( "$utils_BACKEND_TEST_ROOT"/judge )
@@ -18,6 +17,12 @@ utils_NATIVE_BIN=$utils_TEMP_DIR/native_bin
 utils_JUDGE_OUTPUT=$utils_TEMP_DIR/out_judge.txt
 utils_NATIVE_OUTPUT=$utils_TEMP_DIR/out_native.txt
 utils_RNG_OUTPUT=$utils_TEMP_DIR/random.in
+
+declare -A utils_EXTENSION_TO_NATIVE_CC=(
+    [c]=clang
+    [cpp]=clang++ [cxx]=clang++
+)
+utils_NATIVE_CC_ARGS=( -O0 -Wall -Wextra -fsanitize=undefined )
 
 utils__stress_nlines=-1
 
@@ -38,11 +43,10 @@ utils_trace_run() {
     "$@"
 }
 
-# $1: C source file
-utils_compile_c_to_bc() {
+# $1: source file
+utils_compile_to_bc() {
     utils_trace_run \
         "${utils_CLANG[@]}" \
-        -DISEKAI_C_PARSER=0 \
         -O0 -c -emit-llvm \
         "$1" \
         -o "$utils_BC_FILE" || return $?
@@ -78,21 +82,22 @@ utils_run_bc_parser() {
         "$utils_BC_FILE" || return $?
 }
 
-# $1: C source file
-utils_compile_c_to_native() {
-    {
-        cat -- "$1"
-        utils_trace_run "${utils_BOILERPLATE_GEN[@]}" "$1"
-    } | utils_trace_run "${utils_NATIVE_CC[@]}" -x c - -o "$utils_NATIVE_BIN"
-    local -a statuses=( "${PIPESTATUS[@]}" )
-
-    local s
-    for s in "${statuses[@]}"; do
-        if (( s != 0 )); then
-            return $s
-        fi
-    done
-    return 0
+# $1: source file
+utils_compile_to_native() {
+    local ext=${1##*.}
+    local native_cc="${utils_EXTENSION_TO_NATIVE_CC[$ext]}"
+    if [[ -z $native_cc ]]; then
+        printf >&2 'Source file "%s" has unknown extension.\n' "$1"
+        return 1
+    fi
+    local temp_src=$utils_TEMP_DIR/temp.$ext
+    local rc
+    cat -- "$1" > "$temp_src" && \
+        utils_trace_run "${utils_BOILERPLATE_GEN[@]}" "$1" >> "$temp_src" && \
+        utils_trace_run $native_cc "${utils_NATIVE_CC_ARGS[@]}" "$temp_src" -o "$utils_NATIVE_BIN"
+    rc=$?
+    rm -f -- "$temp_src"
+    return $rc
 }
 
 # $1: file 1
@@ -109,10 +114,24 @@ utils_check_files_equal() {
     fi
 }
 
-# $1: C source file
+# $1: source file
+utils_test_case_prepare_for_file() {
+    utils_compile_to_bc "$1" || return $?
+    utils_compile_to_native "$1" || return $?
+}
+
+# $1: test case directory
 utils_test_case_prepare() {
-    utils_compile_c_to_bc "$1" || return $?
-    utils_compile_c_to_native "$1" || return $?
+    local ext
+    for ext in "${!utils_EXTENSION_TO_NATIVE_CC[@]}"; do
+        if [[ -e "$1"/prog."$ext" ]]; then
+            utils_test_case_prepare_for_file "$1"/prog."$ext"
+            return $?
+        fi
+    done
+
+    printf >&2 'Cannot find the program inside directory "%s".\n' "$1"
+    return 1
 }
 
 # $1: file with input values
@@ -141,7 +160,7 @@ utils_stress_test_can_run() {
 
 # $1: test case directory
 utils_stress_test_prepare() {
-    utils_test_case_prepare "$1"/prog.c
+    utils_test_case_prepare "$1"
     local -a in_files=( "$1"/*.in )
     utils__stress_nlines=$(wc -l < "${in_files[0]}") || return $?
 }

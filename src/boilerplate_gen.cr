@@ -59,29 +59,6 @@ class Program
     end
 end
 
-def bake_field (cursor) : Field
-    name = cursor.spelling
-    type = cursor.type
-    if type.kind.constant_array?
-        return ArrayField.new(name: name, nelems: type.array_size.to_i32)
-    else
-        return ScalarField.new(name: name)
-    end
-end
-
-def visit (program, parent)
-    parent.visit_children do |cursor|
-        case cursor.kind
-        when .struct_decl?
-            program.add_struct_decl(StructDecl.new(name: cursor.spelling))
-        when .field_decl?
-            program.add_field_to_last_struct(bake_field(cursor))
-        end
-        visit(program, cursor)
-        Clang::ChildVisitResult::Continue
-    end
-end
-
 class CodeGen
     private class Variable
         def initialize (@name : String, @type : StructDecl | String)
@@ -201,13 +178,12 @@ END
 end
 
 def main
-    options =
-        Clang::TranslationUnit.default_options |
-        Clang::TranslationUnit::Options::DetailedPreprocessingRecord |
-        Clang::TranslationUnit::Options::SkipFunctionBodies
+    options = Clang::TranslationUnit.default_options
+    options &= ~Clang::TranslationUnit::Options::DetailedPreprocessingRecord
+    options |= Clang::TranslationUnit::Options::SkipFunctionBodies
 
     if ARGV.empty?
-        STDERR.puts "USAGE: boilerplate_gen [<clang args>...] <C source file>"
+        STDERR.puts "USAGE: boilerplate_gen [<clang args>...] <source file>"
         exit 2
     end
     args, file_name = ARGV[...-1], ARGV[-1]
@@ -216,7 +192,28 @@ def main
     tu = Clang::TranslationUnit.from_source(index, files, args, options)
 
     program = Program.new
-    visit(program, tu.cursor)
+    tu.cursor.visit_children do |cursor|
+        case cursor.kind
+        when .struct_decl?
+            # Actually, libclang has "clang_Type_visitFields", but the Crystal wrapper does not
+            # expose it. Oh well.
+            program.add_struct_decl(StructDecl.new(name: cursor.spelling))
+            Clang::ChildVisitResult::Recurse
+        when .class_decl?, .union_decl?
+            Clang::ChildVisitResult::Continue
+        when .field_decl?
+            name, type = cursor.spelling, cursor.type
+            if type.kind.constant_array?
+                field = ArrayField.new(name: name, nelems: type.array_size.to_i32)
+            else
+                field = ScalarField.new(name: name)
+            end
+            program.add_field_to_last_struct(field)
+            Clang::ChildVisitResult::Continue
+        else
+            Clang::ChildVisitResult::Continue
+        end
+    end
 
     input_struct = program.find_struct_by_name "Input"
     raise "Cannot find the 'Input' struct" unless input_struct

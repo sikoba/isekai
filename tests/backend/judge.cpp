@@ -15,23 +15,6 @@ using namespace libff;
 using namespace libsnark;
 using namespace gadgetlib2;
 
-static void init_pp()
-{
-#if defined(CURVE_BN128)
-    bn128_pp::init_public_params();
-#elif defined(CURVE_ALT_BN128)
-    alt_bn128_pp::init_public_params();
-#elif defined(CURVE_EDWARDS)
-    edwards_pp::init_public_params();
-#elif defined(CURVE_MNT4)
-    mnt4_pp::init_public_params();
-#elif defined(CURVE_MNT6)
-    mnt6_pp::init_public_params();
-#else
-#   error "Unknown curve."
-#endif
-}
-
 static void check_failed(const char *expr, const char *file, int line)
 {
     fprintf(stderr, "CHECK(%s) failed at %s:%d.\n", expr, file, line);
@@ -89,7 +72,7 @@ int main(int argc, char **argv)
     }
     const std::string arci_filename = argv[optind];
 
-    init_pp();
+    libff::default_ec_pp::init_public_params();
 
     FieldT one = FieldT::one();
     FieldT zero = FieldT::zero();
