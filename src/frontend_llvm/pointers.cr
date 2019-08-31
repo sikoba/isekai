@@ -18,20 +18,14 @@ def self.bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
     return Add.bake(a, b)
 end
 
-def self.get_element_type (base : Structure, field : Int32?) : LibLLVM::Type
-    type = base.@type
-    case type.kind
-    when .struct_type_kind?
-        type.struct_elems[field.not_nil!]
-    when .array_type_kind?
-        type.element_type
-    else
-        raise "unreachable"
-    end
+def self.make_undef_array_elem (arr : Structure) : DFGExpr
+    type = arr.@type
+    raise "unreachable" unless type.array?
+    return TypeUtils.make_undef_expr_of_type(type.element_type)
 end
 
 abstract class AbstractPointer < DFGExpr
-    def initialize (@target_type : LibLLVM::Type)
+    def initialize ()
         super(bitwidth: BitWidth.new_for_undefined)
     end
 
@@ -46,8 +40,8 @@ abstract class AbstractPointer < DFGExpr
 end
 
 class UndefPointer < AbstractPointer
-    def initialize (target_type : LibLLVM::Type)
-        super(target_type)
+    def initialize (@target_type : LibLLVM::Type)
+        super()
     end
 
     def load (assumption : Assumption) : DFGExpr
@@ -67,8 +61,8 @@ end
 # Points to an exactly one instance of an object. Used for on-stack allocations and input/output
 # structs.
 class StaticPointer < AbstractPointer
-    def initialize (@target : DFGExpr, target_type : LibLLVM::Type)
-        super(target_type)
+    def initialize (@target : DFGExpr)
+        super()
     end
 
     def load (assumption : Assumption) : DFGExpr
@@ -76,7 +70,9 @@ class StaticPointer < AbstractPointer
     end
 
     def store! (value : DFGExpr, assumption : Assumption) : Nil
-        @target = assumption.conditionalize(old_expr: @target, new_expr: value)
+        @target = assumption.conditionalize(
+            old_expr: @target,
+            new_expr: value)
     end
 
     def move (by offset : DFGExpr) : DFGExpr
@@ -88,8 +84,8 @@ end
 
 # Points to a field of a structure or an array element with statically known index.
 class StaticFieldPointer < AbstractPointer
-    def initialize (@base : Structure, @field : Int32, target_type : LibLLVM::Type?)
-        super(target_type || LLVMFrontend.get_element_type(base, field))
+    def initialize (@base : Structure, @field : Int32)
+        super()
     end
 
     def valid?
@@ -99,7 +95,7 @@ class StaticFieldPointer < AbstractPointer
     def load (assumption : Assumption) : DFGExpr
         unless valid?
             Log.log.info("possible undefined behavior: array index is out of bounds")
-            return TypeUtils.make_undef_expr_of_type(@target_type)
+            return LLVMFrontend.make_undef_array_elem(@base)
         end
         assumption.reduce(@base.@elems[@field])
     end
@@ -115,13 +111,15 @@ class StaticFieldPointer < AbstractPointer
     end
 
     def move (by offset : DFGExpr) : DFGExpr
+        if @base.@type.struct?
+            # Technically, we can move this pointer past *one* element, but cannot dereference the
+            # resulting pointer. Since we can't compare pointers, this implementation is OK.
+            return self
+        end
         new_field = LLVMFrontend.bitwidth_safe_signed_add(
             offset,
-            Constant.new(@field.to_i64, bitwidth: BitWidth.new(32)))
-        return PointerFactory.bake_field_pointer(
-            base: @base,
-            field: new_field,
-            target_type: @target_type)
+            Constant.new(@field.to_i64, BitWidth.new(32)))
+        return PointerFactory.bake_field_pointer(base: @base, field: new_field)
     end
 end
 
@@ -130,8 +128,8 @@ class DynamicFieldPointer < AbstractPointer
     @max_size : Int32?
 
     # Assumes that '@field' is of integer type.
-    def initialize (@base : Structure, @field : DFGExpr, target_type : LibLLVM::Type?)
-        super(target_type || LLVMFrontend.get_element_type(base, field: nil))
+    def initialize (@base : Structure, @field : DFGExpr)
+        super()
 
         unless @base.@elems.empty?
             bitwidth = @field.@bitwidth
@@ -146,7 +144,7 @@ class DynamicFieldPointer < AbstractPointer
     def load (assumption : Assumption) : DFGExpr
         unless (n = @max_size)
             Log.log.info("possible undefined behavior: index is undefined or always invalid")
-            return TypeUtils.make_undef_expr_of_type(@target_type)
+            return LLVMFrontend.make_undef_array_elem(@base)
         end
         result = assumption.reduce(@base.@elems[0])
         (1...n).each do |i|
@@ -183,23 +181,16 @@ class DynamicFieldPointer < AbstractPointer
 
     def move (by offset : DFGExpr) : DFGExpr
         new_field = LLVMFrontend.bitwidth_safe_signed_add(offset, @field)
-        return PointerFactory.bake_field_pointer(
-            base: @base,
-            field: new_field,
-            target_type: @target_type)
+        return PointerFactory.bake_field_pointer(base: @base, field: new_field)
     end
 end
 
 module PointerFactory
-    def self.bake_field_pointer (
-            base : Structure,
-            field : DFGExpr,
-            target_type : LibLLVM::Type?) : AbstractPointer
-
+    def self.bake_field_pointer (base : Structure, field : DFGExpr) : AbstractPointer
         if field.is_a? Constant
-            return StaticFieldPointer.new(base, field.@value.to_i32, target_type)
+            return StaticFieldPointer.new(base: base, field: field.@value.to_i32)
         else
-            return DynamicFieldPointer.new(base, field, target_type)
+            return DynamicFieldPointer.new(base: base, field: field)
         end
     end
 end # module Isekai::LLVMFrontend::PointerFactory

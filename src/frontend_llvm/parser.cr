@@ -139,7 +139,7 @@ class Parser
             raise "unreachable"
         end
 
-        @arguments[value] = StaticPointer.new(expr, target_type: struct_type)
+        @arguments[value] = StaticPointer.new(expr)
     end
 
     private def as_expr (value : LibLLVM::Any) : DFGExpr
@@ -205,7 +205,7 @@ class Parser
     private def get_field_ptr (base : DFGExpr, field : DFGExpr) : DFGExpr
         case base
         when Structure
-            return PointerFactory.bake_field_pointer(base: base, field: field, target_type: nil)
+            return PointerFactory.bake_field_pointer(base: base, field: field)
         when Conditional
             return Conditional.bake(
                 base.@cond,
@@ -295,9 +295,8 @@ class Parser
             case ins.opcode
 
             when .alloca?
-                type = ins.alloca_type
-                expr = make_undef_expr_of_type_cached(type, cache_token: ins.to_any)
-                @locals[ins.to_any] = StaticPointer.new(expr, target_type: type)
+                expr = make_undef_expr_of_type_cached(ins.alloca_type, cache_token: ins.to_any)
+                @locals[ins.to_any] = StaticPointer.new(expr)
 
             when .store?
                 operands = ins.operands
