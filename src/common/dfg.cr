@@ -5,7 +5,7 @@ require "./dfgoperator"
 require "./bitwidth"
 require "./common"
 
-private macro def_simplify_left(**kwargs)
+private macro def_simplify_left (**kwargs)
     def self.simplify_left (const, right)
         {% for key, value in kwargs %}
             {% if key == :identity %}
@@ -24,7 +24,7 @@ private macro def_simplify_left(**kwargs)
     end
 end
 
-private macro def_simplify_right(**kwargs)
+private macro def_simplify_right (**kwargs)
     def self.simplify_right (left, const)
         {% for key, value in kwargs %}
             {% if key == :identity %}
@@ -412,6 +412,11 @@ class Divide < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
+        if right == 0
+            # Well, we have to compile something...
+            Log.log.info("possible undefined behavior: division by zero")
+            return 0_i64
+        end
         # unsigned division; cannot overflow, so no truncate
         return (left.to_u64 // right.to_u64).to_i64
     end
@@ -429,6 +434,11 @@ class Modulo < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
+        if right == 0
+            # Well, we have to compile something...
+            Log.log.info("possible undefined behavior: division by zero")
+            return 0_i64
+        end
         # unsigned modulo; cannot overflow, so no truncate
         return (left.to_u64 % right.to_u64).to_i64
     end
