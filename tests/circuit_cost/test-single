@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+
+opwd=$PWD
+cd -- "$(dirname "$(readlink "$0" || echo "$0")")" || exit $?
+cd .. || exit $?
+source ./utils.lib.bash || exit $?
+
+# $1: file with judge's cost output
+extract_cost() {
+    local _unused cost
+    read _unused cost < "$1" || return $?
+    echo "$cost"
+}
+
+# $1: number of random integers to generate
+gen_small_rands() {
+    local i
+    for (( i = 0; i < $1; ++i )); do
+        echo $(( RANDOM % 100 ))
+    done
+}
+
+# $1: file 1
+# $2: file 2
+compare_files() {
+    if ! cmp -- "$1" "$2"; then
+        echo >&2 "ERROR: files '$1' and '$2' differ:"
+        echo >&2
+        diff -u -- "$1" "$2"
+        return 1
+    fi
+}
+
+ARCI_NEW=$utils_TEMP_DIR/new.arci
+ARCI_OLD=$utils_TEMP_DIR/old.arci
+COST_NEW=$utils_TEMP_DIR/cost_new
+COST_OLD=$utils_TEMP_DIR/cost_old
+TEMP_SRC=$utils_TEMP_DIR/temp.c
+OUT_JUDGE_OLD=$utils_TEMP_DIR/out_judge_old.txt
+OUT_JUDGE_NEW=$utils_TEMP_DIR/out_judge_new.txt
+OUT_NATIVE=$utils_TEMP_DIR/out_native.txt
+NATIVE_CC=(
+    ${utils_EXTENSION_TO_NATIVE_CC[c]}
+    "${utils_NATIVE_CC_ARGS[@]}"
+)
+
+set -e
+
+if (( $# != 1 )); then
+    echo >&2 "USAGE: $0 <source file>"
+    exit 2
+fi
+src=$(utils_resolve_relative "$1" "$opwd")
+
+for (( n = 1; n <= 20; ++n )); do
+    sed -r "1s/NINPUT = [0-9]+/NINPUT = $n/" "$src" > "$utils_PREPROCD_C_FILE"
+    "${utils_CLANG[@]}" -O0 -c -emit-llvm -I"$opwd" "$utils_PREPROCD_C_FILE" -o "$utils_BC_FILE"
+    gen_small_rands 10000 > "$utils_BC_FILE".in
+
+    "${utils_ISEKAI[@]}" --arith="$ARCI_NEW" --ignore-overflow "$utils_BC_FILE"
+    "${utils_ISEKAI[@]}" --arith="$ARCI_OLD" --primary-backend "$utils_BC_FILE"
+
+    "${utils_JUDGE[@]}" -w 32 -c 3 "$ARCI_OLD" > "$OUT_JUDGE_OLD" 3> "$COST_OLD"
+    "${utils_JUDGE[@]}" -w 32 -c 3 "$ARCI_NEW" > "$OUT_JUDGE_NEW" 3> "$COST_NEW"
+
+    cat -- "$utils_PREPROCD_C_FILE" > "$TEMP_SRC"
+    "${utils_BOILERPLATE_GEN[@]}" -I"$opwd" "$utils_PREPROCD_C_FILE" >> "$TEMP_SRC"
+
+    "${NATIVE_CC[@]}" -I"$opwd" "$TEMP_SRC" -o "$utils_NATIVE_BIN"
+    "$utils_NATIVE_BIN" < "$ARCI_NEW".in > "$OUT_NATIVE"
+
+    compare_files "$OUT_JUDGE_NEW" "$OUT_NATIVE"
+    compare_files "$OUT_JUDGE_OLD" "$OUT_NATIVE"
+
+    echo "$n    old:$(extract_cost "$COST_OLD")    new:$(extract_cost "$COST_NEW")"
+done

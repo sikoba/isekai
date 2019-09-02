@@ -15,7 +15,7 @@ struct Output {
 void outsource(struct Input *input, struct Output *output)
 {
 #if ISEKAI_C_PARSER
-    output->x = 0;
+    output->x = input->a_0;
 #else
     int *n = (&(input->a))[1];
     output->x = *n;

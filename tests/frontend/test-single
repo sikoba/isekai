@@ -16,7 +16,7 @@ fix_ptrs() {
      sed 's/:0x[0-9a-f]*/:POINTER/' -i -- "$1"
 }
 
-utils_compile_c_to_bc "$src" || exit $?
+utils_compile_to_bc "$src" || exit $?
 utils_run_bc_parser --primary-backend || exit $?
 
 utils_preprocess_for_c_parser "$src" || exit $?

@@ -1,4 +1,4 @@
-enum { NINPUT = 4 };
+enum { NINPUT = 3 };
 
 #define IMAGE_W (NINPUT+2)
 #define IMAGE_H (NINPUT+2)

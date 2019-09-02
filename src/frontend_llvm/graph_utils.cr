@@ -63,32 +63,10 @@ class BfsTree
     end
 end
 
-private class FastQueue(T)
-    def initialize (initial_capacity : Int = 0)
-        @queue = Array(T).new(initial_capacity: initial_capacity)
-        @queue_start = 0
-    end
-
-    def empty?
-        @queue_start == @queue.size
-    end
-
-    def push (x)
-        @queue << x
-        self
-    end
-
-    def shift
-        res = @queue[@queue_start]
-        @queue_start += 1
-        res
-    end
-end
-
 def self.build_bfs_tree (on graph, from source : Int32)
     tree = BfsTree.new(nvertices: graph.nvertices, from: source)
 
-    queue = FastQueue(Int32).new(initial_capacity: graph.nvertices)
+    queue = Deque(Int32).new(initial_capacity: graph.nvertices)
     queue.push(source)
     until queue.empty?
         v = queue.shift

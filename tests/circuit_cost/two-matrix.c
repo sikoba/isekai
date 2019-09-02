@@ -1,4 +1,4 @@
-enum { NINPUT = 13 };
+enum { NINPUT = 7 };
 
 #define SIZE NINPUT
 
