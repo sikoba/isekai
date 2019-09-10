@@ -87,7 +87,6 @@ class Parser
 
     @arguments = {} of LibLLVM::Any => DFGExpr
     @locals = {} of LibLLVM::Any => DFGExpr
-    @cached_undef_exprs = {} of LibLLVM::Any => DFGExpr
 
     # junction => {sink, is_loop}
     @preproc_data = {} of LibLLVM::BasicBlock => Tuple(LibLLVM::BasicBlock, Bool)
@@ -105,12 +104,6 @@ class Parser
 
     def initialize (input_file : String, @loop_sanity_limit : Int32)
         @llvm_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
-    end
-
-    private def make_undef_expr_of_type_cached (type, cache_token)
-        return @cached_undef_exprs.fetch(cache_token) do
-            @cached_undef_exprs[cache_token] = TypeUtils.make_undef_expr_of_type(type)
-        end
     end
 
     private def inspect_outsource_param (value : LibLLVM::Any, which_param : OutsourceParam) : Nil
@@ -239,9 +232,7 @@ class Parser
     private def get_phi_value (ins : LibLLVM::Instruction) : DFGExpr
         # Note no 'as_expr()' here, as it calls '@assumption.reduce' on the result, which we
         # don't want here.
-        return @locals.fetch(ins.to_any) do
-            make_undef_expr_of_type_cached(ins.type, cache_token: ins.to_any)
-        end
+        return @locals[ins.to_any]? || TypeUtils.make_undef_expr_of_type(ins.type)
     end
 
     private def produce_phi_copies (from : LibLLVM::BasicBlock, to : LibLLVM::BasicBlock) : Nil
@@ -295,8 +286,8 @@ class Parser
             case ins.opcode
 
             when .alloca?
-                expr = make_undef_expr_of_type_cached(ins.alloca_type, cache_token: ins.to_any)
-                @locals[ins.to_any] = StaticPointer.new(expr)
+                @locals[ins.to_any] ||= StaticPointer.new(
+                    TypeUtils.make_undef_expr_of_type(ins.alloca_type))
 
             when .store?
                 operands = ins.operands
