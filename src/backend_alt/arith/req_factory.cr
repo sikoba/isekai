@@ -368,7 +368,6 @@ struct RequestFactory
     def split_to_joined (bits : SplitRequest) : JoinedRequest
         const_summand = 0_u128
         wire_summand : Wire? = nil
-        wire_summand_width = 0
 
         bits.each_with_index do |bit, i|
             if bit.constant?
@@ -390,7 +389,6 @@ struct RequestFactory
             else
                 wire_summand = bit_wire
             end
-            wire_summand_width = i + 1
         end
 
         if wire_summand
