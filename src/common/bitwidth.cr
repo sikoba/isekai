@@ -44,8 +44,7 @@ struct BitWidth
     end
 
     def common! (other : BitWidth)
-        return other if undefined?
-        return self if other.undefined? || @width == other.@width
+        return self if @width == other.@width
         raise BitWidthsIncompatible.new
     end
 

@@ -7,6 +7,8 @@ require "../common/collapser"
 require "../common/bitwidth"
 
 module Isekai::CFrontend
+    private DEFAULT_BITWIDTH = BitWidth.new(32)
+
     # Class that parses and transforms C code into internal state
     class Parser
         @parsed : State?
@@ -177,7 +179,7 @@ module Isekai::CFrontend
                     # For every element in the input array, declare the Input/NIZKInput nodes
                     (0..(input_storage_ref).@type.sizeof-1).each do |idx|
                         sk = StorageKey.new(input_storage_ref.@storage, idx)
-                        input = dfg(Field, sk, BitWidth.new_for_undefined)
+                        input = Field.new(sk, DEFAULT_BITWIDTH)
                         input_list << input
                         symtab.assign(sk, input)
                     end
@@ -205,16 +207,30 @@ module Isekai::CFrontend
             end
         end
 
-        # Convinience function to create DFGExpr.
-        #
-        # Params:
-        #     dfg_name = name of the DFGExpr node
-        #     args = arguments to pass to dfg_name's constructor
-        #
-        # Returns:
-        #    instance of dfg_name instantiated with args
-        def dfg (dfg_name, *args)
-            return dfg_name.new(*args)
+        private def cast_to_same_bitwidth (left, right)
+            case left.@bitwidth <=> right.@bitwidth
+            when .< 0
+                left = ZeroExtend.new(left, right.@bitwidth)
+            when .> 0
+                right = ZeroExtend.new(right, left.@bitwidth)
+            end
+            return left, right
+        end
+
+        private def dfg_math (dfg_name, left, right)
+            left, right = cast_to_same_bitwidth(left, right)
+            return dfg_name.new(left, right)
+        end
+
+        private def dfg_math (dfg_name, expr)
+            return dfg_name.new(expr)
+        end
+
+        private def dfg_conditional (cond, valtrue, valfalse)
+            valtrue, valfalse = cast_to_same_bitwidth(valtrue, valfalse)
+            # TODO: we should probably truncate 'cond' to 1 bit here, but the primary back-end does
+            # not support 'Truncate' operation...
+            return Conditional.new(cond, valtrue, valfalse)
         end
 
         # Goes over the AST tree and creates the symbol table for the
@@ -248,7 +264,7 @@ module Isekai::CFrontend
                 raise "Input program must be parsed first."
             end
 
-            symtab.declare(PseudoSymbol.new("_unroll"), dfg(Undefined))
+            symtab.declare(PseudoSymbol.new("_unroll"), Undefined.new)
             return symtab
         end
 
@@ -344,14 +360,13 @@ module Isekai::CFrontend
                 state = create_storage(cursor.spelling,
                                        stored_type, initial_values, symtab)
                 storage_ref = state.@expr.as StorageRef
-                symbol_value = dfg(StorageRef, var_type, storage_ref.@storage,
-                                   storage_ref.@idx)
+                symbol_value = StorageRef.new(var_type, storage_ref.@storage, storage_ref.@idx)
                 symtab = state.@symtab
             else
                 if !initial_value.is_a? Nil
                     symbol_value = initial_value.as StorageRef
                 else
-                    symbol_value = dfg(StorageRef, stored_type, Null.new(), 0)
+                    symbol_value = StorageRef.new(stored_type, Null.new(), 0)
                 end
             end
 
@@ -440,7 +455,7 @@ module Isekai::CFrontend
             field = struct_type.get_field(member_ref.spelling)
 
             # Create the StorageRef DFG element
-            fieldstorage = dfg(StorageRef,
+            fieldstorage = StorageRef.new(
                                field.@type,
                                storage_ref.@storage,
                                storage_ref.@idx + struct_type.offsetof(member_ref.spelling))
@@ -465,11 +480,11 @@ module Isekai::CFrontend
                         end
                 else
                     (0..store_type.sizeof-1).each do |i|
-                        symtab.declare(StorageKey.new(storage, i), dfg(Constant, 0_i64, BitWidth.new_for_undefined))
+                        symtab.declare(StorageKey.new(storage, i), Constant.new(0_i64, DEFAULT_BITWIDTH))
                     end
                 end
 
-                return State.new(dfg(StorageRef, store_type, storage, 0), symtab)
+                return State.new(StorageRef.new(store_type, storage, 0), symtab)
             end
 
             # Converts from the type AST cursor to the IntType/UnsignedType
@@ -603,7 +618,7 @@ module Isekai::CFrontend
             # Resolves the expression and gets its value, if the
             # expression is a literal
             def decode_expression (literal : Int32, symtab) : State
-                return State.new(dfg(Constant, literal.to_i64, BitWidth.new_for_undefined), symtab)
+                return State.new(Constant.new(literal.to_i64, DEFAULT_BITWIDTH), symtab)
             end
 
             # Takes an expression and a symbol table, and recursively transforms
@@ -633,39 +648,39 @@ module Isekai::CFrontend
 
                     case expression.spelling
                     when "+"
-                        dfg_expr = dfg(Add, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(Add, left_state.expr, right_state.expr)
                     when "-"
-                        dfg_expr = dfg(Subtract, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(Subtract, left_state.expr, right_state.expr)
                     when "*"
-                        dfg_expr = dfg(Multiply, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(Multiply, left_state.expr, right_state.expr)
                     when "<"
-                        dfg_expr = dfg(CmpLT, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(CmpLT, left_state.expr, right_state.expr)
                     when "<="
-                        dfg_expr = dfg(CmpLEQ, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(CmpLEQ, left_state.expr, right_state.expr)
                     when "=="
-                        dfg_expr = dfg(CmpEQ, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(CmpEQ, left_state.expr, right_state.expr)
                     when "!="
-                        dfg_expr = dfg(CmpNEQ, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(CmpNEQ, left_state.expr, right_state.expr)
                     when ">"
-                        dfg_expr = dfg(CmpLT, right_state.expr, left_state.expr) 
+                        dfg_expr = dfg_math(CmpLT, right_state.expr, left_state.expr) 
                     when ">="
-                        dfg_expr = dfg(CmpLEQ, right_state.expr, left_state.expr) 
+                        dfg_expr = dfg_math(CmpLEQ, right_state.expr, left_state.expr) 
                     when "/"
-                        dfg_expr = dfg(Divide, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(Divide, left_state.expr, right_state.expr)
                     when "%"
-                        dfg_expr = dfg(Modulo, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(Modulo, left_state.expr, right_state.expr)
                     when "^"
-                        dfg_expr = dfg(Xor, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(Xor, left_state.expr, right_state.expr)
                     when "<<"
-                        dfg_expr = dfg(LeftShift, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(LeftShift, left_state.expr, right_state.expr)
                     when ">>"
-                        dfg_expr = dfg(RightShift, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(RightShift, left_state.expr, right_state.expr)
                     when "|"
-                        dfg_expr = dfg(BitOr, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(BitOr, left_state.expr, right_state.expr)
                     when "&"
-                        dfg_expr = dfg(BitAnd, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(BitAnd, left_state.expr, right_state.expr)
                     when "&&"
-                        dfg_expr = dfg(LogicalAnd, left_state.expr, right_state.expr)
+                        dfg_expr = dfg_math(LogicalAnd, left_state.expr, right_state.expr)
                     else
                         raise "I don't know this binary expression: #{expression}"
                     end
@@ -684,11 +699,11 @@ module Isekai::CFrontend
                     when "-"
                         Log.log.debug "Resolving negate"
                         state = decode_expression_value(child, symtab)
-                        return State.new(dfg(Negate, state.expr), state.symtab)
+                        return State.new(dfg_math(Negate, state.expr), state.symtab)
                     when "!"
                         Log.log.debug "Resolving logical not"
                         state = decode_expression_value(child, symtab)
-                        return State.new(dfg(LogicalNot, state.expr), state.symtab)
+                        return State.new(dfg_math(LogicalNot, state.expr), state.symtab)
                     when "&"
                         Log.log.debug "Decoding unary &"
                         sub_state = decode_ref(child, symtab)
@@ -701,7 +716,7 @@ module Isekai::CFrontend
                 when .integer_literal?
                     value = ClangUtils.getCursorValue(expression)
                     raise "Integer literal can't be resolved #{expression}" unless !value.is_a? Nil
-                    return State.new(dfg(Constant, value.to_i32.to_i64, BitWidth.new_for_undefined), symtab)
+                    return State.new(Constant.new(value.to_i32.to_i64, DEFAULT_BITWIDTH), symtab)
                     # This is a just a wrapper around real expression,
                     # in order to resolve it, we just unwrap it and do it recursively
                 when .first_expr?
@@ -881,13 +896,13 @@ module Isekai::CFrontend
 
                     case statement.spelling
                     when "+="
-                        expr = dfg(Add, left_state.@expr, right_state.@expr)
+                        expr = dfg_math(Add, left_state.@expr, right_state.@expr)
                     when "-="
-                        expr = dfg(Subtract, left_state.@expr, right_state.@expr)
+                        expr = dfg_math(Subtract, left_state.@expr, right_state.@expr)
                     when "*="
-                        expr = dfg(Multiply, left_state.@expr, right_state.@expr)
+                        expr = dfg_math(Multiply, left_state.@expr, right_state.@expr)
                     when "|="
-                        expr = dfg(Divide, left_state.@expr, right_state.@expr)
+                        expr = dfg_math(Divide, left_state.@expr, right_state.@expr)
                     else
                         raise "Unexpected assignment operator: #{statement}"
                     end
@@ -985,8 +1000,10 @@ module Isekai::CFrontend
 
                     # Wrap every identifier in the conditional expression
                     modified_idents.each do |id|
-                        expr = dfg(Conditional, cond_state.@expr,
-                                   then_symtab.lookup(id).as DFGExpr, else_symtab.lookup(id).as DFGExpr)
+                        expr = dfg_conditional(
+                            cond_state.@expr,
+                            then_symtab.lookup(id).as DFGExpr,
+                            else_symtab.lookup(id).as DFGExpr)
                         new_symtab.assign(id, expr)
                     end
                     return new_symtab
@@ -1113,10 +1130,10 @@ module Isekai::CFrontend
                     modified_idents.each do |id|
                         parent_scope = scope.@parent
                         raise "Unexpected scope without parent" if parent_scope.is_a? Nil
-                        applied_symtab.assign(id,
-                                dfg(Conditional, cond,
-                                    working_symtab.lookup(id).as DFGExpr,
-                                    parent_scope.lookup(id).as DFGExpr))
+                        applied_symtab.assign(id, dfg_conditional(
+                            cond,
+                            working_symtab.lookup(id).as DFGExpr,
+                            parent_scope.lookup(id).as DFGExpr))
                     end
                     working_symtab = applied_symtab
                 end
@@ -1139,8 +1156,8 @@ module Isekai::CFrontend
                 state = create_storage(node.spelling, store_type, nil, symtab)
                 symtab = state.@symtab
                 state_storage_ref = state.@expr.as StorageRef 
-                symbol_value = dfg(StorageRef, ptr_type, state_storage_ref.@storage,
-                                   state_storage_ref.@idx)
+                symbol_value = StorageRef.new(
+                    ptr_type, state_storage_ref.@storage, state_storage_ref.@idx)
                 return State.new(symbol_value, symtab)
             end
         end
