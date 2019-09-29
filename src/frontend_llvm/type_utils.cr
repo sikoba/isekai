@@ -20,6 +20,8 @@ def self.get_type_bitwidth (type) : BitWidth
     return get_type_bitwidth_unchecked(type)
 end
 
+# Makes an expression of type 'type', creating 'Structure' objects for struct and array types, and
+# invoking 'block' to make an expression of scalar type (integer or pointer).
 def self.make_expr_of_type (type, &block : LibLLVM::Type -> DFGExpr) : DFGExpr
     case type.kind
     when .integer_type_kind?, .pointer_type_kind?
@@ -40,6 +42,8 @@ def self.make_expr_of_type (type, &block : LibLLVM::Type -> DFGExpr) : DFGExpr
     end
 end
 
+# Makes an "undefined" expression of type 'type': initializes all integer values to zero, and
+# pointer values to 'UndefPointer' objects.
 def self.make_undef_expr_of_type (type) : DFGExpr
     return make_expr_of_type(type) do |scalar_type|
         case scalar_type.kind

@@ -369,7 +369,7 @@ class Add < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
-        return bitwidth.truncate(left.to_u64 + right.to_u64).to_i64
+        return bitwidth.truncate(left.to_u64! &+ right.to_u64!).to_i64!
     end
 
     def_simplify_left identity: 0
@@ -384,7 +384,7 @@ class Multiply < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
-        return bitwidth.truncate(left.to_u64 * right.to_u64).to_i64
+        return bitwidth.truncate(left.to_u64! &* right.to_u64!).to_i64!
     end
 
     def_simplify_left identity: 1, const: {match: 0, result: 0}
@@ -398,7 +398,7 @@ class Subtract < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
-        return bitwidth.truncate(left.to_u64 - right.to_u64).to_i64
+        return bitwidth.truncate(left.to_u64! &- right.to_u64!).to_i64!
     end
 
     def_simplify_left
@@ -418,7 +418,7 @@ class Divide < BinaryMath
             return 0_i64
         end
         # unsigned division; cannot overflow, so no truncate
-        return (left.to_u64 // right.to_u64).to_i64
+        return (left.to_u64! // right.to_u64!).to_i64!
     end
 
     # 0 / x = 0
@@ -440,7 +440,7 @@ class Modulo < BinaryMath
             return 0_i64
         end
         # unsigned modulo; cannot overflow, so no truncate
-        return (left.to_u64 % right.to_u64).to_i64
+        return (left.to_u64! % right.to_u64!).to_i64!
     end
 
     # 0 % x = 0
@@ -471,7 +471,9 @@ class LeftShift < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
-        return bitwidth.truncate(left.to_u64 << right.to_u64).to_i64
+        shift = right.to_u64!
+        return 0_i64 if shift >= 64
+        return bitwidth.truncate(left.to_u64! << shift).to_i64!
     end
 
     # 0 << x = 0
@@ -487,8 +489,10 @@ class RightShift < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
+        shift = right.to_u64!
+        return 0_i64 if shift >= 64
         # cannot overflow, so no truncate
-        return (left.to_u64 >> right.to_u64).to_i64
+        return (left.to_u64! >> shift).to_i64!
     end
 
     # 0 >> x = 0
@@ -504,9 +508,11 @@ class SignedRightShift < BinaryMath
     end
 
     def self.static_eval (left, right, bitwidth)
-        signed_left = bitwidth.sign_extend_to(left.to_u64, BitWidth.new(64))
-        result = signed_left.to_i64 >> right.to_i64
-        bitwidth.truncate(result.to_u64).to_i64
+        shift = right.to_i64!
+        return 0_i64 unless 0 <= shift < 64
+        signed_left = bitwidth.sign_extend_to(left.to_u64!, BitWidth.new(64))
+        result = signed_left.to_i64! >> shift
+        bitwidth.truncate(result.to_u64!).to_i64!
     end
 
     # 0 >> x = 0
@@ -567,7 +573,7 @@ class CmpLT < BinaryPredicate
     end
 
     def self.static_eval (left, right, bitwidth)
-        (left.to_u64 < right.to_u64) ? 1_i64 : 0_i64
+        (left.to_u64! < right.to_u64!) ? 1_i64 : 0_i64
     end
 
     def_simplify_left
@@ -581,9 +587,9 @@ class SignedCmpLT < BinaryPredicate
     end
 
     def self.static_eval (left, right, bitwidth)
-        signed_left = bitwidth.sign_extend_to(left.to_u64, BitWidth.new(64))
-        signed_right = bitwidth.sign_extend_to(right.to_u64, BitWidth.new(64))
-        return signed_left.to_i64 < signed_right.to_i64 ? 1_i64 : 0_i64
+        signed_left = bitwidth.sign_extend_to(left.to_u64!, BitWidth.new(64))
+        signed_right = bitwidth.sign_extend_to(right.to_u64!, BitWidth.new(64))
+        return signed_left.to_i64! < signed_right.to_i64! ? 1_i64 : 0_i64
     end
 
     def_simplify_left
@@ -605,7 +611,7 @@ class CmpLEQ < BinaryPredicate
     end
 
     def self.static_eval (left, right, bitwidth)
-        (left.to_u64 <= right.to_u64) ? 1_i64 : 0_i64
+        (left.to_u64! <= right.to_u64!) ? 1_i64 : 0_i64
     end
 
     def_simplify_left
@@ -619,9 +625,9 @@ class SignedCmpLEQ < BinaryPredicate
     end
 
     def self.static_eval (left, right, bitwidth)
-        signed_left = bitwidth.sign_extend_to(left.to_u64, BitWidth.new(64))
-        signed_right = bitwidth.sign_extend_to(right.to_u64, BitWidth.new(64))
-        return signed_left.to_i64 <= signed_right.to_i64 ? 1_i64 : 0_i64
+        signed_left = bitwidth.sign_extend_to(left.to_u64!, BitWidth.new(64))
+        signed_right = bitwidth.sign_extend_to(right.to_u64!, BitWidth.new(64))
+        return signed_left.to_i64! <= signed_right.to_i64! ? 1_i64 : 0_i64
     end
 
     def_simplify_left
@@ -809,7 +815,7 @@ class SignExtend < BitWidthCast
     end
 
     def self.static_eval (value, old_bitwidth, new_bitwidth)
-        old_bitwidth.sign_extend_to(value.to_u64, new_bitwidth).to_i64
+        old_bitwidth.sign_extend_to(value.to_u64!, new_bitwidth).to_i64!
     end
 end
 
@@ -820,7 +826,7 @@ class Truncate < BitWidthCast
     end
 
     def self.static_eval (value, old_bitwidth, new_bitwidth)
-        return new_bitwidth.truncate(value.to_u64).to_i64
+        return new_bitwidth.truncate(value.to_u64!).to_i64!
     end
 end
 

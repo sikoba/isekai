@@ -22,9 +22,7 @@ struct RequestFactory
         def initialize (@a : UInt128, @x : Wire, @b : UInt128, @width : Int32)
         end
 
-        def width
-            @width
-        end
+        getter width
 
         @[AlwaysInline]
         def self.new_for_wire (w : Wire, width : Int32)
@@ -99,7 +97,7 @@ struct RequestFactory
         return JoinedRequest.new(
             a: j.@a,
             x: j.@x,
-            b: truncate(c + j.@b, j.@width),
+            b: truncate(c &+ j.@b, j.@width),
             width: j.@width)
     end
 
@@ -108,9 +106,9 @@ struct RequestFactory
 
         if j.@x == k.@x
             return JoinedRequest.new(
-                a: truncate(j.@a + k.@a, width),
+                a: truncate(j.@a &+ k.@a, width),
                 x: j.@x,
-                b: truncate(j.@b + k.@b, width),
+                b: truncate(j.@b &+ k.@b, width),
                 width: width)
         end
 
@@ -122,15 +120,15 @@ struct RequestFactory
         return JoinedRequest.new(
             a: 1,
             x: @board.add(j_ax, k_ax, policy: bake_overflow_policy(width)),
-            b: truncate(j.@b + k.@b, width),
+            b: truncate(j.@b &+ k.@b, width),
             width: width)
     end
 
     def joined_mul_const (c : UInt128, j : JoinedRequest)
         return JoinedRequest.new(
-            a: truncate(c * j.@a, j.@width),
+            a: truncate(c &* j.@a, j.@width),
             x: j.@x,
-            b: truncate(c * j.@b, j.@width),
+            b: truncate(c &* j.@b, j.@width),
             width: j.@width)
     end
 
@@ -205,7 +203,7 @@ struct RequestFactory
     end
 
     private def cond_wcc (c : Wire, t : UInt128, f : UInt128, width : Int32) : JoinedRequest
-        diff = (t - f).to_i128
+        diff = t.to_i128 - f.to_i128
         return JoinedRequest.new_for_const(f, width: width) if diff == 0
 
         c = @board.truncate(c, to: 1)

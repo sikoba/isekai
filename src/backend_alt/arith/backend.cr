@@ -158,7 +158,7 @@ struct Backend
 
         when Constant
             return cache_joined! expr, @req_factory.bake_const(
-                expr.@value.to_u64.to_u128,
+                expr.@value.to_u64!.to_u128,
                 width: expr.@bitwidth.@width)
 
         when Conditional
@@ -222,6 +222,8 @@ struct Backend
             shift = right.as_constant
             raise "Not yet implemented: unsigned right shift with non-const right operand" unless shift
 
+            return cache_joined!(expr, @req_factory.bake_const(0, width: left.size)) if shift >= 64
+
             return cache_split!(expr, SplitRequest.new(left.size) do |i|
                 left[i + shift]? || @req_factory.bake_const(0, width: 1)
             end)
@@ -231,6 +233,8 @@ struct Backend
             right = get_joined(expr.@right)
             shift = right.as_constant
             raise "Not yet implemented: signed right shift with non-const right operand" unless shift
+
+            return cache_joined!(expr, @req_factory.bake_const(0, width: left.size)) if shift >= 64
 
             return cache_split!(expr, SplitRequest.new(left.size) do |i|
                 left[i + shift]? || left.last

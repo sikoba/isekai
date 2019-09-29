@@ -54,6 +54,10 @@ private struct DynamicRange
         @width == UNDEFINED
     end
 
+    private def max_value_or_u128max : UInt128
+        return @width >= 128 ? UInt128::MAX : ((1_u128 << @width) - 1)
+    end
+
     def + (other : DynamicRange)
         return DynamicRange.new_for_undefined if undefined? || other.undefined?
         return DynamicRange.new(DynamicRange.max_bits_in_sum(@width, other.@width))
@@ -64,8 +68,7 @@ private struct DynamicRange
         c_nbits = BitManip.nbits(c)
         result = DynamicRange.max_bits_in_sum(@width, c_nbits)
         if result <= 128
-            max_value = (1_u128 << @width) - 1
-            result = BitManip.nbits(c + max_value)
+            result = BitManip.nbits(c + max_value_or_u128max)
         end
         return DynamicRange.new(result)
     end
@@ -80,8 +83,7 @@ private struct DynamicRange
         c_nbits = BitManip.nbits(c)
         result = DynamicRange.max_bits_in_product(@width, c_nbits)
         if result <= 128
-            max_value = (1_u128 << @width) - 1
-            result = BitManip.nbits(c * max_value)
+            result = BitManip.nbits(c * max_value_or_u128max)
         end
         return DynamicRange.new(result)
     end
