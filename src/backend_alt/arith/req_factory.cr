@@ -220,7 +220,7 @@ struct RequestFactory
         end
 
         result = @board.const_add(f, left_summand, policy: OverflowPolicy.new_set_undef_range)
-        @board.assume_width!(result, BitManip.max(BitManip.nbits(t), BitManip.nbits(f)))
+        @board.assume_width!(result, Math.max(BitManip.nbits(t), BitManip.nbits(f)))
         return JoinedRequest.new_for_wire(result, width: width)
     end
 
@@ -266,7 +266,7 @@ struct RequestFactory
             left_summand,
             f_wire,
             policy: OverflowPolicy.new_set_undef_range)
-        @board.assume_width!(result, BitManip.max(t_max_nbits, f_max_nbits))
+        @board.assume_width!(result, Math.max(t_max_nbits, f_max_nbits))
         return JoinedRequest.new_for_wire(result, width: width)
     end
 

@@ -11,7 +11,7 @@ private struct DynamicRange
     def self.max_bits_in_sum (n : Int32, m : Int32) : Int32
         return n if m == 0
         return m if n == 0
-        return BitManip.max(n, m) + 1
+        return Math.max(n, m) + 1
     end
 
     @[AlwaysInline]
