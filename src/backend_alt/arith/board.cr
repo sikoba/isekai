@@ -425,7 +425,7 @@ struct Board
         arg, new_range = cast_to_safe_cw(c, w, policy) { |a, b| a * b }
 
         result = allocate_wire! new_range
-        @outbuf.write_const_mul(c, w, output: result)
+        @outbuf.write_const_mul(c, arg, output: result)
         result
     end
 
