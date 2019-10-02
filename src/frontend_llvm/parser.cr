@@ -203,7 +203,7 @@ class Parser
             return Conditional.bake(
                 base.@cond,
                 get_field_ptr(base: base.@valtrue, field: field),
-                get_field_ptr(base: base.@valtrue, field: field))
+                get_field_ptr(base: base.@valfalse, field: field))
         else
             raise "Cannot get_field_ptr of #{base}"
         end
