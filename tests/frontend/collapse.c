@@ -3,6 +3,7 @@ struct Output { int x; };
 
 void outsource(struct Input *input, struct Output *output)
 {
+    (void) input;
     int a = 0;
     a = a + 3;
     a = a + 4;

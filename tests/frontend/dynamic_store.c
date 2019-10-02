@@ -32,12 +32,10 @@ struct Output {
     int a[5];
 };
 
-#define NELEMS(arr) (sizeof(arr) / sizeof((arr)[0]))
-
 void
 outsource(struct Input *input, struct Output *output)
 {
-    for (int i = 0; i < NELEMS(output->a); ++i) {
+    for (int i = 0; i < 5; ++i) {
         output->a[i] = i;
     }
     output->a[input->i] = 999;
