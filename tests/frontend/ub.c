@@ -22,5 +22,6 @@ outsource(struct Input *input, struct Output *output)
         p = &input->a;
     }
     output->x = *p;
+
 #endif
 }
