@@ -154,6 +154,8 @@ struct Backend
             shift = request_as_constant right
             raise "Not implemented: unsigned right shift with non-const right operand" unless shift
 
+            return cache!(expr, const_to_request(0, width: left.size)) if shift >= 64
+
             return cache!(expr, Request.new(left.size) do |i|
                 left[i + shift]? || Bit.new_for_const(false)
             end)
@@ -163,6 +165,8 @@ struct Backend
             right = get_cached(expr.@right)
             shift = request_as_constant right
             raise "Not implemented: signed right shift with non-const right operand" unless shift
+
+            return cache!(expr, const_to_request(0, width: left.size)) if shift >= 64
 
             return cache!(expr, Request.new(left.size) do |i|
                 left[i + shift]? || left.last

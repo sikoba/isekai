@@ -188,7 +188,7 @@ end
 module PointerFactory
     def self.bake_field_pointer (base : Structure, field : DFGExpr) : AbstractPointer
         if field.is_a? Constant
-            return StaticFieldPointer.new(base: base, field: field.@value.to_i32)
+            return StaticFieldPointer.new(base: base, field: field.@value.to_i32!)
         else
             return DynamicFieldPointer.new(base: base, field: field)
         end

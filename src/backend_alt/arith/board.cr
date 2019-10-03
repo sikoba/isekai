@@ -309,7 +309,7 @@ struct Board
     private def yank (w : Wire, width : Int32) : Wire
         bits = split(w)
         result = lowbit(bits[0])
-        n = BitManip.min(width, bits.size)
+        n = Math.min(width, bits.size)
         (1...n).each do |i|
             w = lowbit(bits[i])
             factor = 1_u128 << i
@@ -425,7 +425,7 @@ struct Board
         arg, new_range = cast_to_safe_cw(c, w, policy) { |a, b| a * b }
 
         result = allocate_wire! new_range
-        @outbuf.write_const_mul(c, w, output: result)
+        @outbuf.write_const_mul(c, arg, output: result)
         result
     end
 

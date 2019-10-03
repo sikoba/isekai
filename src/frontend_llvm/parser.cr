@@ -15,7 +15,7 @@ module Isekai::LLVMFrontend
 # appropriate bitwidth.
 def self.make_constant_unchecked (value) : Constant
     return Constant.new(
-        value.zero_extended_int_value.to_i64,
+        value.zero_extended_int_value.to_i64!,
         bitwidth: TypeUtils.get_type_bitwidth_unchecked(value.type))
 end
 
@@ -203,7 +203,7 @@ class Parser
             return Conditional.bake(
                 base.@cond,
                 get_field_ptr(base: base.@valtrue, field: field),
-                get_field_ptr(base: base.@valtrue, field: field))
+                get_field_ptr(base: base.@valfalse, field: field))
         else
             raise "Cannot get_field_ptr of #{base}"
         end
@@ -252,9 +252,7 @@ class Parser
         operands = ins.operands
         arg = as_expr(operands[0])
         raise "_unroll_hint() argument is not constant" unless arg.is_a? Constant
-        value = arg.@value
-        raise "_unroll_hint() argument is out of bounds" unless 0 <= value < Int32::MAX
-        @loop_sanity_limit = value.to_i32
+        @loop_sanity_limit = arg.@value.to_i32
     end
 
     @[AlwaysInline]

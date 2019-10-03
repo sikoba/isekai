@@ -42,7 +42,7 @@ private def self.each_logical_input (
             value = values[i - 1]? || 0
             bitwidth = nizk_inputs[i - 1 - n_inputs]
         end
-        unsigned_value = bitwidth.truncate(value.to_u64)
+        unsigned_value = bitwidth.truncate(value.to_u64!)
         yield unsigned_value, bitwidth
     end
 end

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <system_error>
+#include <algorithm>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -9,6 +10,7 @@
 class CFile
 {
     FILE *file_;
+
 public:
     CFile(const char *path, const char *mode)
     {
@@ -29,8 +31,7 @@ public:
 
     CFile & operator =(CFile &&other)
     {
-        file_ = other.file_;
-        other.file_ = nullptr;
+        std::swap(file_, other.file_);
         return *this;
     }
 
@@ -63,9 +64,8 @@ public:
 
     CFileLine& operator =(CFileLine &&other)
     {
-        buf_ = other.buf_;
-        nbuf_ = other.nbuf_;
-        other.buf_ = nullptr;
+        std::swap(buf_, other.buf_);
+        std::swap(nbuf_, other.nbuf_);
         return *this;
     }
 

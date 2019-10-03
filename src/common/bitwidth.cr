@@ -11,7 +11,7 @@ struct BitWidth
 
     @[AlwaysInline]
     def self.all_ones (n)
-        (1_u64 << n) - 1
+        n == 64 ? UInt64::MAX : ((1_u64 << n) - 1)
     end
 
     @[AlwaysInline]

@@ -2,7 +2,7 @@ module Isekai::LLVMFrontend::Containers
 
 struct Multiset(T)
     def initialize ()
-        @hash = Hash(T, Int32).new(default_value: 0)
+        @hash = Hash(T, UInt32).new(default_value: 0)
     end
 
     def includes? (x)
