@@ -1,0 +1,23 @@
+[package]
+name = "bulletproof"
+version = "0.1.0"
+authors = ["guipublic <47281315+guipublic@users.noreply.github.com>"]
+description = "Wrapping rust interface for bulletproof"
+
+[dependencies]
+curve25519-dalek = "1.1.3"
+merlin = "1.0.3"
+rand = "0.6.5"
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+serde_derive = "*"
+num-bigint = "0.2"
+
+[dependencies.bulletproofs]
+#path = "../bulletproofs"
+git = "https://github.com/dalek-cryptography/bulletproofs/"
+branch = "develop"
+features = ["yoloproofs"]
+
+[lib]
+crate-type = ["cdylib"]
