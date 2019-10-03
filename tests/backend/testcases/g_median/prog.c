@@ -36,5 +36,5 @@ void outsource(struct Input *input, struct Output *output)
 
 	sort(input->a,n);
 		
-    output->x = input->a[5];
+    output->x = input->a[n/2];
 }

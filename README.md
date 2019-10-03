@@ -13,6 +13,11 @@ To find out more, please consult the **[isekai Technical documentation](https://
 
 Isekai is a tool for zero-knowledge applications. It currently parses a C program and outputs the arithmetic and/or boolean circuit representing the expression equivalent to the input program. Support for more languages will be added in the future. Isekai uses libclang to parse the C program, so most of the preprocessor (including the includes) is available. Then isekai uses libsnark to produce a rank-1 constraints system from the arithmetic representation. Isekai can then proove and verify the program execution using libsnark. Isekai is written using crystal programming language allowing for a strong type safety and it is compiled to a native executable, ensuring maximum efficiency in parsing.
 
+# Major Update - October 2019
+
+isekai now supports LLVM bitcode! This means in theory that you can compile any language to work with isekai as long as you have an LLVM frontend for it. In practise we have successfully tested C and C++ through LLVM. With the support of LLVM comes many improvements; pointers, arrays, function call and many other C features are supported, and of course, also C++.
+Another feature we are proud to deliver is the support of Bulletproof zero-knowledge scheme. One major advantage of this scheme is that proofs do not need a trusted setup. This does not come for free unfortunately as it has impact on performances. Nevertheless, with isekai you can now easily compare with zk-snarks by simply changing the scheme!
+We believe isekai is the first project that can handle multiple languages and multiple zero-knowledge proof systems.
 
 # Building the project
 
@@ -97,7 +102,7 @@ void outsource(struct NzikInput * nzik, struct Output *output);
 Input and Output are public parameters and NzikInput are the private parameters (zero-knowledge). Inputs and NzikInputs can be provided in an additional file, by putting each value one per line. This input file must have the same name as the C program file, with an additional ‘.in’ extension. For instance, if the function is implemented in my_C_prog.c, the inputs must be provided in my_C_prog.c.in
 
 In order to generate an arithmetic representation of a C program, use the following command:
-
+N.B These command are deprecated, see LLVM section below.
 ```
 ./isekai --arith=output_file.arith my_C_prog.c
 ```
@@ -115,7 +120,7 @@ Isekai automatically uses the inputs provided in my_C_prog.c.in if it exists. If
 To generate (and verify) a proof with libsnark:
 
 ```
-./isekai --snark=my_snark output_file.j1
+./isekai --prove=my_snark output_file.j1
 ```
 
 If the verification pass, this command will generate json files of the proof (my_snark.p) and trusted setup (my_snark.s). Of course in real life, you should not generate a proof and the trusted setup at the same time!
@@ -127,3 +132,24 @@ A verifier can verify the proof with the following command:
 ```
 
 A verifier should not know the private inputs (NzikInput) so you should remove the ‘witnesses’ part from the input file before giving it to the verifier.
+
+## LLVM
+In order to use LLVM with isekai, you simply provide the LLVM bitcode file instead of the C source code. Please note that LLVM is now the recommended way to use with isekai. The C frontend of isekai will not be maintained.
+For instance, use the following commands to use LLVM frontend with C source code:
+```
+clang -DISEKAI_C_PARSER=0 -O0 -c -emit-llvm my_C_prog.c
+./isekai --r1cs=output_file.j1 my_C_prog.bc
+```
+The inputs should have the .in extension as before. In this example it means you should have also the file my_C_prog.c.in next to my_C_prog.bc
+
+## Bulletproof
+
+In order to use Bulletproof instead of libsnark, you need to specify the dalek scheme;
+```
+./isekai --scheme=dalek --r1cs=output_file.j1 my_C_prog.c
+./isekai --scheme=dalek --prove=my_proof output_file.j1
+./isekai --scheme=dalek --verif=my_proof output_file.j1
+```
+As you can see, the verification requires (for now) the .j1 file (and also the public inputs), contrary to libsnark.
+If the scheme option is not set, it will use libsnark by default. To explicitely use libsnark, you can use the scheme snark. (--scheme=snark)
+Please note that although very similar, the r1cs generated for libsnark and bulletproof are not compatible.
