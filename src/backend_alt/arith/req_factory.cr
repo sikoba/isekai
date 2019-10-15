@@ -292,7 +292,7 @@ struct RequestFactory
             return JoinedRequest.new_for_const(j.@b == 0 ? 0_u128 : 1_u128, width: 1)
         else
             j_wire = joined_to_wire! j
-            result = @board.zerop(j_wire, j.@width)
+            result = @board.zerop(j_wire, policy: TruncatePolicy.new_to_width(j.@width))
             return JoinedRequest.new_for_wire(result, width: 1)
         end
     end
