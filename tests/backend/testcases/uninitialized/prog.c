@@ -6,8 +6,7 @@ struct Output {
     unsigned x;
     // This field is left uninitialized; the backend generates zero for such a
     // field, and the boilerplate generator initializes the output structure
-    // with a {0} initializer, meaning that all fields will be initialized to
-    // zero.
+    // with zero values. That's what we test here.
     unsigned y;
 };
 
