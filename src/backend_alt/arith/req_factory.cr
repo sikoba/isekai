@@ -1,6 +1,5 @@
 require "./board"
 require "./dynamic_range"
-require "./bit_manip"
 
 @[AlwaysInline]
 private def truncate (x : UInt128, width : Int32) : UInt128

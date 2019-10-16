@@ -1,5 +1,4 @@
 require "../../common/bitwidth"
-require "./bit_manip"
 require "./dynamic_range"
 
 module Isekai::AltBackend::Arith
