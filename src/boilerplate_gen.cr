@@ -1,135 +1,7 @@
 require "clang"
 
-class ScalarField
-    def initialize (@name : String)
-    end
-
-    getter name
-end
-
-class ArrayField
-    def initialize (@name : String, @nelems : Int32)
-    end
-
-    getter name, nelems
-end
-
-alias Field = ScalarField | ArrayField
-
-class StructDecl
-    @name : String
-    @fields = [] of Field
-
-    getter name, fields
-
-    def initialize (@name : String)
-    end
-
-    def add_field (field : Field)
-        @fields << field
-        self
-    end
-
-    def to_s (io)
-        io << "struct " << @name
-        self
-    end
-end
-
-class Program
-    @struct_decls = [] of StructDecl
-
-    def initialize ()
-    end
-
-    def add_struct_decl (decl : StructDecl)
-        @struct_decls << decl
-        self
-    end
-
-    def add_field_to_last_struct (field : Field)
-        @struct_decls.last.add_field(field)
-        self
-    end
-
-    def find_struct_by_name (name : String) : StructDecl?
-        @struct_decls.each do |s|
-            return s if s.name == name
-        end
-    end
-end
-
-class CodeGen
-    private class Variable
-        def initialize (@name : String, @type : StructDecl | String)
-        end
-
-        def to_s (io)
-            io << @name
-            self
-        end
-
-        getter name, type
-    end
-
-    @var_counter = 0
-
-    private def gen_var_name! : String
-        "V#{@var_counter += 1}"
-    end
-
-    def initialize ()
-    end
-
-    def create_var (type, initializer = nil) : Variable
-        name = gen_var_name!
-        if initializer
-            puts "#{type} #{name} = #{initializer};"
-        else
-            puts "#{type} #{name};"
-        end
-        Variable.new(name: name, type: type)
-    end
-
-    def traverse_var (v : Variable)
-        type = v.type
-        raise "Cannot traverse scalar variable" unless type.is_a? StructDecl
-        type.fields.each do |field|
-            case field
-            when ScalarField
-                yield "#{v}.#{field.name}"
-            when ArrayField
-                i_name = gen_var_name!
-                puts "for (int #{i_name} = 0; #{i_name} < #{field.nelems}; ++#{i_name}) {"
-                yield "#{v}.#{field.name}[#{i_name}]"
-                puts "}"
-            else
-                raise "unreachable"
-            end
-        end
-    end
-
-    def read_input (into expr)
-        puts "#{expr} = test_read();"
-        self
-    end
-
-    def write_output (expr)
-        puts "test_write(#{expr});"
-        self
-    end
-
-    def reference (expr) : String
-        "&#{expr}"
-    end
-
-    def invoke_func (name, args)
-        puts "#{name}(#{args.join ", "});"
-        self
-    end
-
-    def create_program
-        puts <<-END
+def create_program (&block)
+    puts <<-END
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -168,16 +40,49 @@ static void test_write_impl(uint64_t v, int nbits)
 int main()
 {
 END
-        yield
-        puts <<-END
-    return 0; // tcc miscompiles the program without this
+    yield
+    puts <<-END
+    return 0;
 }
 END
-        self
+end
+
+def visit_fields (type : Clang::Type, &block : Clang::Cursor -> LibC::CXVisitorResult)
+    LibC.clang_Type_visitFields(
+        type,
+        ->(cursor, data) {
+            proc = Box(typeof(block)).unbox(data)
+            proc.call(Clang::Cursor.new(cursor))
+        },
+        Box.box(block))
+end
+
+def traverse_var (type : Clang::Type, name : String, &block : String ->)
+    case type.kind
+    when .constant_array?
+        i_name = "i#{name.size}"
+        puts "for (int #{i_name} = 0; #{i_name} < #{type.array_size}; ++#{i_name}) {"
+        traverse_var(type.element_type, "#{name}[#{i_name}]", &block)
+        puts "}"
+    when .record?, .elaborated?
+        visit_fields(type) do |cursor|
+            traverse_var(cursor.type, "#{name}.#{cursor.spelling}", &block)
+            LibC::CXVisitorResult::Continue
+        end
+    else
+        yield name
     end
 end
 
-def main
+class Program
+    def initialize (
+        @input_struct : Clang::Cursor,
+        @nizk_input_struct : Clang::Cursor?,
+        @output_struct : Clang::Cursor)
+    end
+end
+
+def parse_program_from_argv : Program
     options = Clang::TranslationUnit.default_options
     options &= ~Clang::TranslationUnit::Options::DetailedPreprocessingRecord
     options |= Clang::TranslationUnit::Options::SkipFunctionBodies
@@ -191,59 +96,53 @@ def main
     files = [Clang::UnsavedFile.new(file_name, File.read(file_name))]
     tu = Clang::TranslationUnit.from_source(index, files, args, options)
 
-    program = Program.new
+    input_struct : Clang::Cursor? = nil
+    nizk_input_struct : Clang::Cursor? = nil
+    output_struct : Clang::Cursor? = nil
+
     tu.cursor.visit_children do |cursor|
-        case cursor.kind
-        when .struct_decl?
-            # Actually, libclang has "clang_Type_visitFields", but the Crystal wrapper does not
-            # expose it. Oh well.
-            program.add_struct_decl(StructDecl.new(name: cursor.spelling))
-            Clang::ChildVisitResult::Recurse
-        when .class_decl?, .union_decl?
-            Clang::ChildVisitResult::Continue
-        when .field_decl?
-            name, type = cursor.spelling, cursor.type
-            if type.kind.constant_array?
-                field = ArrayField.new(name: name, nelems: type.array_size.to_i32)
-            else
-                field = ScalarField.new(name: name)
+        if cursor.kind.struct_decl?
+            case cursor.spelling
+            when "Input"
+                input_struct = cursor
+            when "NizkInput", "NzikInput"
+                nizk_input_struct = cursor
+            when "Output"
+                output_struct = cursor
             end
-            program.add_field_to_last_struct(field)
-            Clang::ChildVisitResult::Continue
-        else
-            Clang::ChildVisitResult::Continue
         end
+        Clang::ChildVisitResult::Continue
     end
 
-    input_struct = program.find_struct_by_name "Input"
-    raise "Cannot find the 'Input' struct" unless input_struct
+    raise "Cannot find 'Input' struct" unless input_struct
+    raise "Cannot find 'Output' struct" unless output_struct
 
-    output_struct = program.find_struct_by_name "Output"
-    raise "Cannot find the 'Output' struct" unless output_struct
+    Program.new(
+        input_struct: input_struct.not_nil!,
+        nizk_input_struct: nizk_input_struct,
+        output_struct: output_struct.not_nil!)
+end
 
-    nizk_input_struct =
-        program.find_struct_by_name("NzikInput") ||
-        program.find_struct_by_name("NizkInput")
+def main
+    prog = parse_program_from_argv
+    create_program do
+        puts "struct #{prog.@input_struct.spelling} input;"
+        puts "static struct #{prog.@output_struct.spelling} output;"
 
-    code_gen = CodeGen.new
-    code_gen.create_program do
-        in_var = code_gen.create_var(type: input_struct)
-        out_var = code_gen.create_var(type: output_struct, initializer: "{0}")
+        traverse_var(prog.@input_struct.type, "input") { |e| puts "#{e} = test_read();" }
 
-        code_gen.traverse_var(in_var) { |e| code_gen.read_input into: e }
+        if (nizk_input_struct = prog.@nizk_input_struct)
+            puts "struct #{nizk_input_struct.spelling} nizk_input;"
+            # read one-input
+            puts "(void) test_read();"
+            traverse_var(nizk_input_struct.type, "nizk_input") { |e| puts "#{e} = test_read();" }
 
-        if nizk_input_struct
-            nizk_var = code_gen.create_var(type: nizk_input_struct)
-            # read the one-input
-            code_gen.read_input(into: code_gen.create_var(type: "int"))
-            code_gen.traverse_var(nizk_var) { |e| code_gen.read_input into: e }
-            outsource_args = [in_var, nizk_var, out_var]
+            puts "outsource(&input, &nizk_input, &output);"
         else
-            outsource_args = [in_var, out_var]
+            puts "outsource(&input, &output);"
         end
-        code_gen.invoke_func("outsource", outsource_args.map { |e| code_gen.reference e })
 
-        code_gen.traverse_var(out_var) { |e| code_gen.write_output e }
+        traverse_var(prog.@output_struct.type, "output") { |e| puts "test_write(#{e});" }
     end
 end
 

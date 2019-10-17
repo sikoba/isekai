@@ -10,7 +10,9 @@ struct Output {
     unsigned check_mul_u;
     unsigned check_mul_s;
     unsigned check_div_u;
+    unsigned check_div_s;
     unsigned check_mod_u;
+    unsigned check_mod_s;
     int check_rsh_s;
     unsigned check_eq;
     unsigned check_ne;
@@ -38,7 +40,9 @@ void outsource(struct Input *input, struct Output *output)
     STORE(unsigned, output->check_mul_s, 2147483648u, *,  4294967295u);
 
     STORE(unsigned, output->check_div_u, 1440u,       /,  7u);
+    STORE(int,      output->check_div_s, 1440,        /,  -7);
     STORE(unsigned, output->check_mod_u, 1440u,       %,  7u);
+    STORE(int,      output->check_mod_s, 1440,        %,  -7);
 
     STORE(unsigned, output->check_eq,    2,           ==, 2);
     STORE(unsigned, output->check_ne,    2,           !=, 2);

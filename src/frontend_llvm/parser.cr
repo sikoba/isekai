@@ -52,7 +52,11 @@ def self.make_input_array (s : Structure?) : Array(BitWidth)
 end
 
 def self.make_output_array (s : Structure?) : Array(DFGExpr)
-    return s ? s.flattened : [] of DFGExpr
+    result = s ? s.flattened : [] of DFGExpr
+    if result.any? { |expr| expr.is_a? AbstractPointer }
+        raise "Output structure contains a pointer"
+    end
+    result
 end
 
 class Parser
@@ -315,12 +319,10 @@ class Parser
             when .a_shr? then set_binary(ins, SignedRightShift)
             when .l_shr? then set_binary(ins, RightShift)
 
-            # TODO: is 'Divide' signed or unsigned?
-            when .s_div? then set_binary(ins, Divide)
+            when .s_div? then set_binary(ins, SignedDivide)
             when .u_div? then set_binary(ins, Divide)
 
-            # TODO: is 'Modulo' signed or unsigned?
-            when .s_rem? then set_binary(ins, Modulo)
+            when .s_rem? then set_binary(ins, SignedModulo)
             when .u_rem? then set_binary(ins, Modulo)
 
             when .i_cmp?

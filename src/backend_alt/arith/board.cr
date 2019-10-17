@@ -1,5 +1,4 @@
 require "../../common/bitwidth"
-require "./bit_manip"
 require "./dynamic_range"
 
 module Isekai::AltBackend::Arith
@@ -302,16 +301,12 @@ struct Board
         return result
     end
 
-    private def lowbit (w : Wire) : Wire
-        split(w)[0]
-    end
-
     private def yank (w : Wire, width : Int32) : Wire
         bits = split(w)
-        result = lowbit(bits[0])
+        result = bits[0]
         n = Math.min(width, bits.size)
         (1...n).each do |i|
-            w = lowbit(bits[i])
+            w = bits[i]
             factor = 1_u128 << i
             dyn_range = DynamicRange.new_for_width(i + 1)
 
@@ -353,69 +348,70 @@ struct Board
         case
         when policy.set_undef_range?
             return w, x, DynamicRange.new_for_undefined
+
         when (width = policy.cannot_overflow_width)
             arg1 = truncate(w, to: width)
             arg2 = truncate(x, to: width)
             new_range = yield @dynamic_ranges[arg1.@index],  @dynamic_ranges[arg2.@index]
             max_range = DynamicRange.new_for_width width
             return arg1, arg2, (new_range < max_range ? new_range : max_range)
+
         when (width = policy.wrap_around_width)
-            # ok
+            w_range = @dynamic_ranges[w.@index]
+            x_range = @dynamic_ranges[x.@index]
+            if w_range < x_range
+                w, x = x, w
+                w_range, x_range = x_range, w_range
+            end
+            # now, w_range >= x_range
+
+            new_range = yield w_range, x_range
+
+            unless dangerous?(new_range)
+                arg1, arg2 = w, x
+            else
+                arg1 = yank(w, width)
+                new_range = yield @dynamic_ranges[arg1.@index], x_range
+                unless dangerous?(new_range)
+                    arg2 = x
+                else
+                    arg2 = yank(x, width)
+                    new_range = yield @dynamic_ranges[arg1.@index], @dynamic_ranges[arg2.@index]
+                    raise "Unexpected" if dangerous?(new_range)
+                end
+            end
+            return arg1, arg2, new_range
+
         else
             raise "unreachable"
         end
-
-        w_range = @dynamic_ranges[w.@index]
-        x_range = @dynamic_ranges[x.@index]
-        if w_range < x_range
-            w, x = x, w
-            w_range, x_range = x_range, w_range
-        end
-        # now, w_range >= x_range
-
-        new_range = yield w_range, x_range
-
-        unless dangerous?(new_range)
-            arg1, arg2 = w, x
-        else
-            arg1 = yank(w, width)
-            new_range = yield @dynamic_ranges[arg1.@index], x_range
-            unless dangerous?(new_range)
-                arg2 = x
-            else
-                arg2 = yank(x, width)
-                new_range = yield @dynamic_ranges[arg1.@index], @dynamic_ranges[arg2.@index]
-                raise "Unexpected" if dangerous?(new_range)
-            end
-        end
-        return arg1, arg2, new_range
     end
 
     private def cast_to_safe_cw (c : UInt128, w : Wire, policy : OverflowPolicy)
         case
         when policy.set_undef_range?
             return w, DynamicRange.new_for_undefined
+
         when (width = policy.cannot_overflow_width)
             arg = truncate(w, to: width)
             new_range = yield @dynamic_ranges[arg.@index], c
             max_range = DynamicRange.new_for_width width
             return arg, (new_range < max_range ? new_range : max_range)
+
         when (width = policy.wrap_around_width)
-            # ok
+            new_range = yield @dynamic_ranges[w.@index], c
+            unless dangerous?(new_range)
+                arg = w
+            else
+                arg = yank(w, width)
+                new_range = yield @dynamic_ranges[arg.@index], c
+                raise "Unexpected" if dangerous?(new_range)
+            end
+            return arg, new_range
+
         else
             raise "unreachable"
         end
-
-        new_range = yield @dynamic_ranges[w.@index], c
-
-        unless dangerous?(new_range)
-            arg = w
-        else
-            arg = yank(w, width)
-            new_range = yield @dynamic_ranges[arg.@index], c
-            raise "Unexpected" if dangerous?(new_range)
-        end
-        return arg, new_range
     end
 
     def const_mul (c : UInt128, w : Wire, policy : OverflowPolicy) : Wire

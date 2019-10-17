@@ -405,10 +405,10 @@ class Subtract < BinaryMath
     def_simplify_right identity: 0
 end
 
-# Divide operation
+# Unsigned divide operation
 class Divide < BinaryMath
     def initialize (@left, @right)
-        super(:divide, OperatorDiv.new, nil, @left, @right)
+        super(:u_div, OperatorDiv.new, nil, @left, @right)
     end
 
     def self.static_eval (left, right, bitwidth)
@@ -427,10 +427,36 @@ class Divide < BinaryMath
     def_simplify_right identity: 1
 end
 
-# Modulo operation
+# Signed divide operation
+class SignedDivide < BinaryMath
+    def initialize (@left, @right)
+        super(:s_div, OperatorDiv.new, nil, @left, @right)
+    end
+
+    def self.static_eval (left, right, bitwidth)
+        signed_left = bitwidth.sign_extend_to(left.to_u64!, BitWidth.new(64)).to_i64!
+        signed_right = bitwidth.sign_extend_to(right.to_u64!, BitWidth.new(64)).to_i64!
+        if signed_right == 0
+            # Well, we have to compile something...
+            Log.log.info("possible undefined behavior: division by zero")
+            return 0_i64
+        end
+        if signed_left == Int64::MIN && signed_right == -1_i64
+            return left
+        end
+        return bitwidth.truncate((signed_left.tdiv signed_right).to_u64!).to_i64!
+    end
+
+    # 0 / x = 0
+    def_simplify_left const: {match: 0, result: 0}
+    # x / 1 = x
+    def_simplify_right identity: 1
+end
+
+# Unsigned modulo operation
 class Modulo < BinaryMath
     def initialize (@left, @right)
-        super(:modulo, OperatorMod.new, nil, @left, @right)
+        super(:u_mod, OperatorMod.new, nil, @left, @right)
     end
 
     def self.static_eval (left, right, bitwidth)
@@ -441,6 +467,32 @@ class Modulo < BinaryMath
         end
         # unsigned modulo; cannot overflow, so no truncate
         return (left.to_u64! % right.to_u64!).to_i64!
+    end
+
+    # 0 % x = 0
+    def_simplify_left const: {match: 0, result: 0}
+    # x % 1 = 0
+    def_simplify_right const: {match: 1, result: 0}
+end
+
+# Signed modulo operation
+class SignedModulo < BinaryMath
+    def initialize (@left, @right)
+        super(:s_mod, OperatorMod.new, nil, @left, @right)
+    end
+
+    def self.static_eval (left, right, bitwidth)
+        signed_left = bitwidth.sign_extend_to(left.to_u64!, BitWidth.new(64)).to_i64!
+        signed_right = bitwidth.sign_extend_to(right.to_u64!, BitWidth.new(64)).to_i64!
+        if signed_right == 0
+            # Well, we have to compile something...
+            Log.log.info("possible undefined behavior: division by zero")
+            return 0_i64
+        end
+        if signed_left == Int64::MIN && signed_right == -1_i64
+            return 0_i64
+        end
+        return bitwidth.truncate((signed_left.remainder signed_right).to_u64!).to_i64!
     end
 
     # 0 % x = 0

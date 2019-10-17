@@ -1,5 +1,4 @@
 require "./req_factory"
-require "./bit_manip"
 require "../../common/dfg"
 
 private def zip_map (left, right)
