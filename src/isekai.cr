@@ -22,6 +22,7 @@ require "./backend_alt/boolean/backend"
 require "./backend_alt/lay_down_output"
 require "./backend_alt/utils"
 require "./fmtconv"
+require "./zkp_bench.cr"
 
 
 include Isekai
@@ -66,13 +67,20 @@ struct ProgramOptions
     property force_primary_backend = false
     # ZKP
     property zkp_scheme = ZKP::Snark
+    # Benchmark
+    property benchmark = "none"
 end
 
 enum ZKP
-    Snark    
+    Snark
+    Groth16
+    Bctv14a    
     Libsnark            #use libsnark style to generate r1cs
     Libsnark_legacy     #use libsnark to generate r1cs
     Dalek               #bulletproof
+    Aurora,
+    Ligero,
+    Fractal
 end
 
 private class InputFile
@@ -249,6 +257,7 @@ class ParserProgram
             parser.on("-q", "--p-bits=BITS", "Width of P in bits") { |bits| opts.p_bits = bits.to_i() }
             parser.on("-z", "--primary-backend", "Force use of primary backend") { opts.force_primary_backend = true }
             parser.on("-h", "--help", "Show this help") { puts parser; exit 0 }
+            parser.on("-bb", "--bench=SCHEME_LIST", "benchmark zkp libraries") { |bench| opts.benchmark = bench }
         end
 
         # Filename is passed as the last argument.
@@ -257,6 +266,11 @@ class ParserProgram
             exit 1
         end
         filename = ARGV[-1]
+
+        if (opts.benchmark != "none")
+            ZKPBenchmark.new.benchmark(filename, opts.benchmark);
+            return
+        end
 
         #snakes
         if opts.verif_file != ""
@@ -293,10 +307,10 @@ class ParserProgram
                 else
                     puts "error generating the proof\n"
                 end
-            else ##when .snark? , .libsnark?
+            when .snark? , .libsnark?, .groth16?, .bctv14a?
                 snarc = LibSnark.new()
-                snarc.vcSetup(filename, opts.root_file + ".s")
-                snarc.proof(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
+                snarc.vcSetup(filename, opts.root_file + ".s", opts.zkp_scheme.value.to_u8)
+                snarc.proof(opts.root_file + ".s", filename + ".in", opts.root_file + ".p", opts.zkp_scheme.value.to_u8)
 
                 ##Check the proof:
                 if snarc.verify(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
@@ -306,6 +320,11 @@ class ParserProgram
                 else
                     puts "error generating the proof\n"
                 end
+            when .aurora?, .ligero?, .fractal?
+                snarc = LibSnark.new()
+                snarc.proof(opts.root_file + ".s", filename, opts.root_file + ".p", opts.zkp_scheme.value.to_u8)
+            else
+                puts "error invalid scheme\n"
             end
 
             return

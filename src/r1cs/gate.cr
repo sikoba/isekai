@@ -104,6 +104,8 @@ class GateKeeper
         case @zkp
         when .dalek?
             @prime_field  = BigInt.new(2)**252 + BigInt.new("27742317777372353535851937790883648493")  ##Bullet proof
+    #    when .aurora?
+    #        @prime_field = BigInt.new("1552511030102430251236801561344621993261920897571225601");       ##edwards curve
         else ##when .snark? , .libsnark?
             @prime_field  = BigInt.new("21888242871839275222246405745257275088548364400416034343698204186575808495617")  ##libsnark bn128
         end
@@ -396,13 +398,13 @@ class GateKeeper
             val0 = Maths.new().modulo_inverse(cache.@val, @prime_field);     #TODO   #static method??
         end
         set_witness(out_wires[0], val0);
-        set_witness(out_wires[1], val1)
-
-        str_res = j1cs_helper().to_json_str(cache.@expression.@lc, [{ out_wires[1], BigInt.new(1)}], cache.@expression.@lc)
-        writeToJ1CS(str_res);  
+        set_witness(out_wires[1], val1);
 
         str_res = j1cs_helper().to_json_str(cache.@expression.@lc, [{ out_wires[0], BigInt.new(1)}], [{ out_wires[1], BigInt.new(1)}])
-        satisfy(cache.@expression.@lc, [{ out_wires[0], BigInt.new(1)}], [{ out_wires[1], BigInt.new(1)}])
+        #DEBUG:  satisfy(cache.@expression.@lc, [{ out_wires[0], BigInt.new(1)}], [{ out_wires[1], BigInt.new(1)}])
+        writeToJ1CS(str_res);  
+
+        str_res = j1cs_helper().to_json_str(cache.@expression.@lc, [{ out_wires[1], BigInt.new(1)}], cache.@expression.@lc)
         writeToJ1CS(str_res);  
         return;
     end

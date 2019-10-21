@@ -1,12 +1,14 @@
 #ifndef __CWRAPPER_H__
 #define __CWRAPPER_H__
 
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 struct wrap;
 typedef struct wrap wrap_t;
+
 
 
 void test(char *fname);
@@ -27,14 +29,15 @@ bool generateR1cs(char* arithFile, char* inputsFile, char * r1csFile);
 //r1csFile: j-r1cs input file 
 //setupFile: name of the out file that will contain the trusted setup in json
 //TEMP ts:output verifiable computing setup, to return the data in the out argument, but we need to properly allocate the strings; should be allocated byt the called first
-void vcSetup(char* r1csFile, char * setupFile /*, char** ts*/);
+void vcSetup(char* r1csFile, char * setupFile /*, char** ts*/, int scheme);
 
 //Generate a proof
 //setup: file name of the trusted setup in json format
 //inputs: file name of the inputs in json format. We need the full assignments.
 //proofFile: file name of the out file that will contain the proof in json format. Optional, no file created if not defined
+//scheme: 1 for libsnark, 2 for bulletproof, 3 for aurora
 // returns: the proof in json format
-char * Prove(char * setup, char * inputs, char * proofFile);
+char * Prove(char * setup, char * inputs, char * proofFile, int scheme);
 
 //Verify a proof:
 //setup: file name of the trusted setup in json format

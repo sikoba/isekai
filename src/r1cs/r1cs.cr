@@ -107,7 +107,7 @@ class R1CS
             end
             i+=1
         end
-         
+        
         #We re-create the results field and overwrites it
         str_res = JSON.build do |json|
             json.object do
