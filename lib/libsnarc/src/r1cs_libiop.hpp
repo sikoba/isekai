@@ -25,13 +25,14 @@ class R1CSLibiop
 public:
     void InitR1CS();
     nlohmann::json LinearCombination2Json(libiop::linear_combination<F> vec);
+    libiop::linear_combination<F> parseLinearCombJson(nlohmann::json &jlc, int input_nb, int input_padding);
     libiop::linear_combination<F> parseLinearCombJson(nlohmann::json &jlc);
     nlohmann::json Inputs2Json(const libiop::r1cs_primary_input<F> &primary_input,const libiop::r1cs_auxiliary_input<F> &auxiliary_input);
 
     bool SaveInputs(const std::string jsonFile, const libiop::r1cs_primary_input<F> &primary_input,const libiop::r1cs_auxiliary_input<F> &auxiliary_input);
 
     bool ToJsonl(libiop::r1cs_constraint_system<F>  &in_cs, const std::string &out_fname);
-    bool FromJsonl(const std::string jsonFile, libiop::r1cs_constraint_system<F> &out_cs);
+    bool FromJsonl(const std::string jsonFile, libiop::r1cs_constraint_system<F> &out_cs, bool pad_inputs = false);
     bool LoadInputs(const std::string jsonFile, libiop::r1cs_primary_input<F> &primary_input, libiop::r1cs_auxiliary_input<F> &auxiliary_input);
     void Pad(libiop::r1cs_constraint_system<F> &out_cs);
     void PadInputs(libiop::r1cs_primary_input<F> &primary_inputs);

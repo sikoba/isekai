@@ -98,6 +98,27 @@ linear_combination<F> R1CSLibiop<F>::parseLinearCombJson(json &jlc)
 	return lc;	
 }
 
+template <class F>
+linear_combination<F> R1CSLibiop<F>::parseLinearCombJson(json &jlc, int input_nb, int input_padding)
+{
+	linear_combination<F> lc;
+	for (auto const& term : jlc)
+	{
+		int idx = term[0];
+		if (idx > input_nb)
+			idx = idx + input_padding-input_nb;
+		variable<F> var(idx);
+		std::string str_coeff = term[1];
+		F cc(str_coeff.c_str());
+		
+		lc.add_term(var, cc);//TODO handle negative idx; something like this: if var<0; idx = primary.len - var
+		
+	}
+	return lc;	
+}
+
+
+
 //Convert R1CS assignment into a '.j1cs.in' json input file
 template <class F>
 json R1CSLibiop<F>::Inputs2Json(const r1cs_primary_input<F> &primary_input,const r1cs_auxiliary_input<F> &auxiliary_input)
@@ -164,8 +185,9 @@ bool R1CSLibiop<F>::ToJsonl(r1cs_constraint_system<F>  &in_cs, const std::string
 }
 
 template <class F>
-bool R1CSLibiop<F>::FromJsonl(const std::string jsonFile, r1cs_constraint_system<F> &out_cs)
+bool R1CSLibiop<F>::FromJsonl(const std::string jsonFile, r1cs_constraint_system<F> &out_cs, bool pad_inputs)
 {
+	printf("debuggggn");
 	//read from file
 	std::ifstream r1cs_file(jsonFile);
 	if (!r1cs_file.good())
@@ -173,6 +195,9 @@ bool R1CSLibiop<F>::FromJsonl(const std::string jsonFile, r1cs_constraint_system
 
 	std::string line;
 	json header;
+	int input_nb =0;
+	int input_padding = 0;
+
 	//todo: clear out_cs
 	while (std::getline(r1cs_file, line))
 	{
@@ -182,18 +207,24 @@ bool R1CSLibiop<F>::FromJsonl(const std::string jsonFile, r1cs_constraint_system
 		{
   			// header 
 			header = jc["r1cs"];
+			input_nb = header["instance_nb"];
+			input_padding = input_nb;
+			if (pad_inputs)
+	  			input_padding = libiop::round_to_next_power_of_2(input_padding+1)-1;
+			printf("input nb:%d, padding:%d\n",input_nb,input_padding);
 		}
 		else
 		{
 			//constraint
-			linear_combination<F> A = parseLinearCombJson(jc["A"]);
-			linear_combination<F> B = parseLinearCombJson(jc["B"]);
-			linear_combination<F> C = parseLinearCombJson(jc["C"]);
+			linear_combination<F> A = parseLinearCombJson(jc["A"], input_nb, input_padding);
+			linear_combination<F> B = parseLinearCombJson(jc["B"], input_nb, input_padding);
+			linear_combination<F> C = parseLinearCombJson(jc["C"], input_nb, input_padding);
 			r1cs_constraint<F> constraint(A,B,C);
 			out_cs.add_constraint(constraint);
+			//printf("adding cs\n");
 		}
   	}
-	out_cs.primary_input_size_ = header["instance_nb"];
+	out_cs.primary_input_size_ = input_padding;// header["instance_nb"];
 	out_cs.auxiliary_input_size_ = header["witness_nb"];
 
 	return true;
@@ -205,9 +236,13 @@ void R1CSLibiop<F>::Pad(r1cs_constraint_system<F> &out_cs)
 
 	size_t cur_cs_nb = out_cs.num_constraints();
 	size_t cs_nb = libiop::round_to_next_power_of_2(cur_cs_nb);
+		
 	while (cur_cs_nb < cs_nb)
 	{
 		linear_combination<F> dummy;
+		variable<F> var(0);
+		F cc(0);
+		dummy.add_term(var, cc);
 		r1cs_constraint<F> constraint(dummy, dummy, dummy);
 		out_cs.add_constraint(constraint);
 		++cur_cs_nb;
@@ -217,11 +252,10 @@ void R1CSLibiop<F>::Pad(r1cs_constraint_system<F> &out_cs)
 template <class F>
 void R1CSLibiop<F>::PadInputs(r1cs_primary_input<F> &primary_inputs)
 {
-
 	size_t cur_size = primary_inputs.size();
-	size_t target_size = libiop::round_to_next_power_of_2(cur_size)-1;
-	if (target_size < cur_size)
-		target_size = libiop::round_to_next_power_of_2(cur_size+1)-1;
+	size_t target_size  = libiop::round_to_next_power_of_2(cur_size+1)-1;
+	assert (cur_size <= target_size);
+	
 	while (cur_size < target_size)
 	{
 		F cc(0);	

@@ -39,9 +39,12 @@ nlohmann::json skAurora::Proof(const std::string &r1cs_filename,  const std::str
 
 
 	r1cs_constraint_system<FieldT> cs;
-     printf("loading constraints...\n");
-	r1cs.FromJsonl(r1cs_filename, cs);
-    r1cs.Pad(cs);       
+    printf("loading constraints....\n");
+  
+	r1cs.FromJsonl(r1cs_filename, cs, true);
+    printf("padding...\n");
+    r1cs.Pad(cs);  
+
 	//load the inputs
    	r1cs_primary_input<FieldT> primary_input;
 	r1cs_auxiliary_input<FieldT> auxiliary_input;
@@ -50,9 +53,9 @@ nlohmann::json skAurora::Proof(const std::string &r1cs_filename,  const std::str
 	else
 		printf("error with inputs file\n");
     r1cs.PadInputs(primary_input);
+	
 	if(!cs.is_satisfied(primary_input, auxiliary_input))
 		printf("NOT SATISFIED!!!\n");
-  
 
     /* Actual SNARK test */
     aurora_snark_parameters<FieldT> params(security_parameter,
