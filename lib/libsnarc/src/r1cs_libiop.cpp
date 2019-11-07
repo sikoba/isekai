@@ -6,7 +6,7 @@
 #include <libsnark/zk_proof_systems/ppzksnark/r1cs_ppzksnark/examples/run_r1cs_ppzksnark.hpp>
 #include <libsnark/zk_proof_systems/ppzksnark/r1cs_gg_ppzksnark/r1cs_gg_ppzksnark.hpp>
 
-//#include "Util.hpp"
+#include "Util.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -15,6 +15,7 @@
 #include <gmpxx.h>
 #include <libff/algebra/curves/edwards/edwards_pp.hpp>
 #include <libff/algebra/curves/alt_bn128/alt_bn128_pp.hpp>
+
 
 using json = nlohmann::json;
 
@@ -187,7 +188,6 @@ bool R1CSLibiop<F>::ToJsonl(r1cs_constraint_system<F>  &in_cs, const std::string
 template <class F>
 bool R1CSLibiop<F>::FromJsonl(const std::string jsonFile, r1cs_constraint_system<F> &out_cs, bool pad_inputs)
 {
-	printf("debuggggn");
 	//read from file
 	std::ifstream r1cs_file(jsonFile);
 	if (!r1cs_file.good())
@@ -221,7 +221,6 @@ bool R1CSLibiop<F>::FromJsonl(const std::string jsonFile, r1cs_constraint_system
 			linear_combination<F> C = parseLinearCombJson(jc["C"], input_nb, input_padding);
 			r1cs_constraint<F> constraint(A,B,C);
 			out_cs.add_constraint(constraint);
-			//printf("adding cs\n");
 		}
   	}
 	out_cs.primary_input_size_ = input_padding;// header["instance_nb"];
@@ -250,10 +249,11 @@ void R1CSLibiop<F>::Pad(r1cs_constraint_system<F> &out_cs)
 }
 
 template <class F>
-void R1CSLibiop<F>::PadInputs(r1cs_primary_input<F> &primary_inputs)
+void R1CSLibiop<F>::PadInputs(r1cs_primary_input<F> &primary_inputs, r1cs_auxiliary_input<F> &auxiliary_input, int target)
 {
 	size_t cur_size = primary_inputs.size();
 	size_t target_size  = libiop::round_to_next_power_of_2(cur_size+1)-1;
+	size_t witness_target = target-target_size;
 	assert (cur_size <= target_size);
 	
 	while (cur_size < target_size)
@@ -262,7 +262,19 @@ void R1CSLibiop<F>::PadInputs(r1cs_primary_input<F> &primary_inputs)
 		primary_inputs.push_back(cc); 
 		++cur_size;
 	}
+	/*Commented for now, it is not clear whether it is needed or not.
+	if (target == 0)
+		target =  libiop::round_to_next_power_of_2(target_size + auxiliary_input.size()+1) - 1
+	cur_size =  auxiliary_input.size();
+	printf("padding witness from %d to %d\n", cur_size, witness_target);
+	while (cur_size < witness_target)
+	{
+		F cc(0);	
+		auxiliary_input.push_back(cc); 
+		++cur_size;
+	}*/
 }
+
 
 
 //Load the inputs from a json file .j1cs.in
@@ -293,6 +305,218 @@ bool R1CSLibiop<F>::LoadInputs(const std::string jsonFile, r1cs_primary_input<F>
 	return true;
 }
 
+
+/*
+template <class FieldT>
+std::string FieldToString(FieldT cc)
+{
+	mpz_t t;
+    mpz_init(t);
+   	cc.as_bigint().to_mpz(t);
+	mpz_class big_coeff(t);		//As recommended by GMP library; cf. https://gmplib.org/manual/Converting-Integers.html
+	return big_coeff.get_str();
+}
+*/
+
+template <class T>
+json SerializeFieldVector(std::vector<T> &vec)
+{
+	json jlt;
+
+	for (auto it = begin(vec); it != end(vec); ++it)
+	{
+		std::string ss = FieldToString<T>(*it);
+		jlt.push_back(ss);
+	}
+	return jlt;
+}
+
+template <class T>
+json SerializeBasicVector(const std::vector<T> &vec)
+{
+	json jlt;
+
+	for (auto it = begin(vec); it != end(vec); ++it)
+	{
+		std::stringstream ss;
+
+		ss << (*it);
+		//   printf("bbs:%s",ss.str());
+
+		jlt.push_back(ss.str());
+	}
+	return jlt;
+}
+
+template <class T>
+json SerializeSafeVector(const std::vector<T> &vec)
+{
+	json jlt;
+	for (auto it = begin(vec); it != end(vec); ++it)
+	{
+		std::stringstream ss;
+		ss << (*it);
+		jlt.push_back(skUtils::base64_encode(ss.str()));
+	}
+	return jlt;
+}
+
+template <class T>
+void DeserializeSafeVector(std::vector<T> &vec, const json &jin)
+{
+	for (auto const &term : jin)
+	{
+
+		std::string str = term;
+		vec.push_back(skUtils::base64_decode(str));
+	}
+}
+
+template <class T>
+void DeserializeBasicVector(std::vector<T> &vec, const json &jin)
+{
+
+	for (auto const &term : jin)
+	{
+		T value;
+		std::stringstream ss;
+		std::string str = term;
+		ss << str;
+		ss >> value;
+		vec.push_back(value);
+	}
+}
+
+
+template <class T>
+void  DeserializeFieldVector( std::vector<T> & vec, const json & jin)
+{
+  for (auto const& term : jin)
+  {
+    std::string js = term;
+    T cc(js.c_str());
+    vec.push_back(cc);
+  }
+ 
+}
+
+
+template <class F>
+void R1CSLibiop<F>::SerializeProof(const bcs_transformation_transcript<F> proof, json &js)
+{
+
+    json p_msg;
+    for (auto it = begin( proof.prover_messages_); it != end(proof.prover_messages_); ++it)
+    {
+      std::vector<F> toto = *it;
+      std::vector<std::string> tata;
+      for(auto t =begin(toto);t != end(toto);++t)
+      {
+        tata.push_back( FieldToString<F>(*t));
+      }
+      json jlt(tata);/*
+    //  jlt=SerializeFieldVector<FieldT>(*it);
+    for (auto jt = begin(*it); jt != end(*it); ++jt)
+      {
+        	jlt.push_back(FieldToString<FieldT>(*jt));
+      }*/
+      p_msg.push_back(jlt);
+    //  printf("prove msg vec: %d\n", jlt.size());
+    }
+    js["prover_messages"] = p_msg;
+
+
+    
+  js["MT_roots"] = SerializeSafeVector<std::string>(proof.MT_roots_);
+    json jquerypos;
+    for (auto it = begin ( proof.query_positions_); it != end (proof.query_positions_); ++it)
+    {
+      jquerypos.push_back(SerializeBasicVector<std::size_t>(*it));
+    }
+    js["query_positions"] = jquerypos;
+
+json jqueyresp;
+    for (auto it = begin ( proof.query_responses_); it != end (proof.query_responses_); ++it)
+    {
+      json jqr;
+      for (auto jt = begin (*it); jt != end (*it); ++jt)
+      {
+		std::vector<F> vec = *jt;
+        json jj= SerializeFieldVector<F>(vec);;
+        jqr.push_back(jj);
+      }
+      jqueyresp.push_back(jqr);
+    }
+    js["query_responses"] = jqueyresp;
+    jqueyresp.clear();
+    json jlpos;
+    for (auto it = begin ( proof.MT_leaf_positions_); it != end (proof.MT_leaf_positions_); ++it)
+    {
+      jlpos.push_back(SerializeBasicVector<std::size_t>(*it));
+    }
+    js["MT_leaf_positions"] = jlpos;
+    json jvec;
+    for (auto it = begin ( proof.MT_set_membership_proofs_); it != end ( proof.MT_set_membership_proofs_); ++it)
+    {
+      json jit;
+      jit["auxiliary_hashes"] = SerializeSafeVector<std::string>(it->auxiliary_hashes);
+      jit["randomness_hashes"] = SerializeSafeVector<std::string>(it->randomness_hashes);
+      jvec.push_back(jit);
+    }
+    js["MT_set_membership_proofs"] = jvec;
+  js["total_depth_without_pruning"]  =  proof.total_depth_without_pruning;
+}
+
+template <class F>
+void R1CSLibiop<F>::DeserializeProof(bcs_transformation_transcript<F> &proof, const json &js)
+{
+
+	int s = js["prover_messages"].size();
+
+	for (auto &term : js["prover_messages"])
+	{
+
+		std::vector<F> vec;
+		DeserializeFieldVector(vec, term);
+		proof.prover_messages_.push_back(vec);
+	}
+
+	DeserializeSafeVector<std::string>(proof.MT_roots_, js["MT_roots"]);
+
+	for (auto &term : js["query_positions"])
+	{
+		std::vector<std::size_t> vv;
+		DeserializeBasicVector<std::size_t>(vv, term);
+		proof.query_positions_.push_back(vv);
+	}
+
+	for (auto &term : js["query_responses"])
+	{
+		std::vector<std::vector<F>> qr;
+		for (auto &term2 : term)
+		{
+			std::vector<F> vv;
+			DeserializeFieldVector<F>(vv, term2);
+			qr.push_back(vv);
+		}
+		proof.query_responses_.push_back(qr);
+	}
+	for (auto const &term : js["MT_leaf_positions"])
+	{
+		std::vector<size_t> vv;
+		DeserializeBasicVector<size_t>(vv, term);
+		proof.MT_leaf_positions_.push_back(vv);
+	}
+
+	for (auto const &term : js["MT_set_membership_proofs"])
+	{
+		merkle_tree_set_membership_proof mts;
+		DeserializeSafeVector<std::string>(mts.auxiliary_hashes, term["auxiliary_hashes"]);
+		DeserializeSafeVector<std::string>(mts.randomness_hashes, term["randomness_hashes"]);
+		proof.MT_set_membership_proofs_.push_back(mts);
+	}
+	proof.total_depth_without_pruning = js["total_depth_without_pruning"];
+}
 
 template class  R1CSLibiop<libff::edwards_Fr>;
 template class  R1CSLibiop<libff::alt_bn128_Fr>;

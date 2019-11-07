@@ -294,7 +294,8 @@ bool Verifier_gg(const r1cs_primary_input<FieldT>  &primary_input, json & jsetup
     return ans;
 }
 
-bool Snarks::Verify(const std::string& tsetup, std::string inputs, std::string proofFile)
+
+bool Snarks::Verify(const std::string& tsetup, std::string inputs, json jProof)
 {
 	R1CSUtils r1cs;
 	//init
@@ -308,8 +309,6 @@ bool Snarks::Verify(const std::string& tsetup, std::string inputs, std::string p
 	//load trusted setup from file
 	json jSetup = skUtils::LoadJsonFromFile(tsetup);
 
-	//load proof from file
-	json jProof = skUtils::LoadJsonFromFile(proofFile);
 	if (jProof["type"] == "groth16")
 	{
 		return Verifier_gg<libff::default_ec_pp>(primary_input, jSetup, jProof);
@@ -325,4 +324,5 @@ bool Snarks::Verify(const std::string& tsetup, std::string inputs, std::string p
 	return false;
 	
 }
+
 

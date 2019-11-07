@@ -36,7 +36,7 @@ public:
     nlohmann::json  Proof(const std::string &inputsFile,  const std::string &trustedSetup, zkp_scheme zcheme);
 
     //Verify a proof
-    bool Verify(const std::string& setup, std::string inputsFile, std::string proof);
+    bool Verify(const std::string& setup, std::string inputsFile, nlohmann::json proof);
 
 };
 

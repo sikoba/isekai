@@ -84,8 +84,11 @@ class ZKPBenchmark
         snarc = LibSnark.new()
        
         snarc = LibSnark.new();
-        report += "\n#{opts.zkp_scheme}- Proof&Verify (..todo):"; 
+        report += "\n#{opts.zkp_scheme}- Generate proof:"; 
         bench = Benchmark.measure {  snarc.proof(@root + ".s", j1cs_name, @root + ".p", opts.zkp_scheme.value.to_u8) }
+        report +=  bench.to_s
+        report += "\n#{opts.zkp_scheme}- Verify proof:"; 
+        bench = Benchmark.measure {  snarc.verify(@root + ".s", j1cs_name, @root + ".p") }
         report +=  bench.to_s
   
         return report;
@@ -109,7 +112,7 @@ class ZKPBenchmark
             end
         }
         if schemes.size() == 0
-            schemes = [ ZKP::Bctv14a , ZKP::Groth16, ZKP::Dalek, ZKP::Ligero ];
+            schemes = [ ZKP::Bctv14a , ZKP::Groth16, ZKP::Dalek, ZKP::Ligero, ZKP::Aurora ];
         end
     
         arith_name = @root + ".ari";

@@ -9,7 +9,7 @@
 #include "json.hpp"
 #include "libiop/relations/variable.hpp"
 #include "libiop/relations/r1cs.hpp"
-
+#include "libiop/snark/common/bcs_common.hpp"
 
 
 
@@ -17,6 +17,8 @@
 //typedef libiop::gf64 FieldT;
 //typedef libff::alt_bn128_Fr FieldT;
 //typedef libff::edwards_Fr FieldT;
+//template<class F>
+//struct bcs_transformation_transcript;
 
 template<class F>
 class R1CSLibiop
@@ -35,7 +37,12 @@ public:
     bool FromJsonl(const std::string jsonFile, libiop::r1cs_constraint_system<F> &out_cs, bool pad_inputs = false);
     bool LoadInputs(const std::string jsonFile, libiop::r1cs_primary_input<F> &primary_input, libiop::r1cs_auxiliary_input<F> &auxiliary_input);
     void Pad(libiop::r1cs_constraint_system<F> &out_cs);
-    void PadInputs(libiop::r1cs_primary_input<F> &primary_inputs);
+    void PadInputs(libiop::r1cs_primary_input<F> &primary_inputs, libiop::r1cs_auxiliary_input<F> &auxiliary_input, int target);
+
+
+    void SerializeProof(const libiop::bcs_transformation_transcript<F> proof, nlohmann::json &js);
+    void DeserializeProof( libiop::bcs_transformation_transcript<F> &proof, const nlohmann::json &js);
+    
 };
 
 #endif

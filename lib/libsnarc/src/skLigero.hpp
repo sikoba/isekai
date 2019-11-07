@@ -27,4 +27,5 @@ public:
 */
      //Generate the proof from a (trusted) setup
     nlohmann::json  Proof(const std::string &r1cs_filename,  const std::string &trustedSetup);
+    bool Verify(const std::string &r1cs_filename, const  nlohmann::json &jProof);
 };

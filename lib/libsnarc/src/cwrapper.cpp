@@ -5,6 +5,7 @@
 #include "skAurora.hpp"
 #include "skLigero.hpp"
 #include "skFractal.hpp"
+#include "util.hpp""
 
 using namespace std; 
 
@@ -90,30 +91,35 @@ char * Prove(char * setup, char * inputs, char * proofFile, int scheme)
 {
 	std::string ts(setup);
 	std::string ins(inputs);
+	
+	std::string pfile = "";
+	if (proofFile != NULL)
+		pfile = std::string(proofFile);
+
 	Snarks::zkp_scheme zcheme = Snarks::zkp_scheme(scheme);
 	if (scheme == Snarks::zkp_scheme::aurora)
 	{
 		skAurora aurora;	//TODO try factory pattern
-		aurora.Proof(ins, ts);
+		nlohmann::json jkey = aurora.Proof(ins, ts);
+		skUtils::WriteJson2File(pfile, jkey);
 		return "";	//TODO
 	}
 	else if (scheme == Snarks::zkp_scheme::ligero)
 	{
 		skLigero ligero;
-		ligero.Proof(ins, ts);
-		return ""; //TODO 
+		nlohmann::json jkey = ligero.Proof(ins, ts);
+		skUtils::WriteJson2File(pfile, jkey);
+		return "";
 	}
 	else if (scheme == Snarks::zkp_scheme::fractal)
 	{
 		skFractal fractal;
-		fractal.Proof(ins, ts);
+		nlohmann::json jkey = fractal.Proof(ins, ts);
+		skUtils::WriteJson2File(pfile, jkey);
 		return ""; //TODO 
 	}
 	Snarks r1cs;
 
-	std::string pfile = "";
-	if (proofFile != NULL)
-		pfile = std::string(proofFile);
 	nlohmann::json jkey = r1cs.Proof(ins, ts, zcheme);
 	
 	if (pfile.length() > 0)
@@ -133,9 +139,34 @@ char * Prove(char * setup, char * inputs, char * proofFile, int scheme)
 //proof: file name of the proof in json format.
 bool Verify(char * setup, char * inputs, char * proof)
 {
-	Snarks r1cs;
-	std::string ts(setup);
-	std::string ins(inputs);
+
+	//load proof from file
 	std::string p(proof);
-	return r1cs.Verify(ts, ins, p);
+	std::string ins(inputs);
+
+	json jProof = skUtils::LoadJsonFromFile(p);
+	if (jProof["type"] == "ligero")
+	{
+		skLigero ligero;
+		return ligero.Verify(ins, jProof);
+	}
+	else if (jProof["type"] == "aurora")
+	{
+		skAurora aurora;
+		return aurora.Verify(ins, jProof);	
+	}
+	else 	if (jProof["type"] == "fractal")
+	{
+	//	skFractal fractal;
+	//	return fractal.Verify(ins, jProof);
+	}
+	else
+	{
+		Snarks r1cs;
+		std::string ts(setup);
+
+		return r1cs.Verify(ts, ins, jProof);
+	}
+	return false;
+	
 }
