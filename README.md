@@ -2,7 +2,7 @@
 
 # isekai
 
-Isekai is a **verifiable computation framework** that will allow to work with several programming languages and verifiable computation systems while using a single code-to-circuit module. Isekai is being developed by [Sikoba Research](http://research.sikoba.com) with the support of [Fantom Foundation](http://fantom.foundation). We seek to cooperate with researchers and developers who work on verifiable computation projects, as well as with blockchain projects that want to offer verifiable computation.
+Isekai is a **verifiable computation framework** that allows to work with several programming languages and verifiable computation systems while using a single code-to-circuit module. Isekai is being developed by [Sikoba Research](http://research.sikoba.com) with the support of [Fantom Foundation](http://fantom.foundation). We seek to cooperate with researchers and developers who work on verifiable computation projects, as well as with blockchain projects that want to offer verifiable computation.
 
 To find out more, please consult the **[isekai Technical documentation](https://github.com/sikoba/isekai/blob/develop/isekai_technical_documentation.pdf)**, read this [Medium post](https://medium.com/sikoba-network/isekai-verifiable-computation-framework-introduction-and-call-for-partners-daea383b1277) or contact us: isekai at protonmail dot com.
 
@@ -11,7 +11,10 @@ To find out more, please consult the **[isekai Technical documentation](https://
 
 ## Overview
 
-Isekai is a tool for zero-knowledge applications. It currently parses a C program and outputs the arithmetic and/or boolean circuit representing the expression equivalent to the input program. Support for more languages will be added in the future. Isekai uses libclang to parse the C program, so most of the preprocessor (including the includes) is available. Then isekai uses libsnark to produce a rank-1 constraints system from the arithmetic representation. Isekai can then proove and verify the program execution using libsnark. Isekai is written using crystal programming language allowing for a strong type safety and it is compiled to a native executable, ensuring maximum efficiency in parsing.
+Isekai is a tool for zero-knowledge applications. It currently parses a C/C++ program and outputs the arithmetic and/or boolean circuit representing the expression equivalent to the input program. Support for more languages will be added in the future. isekai uses libclang to parse the C program, so most of the preprocessor (including the includes) is available. Then isekai generates a rank-1 constraints system from the arithmetic representation. Isekai can then proove and verify the program execution using several ZKP libraries (libsnak, bulletproof and libiop). isekai is written using crystal programming language allowing for a strong type safety and it is compiled to a native executable, ensuring maximum efficiency in parsing.
+
+# isekai 1.0 released!
+This version is fullfilling our goals for a tool integrating several standard programming languages with several ZKP scheme. 
 
 # Major Update - October 2019
 
@@ -27,7 +30,11 @@ isekai can be easily tested on Windows using Ubuntu for windows. This [Medium po
 
 ## Ubuntu (should work on other Linux distributions)
 
-Start by cloning isekai to a local directory.
+Start by cloning isekai to a local directory. We recommend to retrieve also the the submodules:
+
+```
+$ git clone --recurse-submodules https://github.com/sikoba/isekai.git 	
+```
 
 ### 1. Install Crystal and required packages
 
@@ -41,6 +48,7 @@ Then install the following additional packages required by isekai:
 $ sudo apt install clang-7
 $ sudo apt install libclang-7-dev
 $ sudo apt-get install libprocps-dev
+$ shards install
 ```
 ### 2. Apply libclang patch
 
@@ -81,11 +89,22 @@ Finished in 800.85 milliseconds
 
 ### 4. Compiling libsnarc
 
-libsnarc is a library which provides a C-wrapper over libsnark. The library is already included so you do not need to compile it. If you want to compile it, you should create lib/libsnarc/build directory and from here run cmake .. and then make.
+libsnarc is a library which provides a C-wrapper over libsnark and libiop. The library is already included so you do not need to compile it. However, we have noticed errors on some systems, which are fixed by recompiling the library. Please make sure you retrieved the submodules recursively before compiling this library.
 
-## Docker
 
-The docker files included with the project are not up to date and should not be used. 
+```
+$ sudo apt-get install libsodium-dev
+$ cd lib/libsnarc
+$ mkdir build
+$ cd build & cmake ..
+$ make
+```
+
+After having built libsnarc, you need to (re-)build isekai :
+```
+go to isekai main directory
+$ make --always-make
+```
 
 
 ## Usage
@@ -101,22 +120,20 @@ void outsource(struct NzikInput * nzik, struct Output *output);
 ```
 Input and Output are public parameters and NzikInput are the private parameters (zero-knowledge). Inputs and NzikInputs can be provided in an additional file, by putting each value one per line. This input file must have the same name as the C program file, with an additional ‘.in’ extension. For instance, if the function is implemented in my_C_prog.c, the inputs must be provided in my_C_prog.c.in
 
-In order to generate an arithmetic representation of a C program, use the following command:
-N.B These command are deprecated, see LLVM section below.
-```
-./isekai --arith=output_file.arith my_C_prog.c
-```
+Basically, you first generates the constraints system with --r1cs option, then with this r1cs you can create a proof using --prove option, and finally verify the proof using the --verif option. The ZKP scheme to use can be specified with the --scheme option.
 
-To generate the rank-1 contraints system (r1cs)
-
+## LLVM
+In order to use LLVM with isekai, you simply provide the LLVM bitcode file instead of the C source code. Please note that LLVM is now the recommended way to use with isekai. The C frontend of isekai will not be maintained but will be probably replaced using the LLVM one.
+For instance, use the following commands to use LLVM frontend with C source code:
 ```
-./isekai --r1cs=output_file.j1 my_C_prog.c
+clang -DISEKAI_C_PARSER=0 -O0 -c -emit-llvm my_C_prog.c
+./isekai --r1cs=output_file.j1 my_C_prog.bc
 ```
-You can do both operations at the same time using --r1cs and arith options. 
+The inputs should have the .in extension as explained above. In this example it means you should have also the file my_C_prog.c.in next to my_C_prog.bc
 Isekai also generate the assignments in the file output_file.j1.in. It adds ‘.in’ to the filename provided in the r1cs option to get a file for the assignments. Note that existing files are overwritten by isekai.
 Isekai automatically uses the inputs provided in my_C_prog.c.in if it exists. If not, isekai assumes all the inputs are 0.
 
-
+## Libsnark
 To generate (and verify) a proof with libsnark:
 
 ```
@@ -132,15 +149,8 @@ A verifier can verify the proof with the following command:
 ```
 
 A verifier should not know the private inputs (NzikInput) so you should remove the ‘witnesses’ part from the input file before giving it to the verifier.
+Two different ZKP schemes from libsnark are supported and can be specified with the --scheme option, refer to the ZKP scheme section below for more information. If the scheme option is not set, it will use libsnark by default.
 
-## LLVM
-In order to use LLVM with isekai, you simply provide the LLVM bitcode file instead of the C source code. Please note that LLVM is now the recommended way to use with isekai. The C frontend of isekai will not be maintained.
-For instance, use the following commands to use LLVM frontend with C source code:
-```
-clang -DISEKAI_C_PARSER=0 -O0 -c -emit-llvm my_C_prog.c
-./isekai --r1cs=output_file.j1 my_C_prog.bc
-```
-The inputs should have the .in extension as before. In this example it means you should have also the file my_C_prog.c.in next to my_C_prog.bc
 
 ## Bulletproof
 
@@ -148,8 +158,19 @@ In order to use Bulletproof instead of libsnark, you need to specify the dalek s
 ```
 ./isekai --scheme=dalek --r1cs=output_file.j1 my_C_prog.c
 ./isekai --scheme=dalek --prove=my_proof output_file.j1
-./isekai --scheme=dalek --verif=my_proof output_file.j1
+./isekai --verif=my_proof output_file.j1
 ```
 As you can see, the verification requires (for now) the .j1 file (and also the public inputs), contrary to libsnark.
-If the scheme option is not set, it will use libsnark by default. To explicitely use libsnark, you can use the scheme snark. (--scheme=snark)
-Please note that although very similar, the r1cs generated for libsnark and bulletproof are not compatible.
+Please note that although very similar, the r1cs generated for libsnark and bulletproof are not compatible, this is why you need to specify the scheme when generating it.
+
+## ZKP Schemes
+
+With isekai 1.0 we now support more ZKP schemes, the --scheme option can be used with the following values.
+
+| Scheme option     | Type    | 
+| :------------- | :----------: |
+|  bctv14a  | zk-snark  | 
+|  groth16  | zk-snark |
+|  dalek  | bulletproof | 
+|  ligero  | iop |
+|  aurora  | iop | 
