@@ -129,9 +129,9 @@ For instance, use the following commands to use LLVM frontend with C source code
 clang -DISEKAI_C_PARSER=0 -O0 -c -emit-llvm my_C_prog.c
 ./isekai --r1cs=output_file.j1 my_C_prog.bc
 ```
-The inputs should have the .in extension as explained above. In this example it means you should have also the file my_C_prog.c.in next to my_C_prog.bc
+The inputs should have the .in extension as explained above. In this example it means you should have also the file my_C_prog.bc.in next to my_C_prog.bc
 Isekai also generate the assignments in the file output_file.j1.in. It adds ‘.in’ to the filename provided in the r1cs option to get a file for the assignments. Note that existing files are overwritten by isekai.
-Isekai automatically uses the inputs provided in my_C_prog.c.in if it exists. If not, isekai assumes all the inputs are 0.
+Isekai automatically uses the inputs provided in my_C_prog.bc.in if it exists. If not, isekai assumes all the inputs are 0.
 
 ## Libsnark
 To generate (and verify) a proof with libsnark:
@@ -156,7 +156,7 @@ Two different ZKP schemes from libsnark are supported and can be specified with 
 
 In order to use Bulletproof instead of libsnark, you need to specify the dalek scheme;
 ```
-./isekai --scheme=dalek --r1cs=output_file.j1 my_C_prog.c
+./isekai --scheme=dalek --r1cs=output_file.j1 my_C_prog.bc
 ./isekai --scheme=dalek --prove=my_proof output_file.j1
 ./isekai --verif=my_proof output_file.j1
 ```
