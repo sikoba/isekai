@@ -52,8 +52,10 @@ struct ProgramOptions
     property print_exprs = false
     # Ignore overflow
     property ignore_overflow = false
-    # Width of P in bits
-    property p_bits = 254
+    # Min width of P in bits
+    property p_bits_min = 254
+    # Max width of P in bits
+    property p_bits_max = 254
     # Force use of primary backend
     property force_primary_backend = false
 end
@@ -100,7 +102,8 @@ private def run_alt_backend (
                 inputs,
                 nizk_inputs,
                 output: file,
-                p_bits: options.p_bits)
+                p_bits_min: options.p_bits_min,
+                p_bits_max: options.p_bits_max)
             req_factory = AltBackend::Arith::RequestFactory.new(
                 board,
                 sloppy: options.ignore_overflow)
@@ -156,7 +159,8 @@ class ParserProgram
         when .bitcode?
             parser = LLVMFrontend::Parser.new(
                 input_file.@filename,
-                loop_sanity_limit: options.loop_sanity_limit)
+                loop_sanity_limit: options.loop_sanity_limit,
+                p_bits_min: options.p_bits_min)
             inputs, nizk_inputs, outputs = parser.parse()
 
             if options.print_exprs
@@ -223,7 +227,13 @@ class ParserProgram
             parser.on("-p", "--progress", "Print progress messages during compilation") { opts.progress = true }
             parser.on("-i", "--ignore-overflow", "Ignore field-P overflows; never truncate") { opts.ignore_overflow = true }
             parser.on("-x", "--print-exprs", "Print output expressions to stdout") { opts.print_exprs = true }
-            parser.on("-q", "--p-bits=BITS", "Width of P in bits") { |bits| opts.p_bits = bits.to_i() }
+            parser.on("-q", "--p-bits=EXACT|MIN-MAX", "Width of P in bits") do |s|
+                if s.includes? '-'
+                    opts.p_bits_min, opts.p_bits_max = s.split('-', limit: 2).map &.to_i
+                else
+                    opts.p_bits_min = opts.p_bits_max = s.to_i
+                end
+            end
             parser.on("-z", "--primary-backend", "Force use of primary backend") { opts.force_primary_backend = true }
             parser.on("-h", "--help", "Show this help") { puts parser; exit 0 }
         end

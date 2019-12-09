@@ -5,6 +5,21 @@ require "llvm-crystal/lib_llvm"
 
 module Isekai::LLVMFrontend::TypeUtils
 
+alias FuzzyType = LibLLVM::Type | ::Symbol
+
+def self.fuzzy_match (actual : LibLLVM::Type, fuzzy : FuzzyType) : Bool
+    case fuzzy
+    when LibLLVM::Type
+        actual == fuzzy
+    when :pointer
+        actual.pointer?
+    when :integral
+        actual.integer?
+    else
+        raise "Unknown fuzzy type: #{fuzzy}"
+    end
+end
+
 # Assuming 'type' is an integer type, returns its bit width as a 'BitWidth' object.
 def self.get_type_bitwidth_unchecked (type) : BitWidth
     width = type.integer_width
@@ -54,6 +69,30 @@ def self.make_undef_expr_of_type (type) : DFGExpr
         else
             raise "unreachable"
         end
+    end
+end
+
+def self.byte_seq_to_expr (bytes : Array(UInt8)) : DFGExpr
+    arr = Structure.new(
+        elems: bytes.map do |byte|
+            Constant.new(byte.to_i64!, bitwidth: BitWidth.new(8)).as DFGExpr
+        end,
+        type: LibLLVM::Type.new_array(
+            elem_type: LibLLVM::Type.new_integral(nbits: 8),
+            length: bytes.size
+        )
+    )
+    StaticFieldPointer.new(base: arr, field: 0)
+end
+
+def self.expr_to_byte_seq (expr : DFGExpr) : Array(UInt8)?
+    return nil unless expr.is_a? StaticFieldPointer
+    base = expr.@base
+    return nil unless base.@type.array?
+    return nil unless base.@type.element_type == LibLLVM::Type.new_integral(nbits: 8)
+    base.@elems.map do |byte_expr|
+        return nil unless byte_expr.is_a? Constant
+        byte_expr.@value.to_u8!
     end
 end
 

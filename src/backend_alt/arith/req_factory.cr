@@ -1,4 +1,6 @@
+require "big"
 require "./board"
+require "./bit_manip"
 require "./dynamic_range"
 
 @[AlwaysInline]
@@ -15,9 +17,22 @@ end
 module Isekai::AltBackend::Arith
 
 struct RequestFactory
+
+    struct NagaiConstant
+        def initialize (@value : BigInt)
+        end
+    end
+
+    struct NagaiWire
+        def initialize (@wire : Wire)
+        end
+    end
+
+    alias NagaiRequest = NagaiConstant | NagaiWire
+
     struct JoinedRequest
-        # This represents the value of 'a*x+b'. Constants are represented as '0*I+b', where 'I' is an
-        # "invalid" wire.
+        # This represents the value of 'a*x+b'. Constants are represented as '0*I+b', where 'I' is
+        # an "invalid" wire.
         def initialize (@a : UInt128, @x : Wire, @b : UInt128, @width : Int32)
         end
 
@@ -396,6 +411,201 @@ struct RequestFactory
                 width: bits.size)
         else
             return JoinedRequest.new_for_const(const_summand, width: bits.size)
+        end
+    end
+
+    private def nagai_to_wire! (j : NagaiRequest) : Wire
+        if j.is_a? NagaiWire
+            j.@wire
+        else
+            @board.constant_verbatim(j.@value)
+        end
+    end
+
+    private def nagai_as_safe_constant? (
+            j : NagaiRequest,
+            accept_negative : Bool = false) : BigInt?
+
+        return nil unless j.is_a? NagaiConstant
+        c = j.@value
+
+        limit = BigInt.new(1) << (@board.@p_bits_min - 1)
+        if accept_negative
+            return nil unless (-limit < c < limit)
+        else
+            return nil unless (0 <= c < limit)
+        end
+        return c
+    end
+
+    def nagai_create (j : JoinedRequest, negative : Bool) : NagaiRequest
+        if j.constant?
+            c = BigInt.new(j.@b)
+            NagaiConstant.new(negative ? -c : c)
+        else
+            j_wire = joined_to_wire! j
+            if negative
+                wire = @board.const_mul_neg(1, j_wire, policy: TruncatePolicy.new_no_truncate)
+                NagaiWire.new(wire)
+            else
+                NagaiWire.new(j_wire)
+            end
+        end
+    end
+
+    def nagai_create (c : BigInt) : NagaiRequest
+        NagaiConstant.new(c)
+    end
+
+    private def nagai_cond_wcc (c : Wire, t : BigInt, f : BigInt) : NagaiRequest
+        return NagaiConstant.new(f) if t == f
+        left_summand = @board.const_mul(t - f, c)
+        result = @board.const_add(f, left_summand)
+        NagaiWire.new(result)
+    end
+
+    def nagai_cond (c : JoinedRequest, t : NagaiRequest, f : NagaiRequest) : NagaiRequest
+        if c.constant?
+            return (c.@b != 0) ? t : f
+        end
+        if c.@b != 0
+            t, f = f, t
+            c = JoinedRequest.new_for_wire(c.@x, width: 1)
+        end
+
+        if t.is_a? NagaiWire && f.is_a? NagaiWire && t.@wire == f.@wire
+            return f
+        end
+
+        c_wire = @board.truncate(c.@x, to: 1)
+
+        if t.is_a? NagaiConstant && f.is_a? NagaiConstant
+            return nagai_cond_wcc(c_wire, t.@value, f.@value)
+        end
+
+        t_wire = nagai_to_wire! t
+        f_wire = nagai_to_wire! f
+
+        minus_f = @board.const_mul_neg(1, f_wire, policy: TruncatePolicy.new_no_truncate)
+        diff = @board.add(t_wire, minus_f, policy: OverflowPolicy.new_set_undef_range)
+        left_summand = @board.mul(c_wire, diff, policy: OverflowPolicy.new_set_undef_range)
+        result = @board.add(left_summand, f_wire, policy: OverflowPolicy.new_set_undef_range)
+        NagaiWire.new(result)
+    end
+
+    private def nagai_add_const (j : NagaiRequest, c : BigInt) : NagaiRequest
+        if j.is_a? NagaiConstant && j.@value == 0
+            return NagaiConstant.new(c)
+        end
+
+        j_wire = nagai_to_wire! j
+        NagaiWire.new(@board.const_add(c, j_wire))
+    end
+
+    private def nagai_mul_const (j : NagaiRequest, c : BigInt) : NagaiRequest
+        if c == 0
+            return NagaiConstant.new(BigInt.new(0))
+        end
+
+        if j.is_a? NagaiConstant
+            if (-1 <= j.@value <= 1) || (-1 <= c <= 1)
+                return NagaiConstant.new(j.@value * c)
+            end
+        end
+
+        j_wire = nagai_to_wire! j
+        NagaiWire.new(@board.const_mul(c, j_wire))
+    end
+
+    def nagai_add (j : NagaiRequest, k : NagaiRequest) : NagaiRequest
+        return nagai_add_const(k, j.@value) if j.is_a? NagaiConstant
+        return nagai_add_const(j, k.@value) if k.is_a? NagaiConstant
+
+        j_wire = nagai_to_wire! j
+        k_wire = nagai_to_wire! k
+        NagaiWire.new(@board.add(
+            j_wire,
+            k_wire,
+            policy: OverflowPolicy.new_set_undef_range))
+    end
+
+    def nagai_mul (j : NagaiRequest, k : NagaiRequest) : NagaiRequest
+        return nagai_mul_const(k, j.@value) if j.is_a? NagaiConstant
+        return nagai_mul_const(j, k.@value) if k.is_a? NagaiConstant
+
+        j_wire = nagai_to_wire! j
+        k_wire = nagai_to_wire! k
+        NagaiWire.new(@board.mul(
+            j_wire,
+            k_wire,
+            policy: OverflowPolicy.new_set_undef_range))
+    end
+
+    def nagai_div (j : NagaiRequest, k : NagaiRequest) : NagaiRequest
+        if k.is_a? NagaiConstant
+            return j if k.@value == 1
+            return nagai_mul_const(j, k.@value) if k.@value == -1
+        end
+
+        if j.is_a? NagaiConstant
+            return j if j.@value == 0
+            if k.is_a? NagaiConstant && k.@value != 0
+                q, r = j.@value.divmod(k.@value)
+                return NagaiConstant.new(q) if r == 0
+            end
+        end
+
+        if j.is_a? NagaiWire && k.is_a? NagaiWire && j.@wire == k.@wire
+            return NagaiConstant.new(BigInt.new(1))
+        end
+
+        j_wire = nagai_to_wire! j
+        k_wire = nagai_to_wire! k
+        NagaiWire.new(@board.div(j_wire, k_wire))
+    end
+
+    def nagai_lowbits (j : NagaiRequest) : SplitRequest
+        if (c = nagai_as_safe_constant? j)
+            return SplitRequest.new(64) do |i|
+                JoinedRequest.new_for_const(
+                    c.bit(i).to_u!.to_u128!,
+                    width: 1)
+            end
+        end
+
+        j_wire = nagai_to_wire! j
+        bits = @board.split(j_wire)
+        SplitRequest.new(64) do |i|
+            if i < bits.size
+                JoinedRequest.new_for_wire(bits[i], width: 1)
+            else
+                JoinedRequest.new_for_const(0, width: 1)
+            end
+        end
+    end
+
+    def nagai_nonzero (j : NagaiRequest) : JoinedRequest
+        if (c = nagai_as_safe_constant?(j, accept_negative: true))
+            return JoinedRequest.new_for_const(c == 0 ? 0_u128 : 1_u128, width: 1)
+        end
+
+        j_wire = nagai_to_wire! j
+        JoinedRequest.new_for_wire(
+            @board.zerop(j_wire, policy: TruncatePolicy.new_no_truncate),
+            width: 1)
+    end
+
+    def nagai_getbit (j : NagaiRequest, pos : UInt128) : NagaiRequest
+        if (c = nagai_as_safe_constant? j)
+            return NagaiConstant.new(c.bit(pos))
+        end
+
+        j_wire = nagai_to_wire! j
+        bits = @board.split(j_wire)
+        if pos < bits.size
+            NagaiWire.new(bits[pos])
+        else
+            NagaiConstant.new(BigInt.new(0))
         end
     end
 end

@@ -47,16 +47,25 @@ def self.make_input_expr_of_type (type, which : InputBase::Kind) : DFGExpr
     end
 end
 
+def self.make_output_expr_of_type (type) : DFGExpr
+    return TypeUtils.make_expr_of_type(type) do |scalar_type|
+        case scalar_type.kind
+        when .integer_type_kind?
+            Constant.new(0, bitwidth: TypeUtils.get_type_bitwidth_unchecked(scalar_type))
+        when .pointer_type_kind?
+            raise "Output structure contains a pointer"
+        else
+            raise "unreachable"
+        end
+    end
+end
+
 def self.make_input_array (s : Structure?) : Array(BitWidth)
     return s ? s.flattened.map &.@bitwidth : [] of BitWidth
 end
 
 def self.make_output_array (s : Structure?) : Array(DFGExpr)
-    result = s ? s.flattened : [] of DFGExpr
-    if result.any? { |expr| expr.is_a? AbstractPointer }
-        raise "Output structure contains a pointer"
-    end
-    result
+    return s ? s.flattened : [] of DFGExpr
 end
 
 class Parser
@@ -83,6 +92,22 @@ class Parser
         end
     end
 
+    private class Specials
+        property unroll_hint : LibLLVM::Any? = nil
+
+        property nagai_init_pos : LibLLVM::Any? = nil
+        property nagai_init_neg : LibLLVM::Any? = nil
+        property nagai_init_from_str : LibLLVM::Any? = nil
+        property nagai_copy : LibLLVM::Any? = nil
+        property nagai_add : LibLLVM::Any? = nil
+        property nagai_mul : LibLLVM::Any? = nil
+        property nagai_getbit : LibLLVM::Any? = nil
+        property nagai_div : LibLLVM::Any? = nil
+        property nagai_nonzero : LibLLVM::Any? = nil
+        property nagai_lowbits : LibLLVM::Any? = nil
+        property nagai_free : LibLLVM::Any? = nil
+    end
+
     enum OutsourceParam
         Input
         NizkInput
@@ -98,7 +123,7 @@ class Parser
     @assumption = Assumption.new
     @unroll_ctls = [] of UnrollCtl
 
-    @unroll_hint_func : LibLLVM::Any? = nil
+    @specials = Specials.new
 
     @input_struct : Structure? = nil
     @nizk_input_struct : Structure? = nil
@@ -106,7 +131,11 @@ class Parser
 
     @llvm_module : LibLLVM::Module
 
-    def initialize (input_file : String, @loop_sanity_limit : Int32)
+    def initialize (
+            input_file : String,
+            @loop_sanity_limit : Int32,
+            @p_bits_min : Int32)
+
         @llvm_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
     end
 
@@ -128,7 +157,7 @@ class Parser
             @nizk_input_struct = expr
 
         when .output?
-            expr = TypeUtils.make_undef_expr_of_type(struct_type)
+            expr = LLVMFrontend.make_output_expr_of_type(struct_type)
             raise "unreachable" unless expr.is_a? Structure
             @output_struct = expr
 
@@ -137,6 +166,30 @@ class Parser
         end
 
         @arguments[value] = StaticPointer.new(expr)
+    end
+
+    private def eval_const_expr (value : LibLLVM::Any) : DFGExpr
+        unless value.const_opcode.get_element_ptr?
+            raise "only get_element_ptr constant expressions are supported (found '#{value}')"
+        end
+
+        text = value.const_operands[0]
+        unless text.kind.global_variable_value_kind?
+            raise "argument to constant-expression get_element_ptr must be global, not '#{text}'"
+        end
+
+        initializer = text.global_initializer
+        unless initializer
+            raise "global '#{value}' has no initializer"
+        end
+        unless initializer.kind.constant_data_array_value_kind?
+            raise "global '#{value}' is not a constant array"
+        end
+        unless initializer.const_string?
+            raise "global '#{value}' is not a constant string"
+        end
+
+        TypeUtils.byte_seq_to_expr(initializer.to_const_string)
     end
 
     private def as_expr (value : LibLLVM::Any) : DFGExpr
@@ -148,6 +201,8 @@ class Parser
             expr = @locals[value]
         when .constant_int_value_kind?
             expr = LLVMFrontend.make_constant_unchecked(value)
+        when .constant_expr_value_kind?
+            expr = eval_const_expr(value)
         else
             raise "Unsupported value kind: #{value.kind}"
         end
@@ -251,10 +306,8 @@ class Parser
         end
     end
 
-    private def unroll_hint_called (ins : LibLLVM::Instruction) : Nil
-        raise "_unroll_hint() must be called with 1 argument" unless ins.call_nargs == 1
-        operands = ins.operands
-        arg = as_expr(operands[0])
+    private def handle_unroll_hint_call (ins : LibLLVM::Instruction) : Nil
+        arg = as_expr(ins.operands[0])
         raise "_unroll_hint() argument is not constant" unless arg.is_a? Constant
         @loop_sanity_limit = arg.@value.to_i32
     end
@@ -281,6 +334,79 @@ class Parser
         arg = as_expr(operands[0])
         new_bitwidth = TypeUtils.get_type_bitwidth(ins.type)
         @locals[ins.to_any] = klass.bake(arg, new_bitwidth)
+    end
+
+    private def handle_call (ins) : Nil
+        operands = ins.operands
+        case ins.callee
+        when @specials.unroll_hint
+            handle_unroll_hint_call(ins)
+
+        when @specials.nagai_init_pos
+            @locals[ins.to_any] = Nagai.bake(
+                as_expr(operands[0]),
+                negative: false)
+
+        when @specials.nagai_init_neg
+            @locals[ins.to_any] = Nagai.bake(
+                as_expr(operands[0]),
+                negative: true)
+
+        when @specials.nagai_init_from_str
+            bytes = TypeUtils.expr_to_byte_seq(as_expr(operands[0]))
+            unless bytes
+                raise "'nagai_init_from_str': invalid argument: #{operands[0]}"
+            end
+            unless bytes.last? == 0
+                raise "'nagai_init_from_str': argument is not zero-terminated"
+            end
+            @locals[ins.to_any] = NagaiVerbatim.new(
+                BigInt.new(
+                    String.new(bytes.to_unsafe),
+                    base: 10
+                )
+            )
+
+        when @specials.nagai_add
+            @locals[ins.to_any] = NagaiAdd.bake(
+                as_expr(operands[0]),
+                as_expr(operands[1]))
+
+        when @specials.nagai_mul
+            @locals[ins.to_any] = NagaiMultiply.bake(
+                as_expr(operands[0]),
+                as_expr(operands[1]))
+
+        when @specials.nagai_getbit
+            @locals[ins.to_any] = NagaiGetBit.bake(
+                as_expr(operands[0]),
+                as_expr(operands[1]),
+                p_bits_min: @p_bits_min)
+
+        when @specials.nagai_div
+            @locals[ins.to_any] = NagaiDivide.bake(
+                as_expr(operands[0]),
+                as_expr(operands[1]))
+
+        when @specials.nagai_lowbits
+            @locals[ins.to_any] = NagaiLowBits.bake(
+                as_expr(operands[0]),
+                p_bits_min: @p_bits_min)
+
+        when @specials.nagai_nonzero
+            @locals[ins.to_any] = NagaiNonZero.bake(
+                as_expr(operands[0]),
+                p_bits_min: @p_bits_min)
+
+        when @specials.nagai_copy
+            @locals[ins.to_any] = as_expr(operands[0])
+
+        when @specials.nagai_free
+            # do nothing
+
+        else
+            raise "Unsupported function called: #{ins.callee.name}"
+        end
     end
 
     private def inspect_basic_block (bb) : LibLLVM::BasicBlock?
@@ -358,12 +484,7 @@ class Parser
                 @locals[ins.to_any] = Conditional.bake(pred, val_true, val_false)
 
             when .call?
-                callee = ins.callee
-                if callee == @unroll_hint_func
-                    unroll_hint_called(ins)
-                else
-                    raise "Unsupported function called: #{callee.name}"
-                end
+                handle_call(ins)
 
             when .br?
                 successors = ins.successors.to_a
@@ -487,33 +608,173 @@ class Parser
         raise "Sanity-check failed" unless @assumption.empty?
     end
 
-    private def inspect_unroll_hint_func (func) : Nil
+    private def check_special_func (
+            func : LibLLVM::Function,
+            return_type : TypeUtils::FuzzyType,
+            arg_types : Array(TypeUtils::FuzzyType)) : LibLLVM::Any
+
         signature = func.function_type
-        raise "_unroll_hint() return type is not void" unless signature.return_type.void?
-        raise "_unroll_hint() is a var arg function" if signature.var_args?
+        unless TypeUtils.fuzzy_match(signature.return_type, return_type)
+            raise "#{func}: expected return type #{return_type}, found #{signature.return_type}"
+        end
+        if signature.var_args?
+            raise "#{func}: declared as a var arg function" if signature.var_args?
+        end
+
         params = func.params
-        raise "_unroll_hint() takes #{params.size} parameters, expected 1" unless params.size == 1
-        raise "_unroll_hint() parameter has non-integer type" unless params[0].type.integer?
-        @unroll_hint_func = func.to_any
+        unless arg_types.size == params.size
+            raise "#{func}: takes #{params.size} parameter(s), expected #{arg_types.size}"
+        end
+        (0...params.size).each do |i|
+            expected, found = arg_types[i], params[i].type
+            unless TypeUtils.fuzzy_match(found, expected)
+                raise "#{func}: parameter #{i + 1}: expected type #{expected}, found #{found}"
+            end
+        end
+
+        func.to_any
+    end
+
+    private def find_special_func (name) : LibLLVM::Function?
+        func = @llvm_module.functions[name]?
+        return nil unless func
+        raise "Found definition of special function '#{name}'" unless func.declaration?
+        func
     end
 
     def parse ()
-        @llvm_module.functions.each do |func|
-            if func.declaration? && func.name == "_unroll_hint"
-                inspect_unroll_hint_func(func)
-            end
+        if (func = find_special_func "_unroll_hint")
+            @specials.unroll_hint = check_special_func(
+                func,
+                return_type: LibLLVM::Type.new_void,
+                arg_types: [
+                    :integral,
+                ]
+            )
         end
-        @llvm_module.functions.each do |func|
-            next if func.declaration?
-            raise "Unexpected function defined: #{func.name}" unless func.name == "outsource"
-            inspect_outsource_func(func)
-            return {
-                LLVMFrontend.make_input_array(@input_struct),
-                LLVMFrontend.make_input_array(@nizk_input_struct),
-                LLVMFrontend.make_output_array(@output_struct),
-            }
+
+        if (func = find_special_func "nagai_init_pos")
+            @specials.nagai_init_pos = check_special_func(
+                func,
+                return_type: :pointer,
+                arg_types: [
+                    LibLLVM::Type.new_integral(nbits: 64),
+                ]
+            )
         end
-        raise "No 'outsource' function found"
+
+        if (func = find_special_func "nagai_init_neg")
+            @specials.nagai_init_neg = check_special_func(
+                func,
+                return_type: :pointer,
+                arg_types: [
+                    LibLLVM::Type.new_integral(nbits: 64),
+                ]
+            )
+        end
+
+        if (func = find_special_func "nagai_init_from_str")
+            @specials.nagai_init_from_str = check_special_func(
+                func,
+                return_type: :pointer,
+                arg_types: [
+                    :pointer,
+                ]
+            )
+        end
+
+        if (func = find_special_func "nagai_copy")
+            @specials.nagai_copy = check_special_func(
+                func,
+                return_type: :pointer,
+                arg_types: [
+                    :pointer,
+                ]
+            )
+        end
+
+        if (func = find_special_func "nagai_add")
+            @specials.nagai_add = check_special_func(
+                func,
+                return_type: :pointer,
+                arg_types: [
+                    :pointer,
+                    :pointer,
+                ]
+            )
+        end
+
+        if (func = find_special_func "nagai_mul")
+            @specials.nagai_mul = check_special_func(
+                func,
+                return_type: :pointer,
+                arg_types: [
+                    :pointer,
+                    :pointer,
+                ]
+            )
+        end
+
+        if (func = find_special_func "nagai_getbit")
+            @specials.nagai_getbit = check_special_func(
+                func,
+                return_type: :pointer,
+                arg_types: [
+                    :pointer,
+                    :integral,
+                ]
+            )
+        end
+
+        if (func = find_special_func "nagai_div")
+            @specials.nagai_div = check_special_func(
+                func,
+                return_type: :pointer,
+                arg_types: [
+                    :pointer,
+                    :pointer,
+                ]
+            )
+        end
+
+        if (func = find_special_func "nagai_nonzero")
+            @specials.nagai_nonzero = check_special_func(
+                func,
+                return_type: LibLLVM::Type.new_integral(nbits: 1),
+                arg_types: [
+                    :pointer,
+                ]
+            )
+        end
+
+        if (func = find_special_func "nagai_lowbits")
+            @specials.nagai_lowbits = check_special_func(
+                func,
+                return_type: LibLLVM::Type.new_integral(nbits: 64),
+                arg_types: [
+                    :pointer,
+                ]
+            )
+        end
+
+        if (func = find_special_func "nagai_free")
+            @specials.nagai_free = check_special_func(
+                func,
+                return_type: LibLLVM::Type.new_void,
+                arg_types: [
+                    :pointer,
+                ]
+            )
+        end
+
+        func = @llvm_module.functions["outsource"]
+        raise "'outsource' function is only declared but not defined" if func.declaration?
+        inspect_outsource_func(func)
+        return {
+            LLVMFrontend.make_input_array(@input_struct),
+            LLVMFrontend.make_input_array(@nizk_input_struct),
+            LLVMFrontend.make_output_array(@output_struct),
+        }
     end
 end
 

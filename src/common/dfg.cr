@@ -1,3 +1,4 @@
+require "big"
 require "./types"
 require "./storage"
 require "./symbol_table_key"
@@ -40,6 +41,19 @@ private macro def_simplify_right (**kwargs)
             {% end %}
         {% end %}
         return self.new(left, const)
+    end
+end
+
+private def is_safe_bigint (
+                value : BigInt,
+                p_bits_min : Int32,
+                accept_negative : Bool = false) : Bool
+
+    limit = BigInt.new(1) << (p_bits_min - 1)
+    if accept_negative
+        0 <= value < limit
+    else
+        -limit < value < limit
     end
 end
 
@@ -879,6 +893,140 @@ class Truncate < BitWidthCast
 
     def self.static_eval (value, old_bitwidth, new_bitwidth)
         return new_bitwidth.truncate(value.to_u64!).to_i64!
+    end
+end
+
+class NagaiVerbatim < DFGExpr
+    def initialize (@value : BigInt)
+        super(BitWidth.new_for_undefined)
+    end
+end
+
+class Nagai < UnaryOp
+    def initialize (expr : DFGExpr, @negative : Bool)
+        super(:nagai, expr, bitwidth: BitWidth.new_for_undefined)
+    end
+
+    def self.bake (expr : DFGExpr, negative : Bool)
+        if expr.is_a? Constant
+            val = BigInt.new(expr.@value.to_u64!)
+            NagaiVerbatim.new(negative ? -val : val)
+        else
+            self.new(expr, negative: negative)
+        end
+    end
+end
+
+class NagaiAdd < BinaryOp
+    def initialize (left : DFGExpr, right : DFGExpr)
+        super(:nagai_add, left, right, bitwidth: BitWidth.new_for_undefined)
+    end
+
+    def self.bake (left : DFGExpr, right : DFGExpr)
+        if left.is_a? NagaiVerbatim && left.@value == 0
+            return right
+        end
+        if right.is_a? NagaiVerbatim && right.@value == 0
+            return left
+        end
+        self.new(left, right)
+    end
+end
+
+class NagaiMultiply < BinaryOp
+    def initialize (left : DFGExpr, right : DFGExpr)
+        super(:nagai_mul, left, right, bitwidth: BitWidth.new_for_undefined)
+    end
+
+    def self.simplify_verbatim (x : DFGExpr, y : NagaiVerbatim)
+        case y.@value
+        when 0
+            return y
+        when 1
+            return x
+        else
+            return self.new(x, y)
+        end
+    end
+
+    def self.bake (left : DFGExpr, right : DFGExpr)
+        if left.is_a? NagaiVerbatim
+            return self.simplify_verbatim(right, left)
+        end
+        if right.is_a? NagaiVerbatim
+            return self.simplify_verbatim(left, right)
+        end
+        self.new(left, right)
+    end
+end
+
+class NagaiDivide < BinaryOp
+    def initialize (left : DFGExpr, right : DFGExpr)
+        super(:nagai_div, left, right, bitwidth: BitWidth.new_for_undefined)
+    end
+
+    def self.bake (left : DFGExpr, right : DFGExpr)
+        if right.is_a? NagaiVerbatim
+            return left if right.@value == 1
+        end
+
+        if left.is_a? NagaiVerbatim
+            return left if left.@value == 0
+            if right.is_a? NagaiVerbatim && right.@value != 0
+                q, r = left.@value.divmod(right.@value)
+                return NagaiVerbatim.new(q) if r == 0
+            end
+        end
+
+        self.new(left, right)
+    end
+end
+
+class NagaiGetBit < BinaryOp
+    def initialize (left : DFGExpr, right : DFGExpr)
+        super(:nagai_getbit, left, right, bitwidth: BitWidth.new_for_undefined)
+    end
+
+    def self.bake (left : DFGExpr, right : DFGExpr, p_bits_min : Int32)
+        if left.is_a? NagaiVerbatim && right.is_a? Constant
+            if is_safe_bigint(left.@value, p_bits_min)
+                val = left.@value.bit(right.@value.to_u64!)
+                return NagaiVerbatim.new(BigInt.new(val))
+            end
+        end
+        self.new(left, right)
+    end
+end
+
+class NagaiLowBits < UnaryOp
+    def initialize (expr : DFGExpr)
+        super(:nagai_lowbits, expr, bitwidth: BitWidth.new(64))
+    end
+
+    def self.bake (expr : DFGExpr, p_bits_min)
+        if expr.is_a? NagaiVerbatim && is_safe_bigint(expr.@value, p_bits_min)
+            return Constant.new(
+                expr.@value.to_u64!.to_i64!,
+                bitwidth: BitWidth.new(64))
+        end
+        self.new(expr)
+    end
+end
+
+class NagaiNonZero < UnaryOp
+    def initialize (expr : DFGExpr)
+        super(:nagai_nonzero, expr, bitwidth: BitWidth.new(1))
+    end
+
+    def self.bake (expr : DFGExpr, p_bits_min : Int32)
+        if expr.is_a? NagaiVerbatim
+            if is_safe_bigint(expr.@value, p_bits_min, accept_negative: true)
+                return Constant.new(
+                    expr.@value == 0 ? 0_i64 : 1_i64,
+                    bitwidth: BitWidth.new(1))
+            end
+        end
+        self.new(expr)
     end
 end
 

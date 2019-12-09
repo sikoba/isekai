@@ -1,3 +1,4 @@
+require "big"
 require "../../common/bitwidth"
 require "./dynamic_range"
 
@@ -36,7 +37,24 @@ struct Wire
     end
 end
 
-alias WireList = Array(Wire)
+struct WireRange
+    include Indexable(Wire)
+
+    def initialize (@start : Int32, @finish : Int32)
+    end
+
+    def self.new_for_single (w : Wire)
+        self.new(w.@index, w.@index + 1)
+    end
+
+    def size
+        @finish - @start
+    end
+
+    def unsafe_fetch (index : Int)
+        Wire.new(@start + index)
+    end
+end
 
 private struct OutputBuffer
     private struct Datum
@@ -47,8 +65,10 @@ private struct OutputBuffer
             Output
             ConstMul
             ConstMulNeg
+            ConstMulVerbatim
             Mul
             Add
+            Div
             Split
             Zerop
         end
@@ -67,7 +87,7 @@ private struct OutputBuffer
     end
 
     @data = Array(Datum).new
-    @split_outs = Array(Int32).new
+    @verbatims = Array(BigInt).new
     @file : File
 
     def initialize (@file)
@@ -93,6 +113,12 @@ private struct OutputBuffer
         @data << Datum.new(Datum::Command::ConstMulNeg, c, w, output)
     end
 
+    def write_const_mul_verbatim (c : BigInt, w : Wire, output : Wire) : Nil
+        verbatim_idx = @verbatims.size
+        @verbatims << c
+        @data << Datum.new(Datum::Command::ConstMulVerbatim, verbatim_idx, w, output)
+    end
+
     def write_mul (w : Wire, x : Wire, output : Wire) : Nil
         @data << Datum.new(Datum::Command::Mul, w, x, output)
     end
@@ -101,11 +127,12 @@ private struct OutputBuffer
         @data << Datum.new(Datum::Command::Add, w, x, output)
     end
 
-    def write_split (w : Wire, outputs : WireList) : Nil
-        out_begin = @split_outs.size
-        outputs.each { |x| @split_outs << x.@index }
-        out_end = @split_outs.size
-        @data << Datum.new(Datum::Command::Split, w, out_begin, out_end)
+    def write_div (w : Wire, x : Wire, output : Wire) : Nil
+        @data << Datum.new(Datum::Command::Div, w, x, output)
+    end
+
+    def write_split (w : Wire, outputs : WireRange) : Nil
+        @data << Datum.new(Datum::Command::Split, w, outputs.@start, outputs.@finish)
     end
 
     def write_zerop (w : Wire, dummy_output : Wire, output : Wire) : Nil
@@ -144,18 +171,31 @@ private struct OutputBuffer
                 datum.@arg1.to_s(base: 16, io: @file)
                 @file << " in 1 <" << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
 
+            when .const_mul_verbatim?
+                verbatim = @verbatims[datum.@arg1]
+                if verbatim < 0
+                    @file << "const-mul-neg"
+                else
+                    @file << "const-mul-"
+                end
+                verbatim.to_s(base: 16, io: @file)
+                @file << " in 1 <" << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
+
             when .mul?
                 @file << "mul in 2 <" << datum.@arg1 << " " << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
 
             when .add?
                 @file << "add in 2 <" << datum.@arg1 << " " << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
 
+            when .div?
+                @file << "div in 2 <" << datum.@arg1 << " " << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
+
             when .split?
-                out_begin, out_end = datum.@arg2, datum.@arg3
-                out_num = out_end - out_begin
-                @file << "split in 1 <" << datum.@arg1 << "> out " << out_num << " <"
-                @file << @split_outs[out_begin] unless out_num == 0
-                (out_begin+1...out_end).each { |i| @file << " " << @split_outs[i] }
+                range_start, range_finish = datum.@arg2, datum.@arg3
+                nrange = range_finish - range_start
+                @file << "split in 1 <" << datum.@arg1 << "> out " << nrange << " <"
+                @file << range_start unless nrange == 0
+                (range_start+1...range_finish).each { |i| @file << " " << i }
                 @file << ">\n"
 
             when .zerop?
@@ -228,11 +268,14 @@ struct Board
     @one_const : Wire
     @const_pool = {} of UInt128 => Wire
     @neg_const_pool = {} of UInt128 => Wire
+    @big_const_pool = {} of BigInt => Wire
+    @cached_splits = {} of Int32 => WireRange
     @inputs : Array(Tuple(Wire, BitWidth))
     @nizk_inputs : Array(Tuple(Wire, BitWidth))
     @dynamic_ranges = [] of DynamicRange
     @outbuf : OutputBuffer
-    @p_bits : Int32
+    @p_bits_min : Int32
+    @p_bits_max : Int32
 
     private def allocate_wire! (dynamic_range : DynamicRange) : Wire
         result = Wire.new(@dynamic_ranges.size)
@@ -240,11 +283,19 @@ struct Board
         result
     end
 
+    private def allocate_wire_range! (n : Int32, dynamic_range : DynamicRange) : WireRange
+        start = @dynamic_ranges.size
+        n.times { @dynamic_ranges << dynamic_range }
+        finish = @dynamic_ranges.size
+        WireRange.new(start: start, finish: finish)
+    end
+
     def initialize (
             input_bitwidths : Array(BitWidth),
             nizk_input_bitwidths : Array(BitWidth),
             output : File,
-            @p_bits : Int32)
+            @p_bits_min : Int32,
+            @p_bits_max : Int32)
 
         @outbuf = OutputBuffer.new(output)
 
@@ -274,7 +325,7 @@ struct Board
     private def dangerous? (dyn_range : DynamicRange) : Bool
         n = dyn_range.max_nbits
         raise "dangerous?() called on an undefined-width dynamic range" unless n
-        return n >= @p_bits
+        return n >= @p_bits_min
     end
 
     def input (idx : Int32) : {Wire, BitWidth}
@@ -289,16 +340,21 @@ struct Board
         @nizk_inputs[idx]
     end
 
-    def split (w : Wire) : WireList
-        w_range = @dynamic_ranges[w.@index]
+    def split (w : Wire) : WireRange
+        @cached_splits.fetch(w.@index) do
+            w_range = @dynamic_ranges[w.@index]
 
-        n = w_range.max_nbits
-        raise "Cannot split undefined-width value" unless n
-        return [w] if n <= 1
+            n = w_range.max_nbits || @p_bits_max
+            if n <= 1
+                result = WireRange.new_for_single(w)
+            else
+                result = allocate_wire_range!(n, DynamicRange.new_for_bool)
+                @outbuf.write_split(w, outputs: result)
+            end
 
-        result = WireList.new(n) { allocate_wire! DynamicRange.new_for_bool }
-        @outbuf.write_split(w, outputs: result)
-        return result
+            @cached_splits[w.@index] = result
+            result
+        end
     end
 
     private def yank (w : Wire, width : Int32) : Wire
@@ -332,9 +388,13 @@ struct Board
     def zerop (w : Wire, policy : TruncatePolicy) : Wire
         if (width = policy.truncate_to_width)
             arg = truncate(w, to: width)
-            return arg unless may_exceed?(arg, 1)
         else
             arg = w
+        end
+
+        n = @dynamic_ranges[arg.@index].max_nbits
+        if n && n <= 1
+            return arg
         end
 
         # This operation has two output wires!
@@ -425,6 +485,15 @@ struct Board
         result
     end
 
+    def const_mul (c : BigInt, w : Wire) : Wire
+        raise "Missed optimization" if c == 0
+        return w if c == 1
+
+        result = allocate_wire! DynamicRange.new_for_undefined
+        @outbuf.write_const_mul_verbatim(c, w, output: result)
+        result
+    end
+
     def mul (w : Wire, x : Wire, policy : OverflowPolicy) : Wire
         arg1, arg2, new_range = cast_to_safe_ww(w, x, policy) { |a, b| a * b }
 
@@ -484,6 +553,11 @@ struct Board
         result
     end
 
+    def const_add (c : BigInt, w : Wire) : Wire
+        return w if c == 0
+        add(constant_verbatim(c), w, OverflowPolicy.new_set_undef_range)
+    end
+
     def const_mul_neg (c : UInt128, w : Wire, policy : TruncatePolicy) : Wire
         raise "Missed optimization" if c == 0
         if (width = policy.truncate_to_width)
@@ -493,6 +567,12 @@ struct Board
         end
         result = allocate_wire! DynamicRange.new_for_undefined
         @outbuf.write_const_mul_neg(c, arg, output: result)
+        result
+    end
+
+    def div (w : Wire, x : Wire) : Wire
+        result = allocate_wire! DynamicRange.new_for_undefined
+        @outbuf.write_div(w, x, output: result)
         result
     end
 
@@ -516,6 +596,21 @@ struct Board
             result = allocate_wire! DynamicRange.new_for_undefined
             @outbuf.write_const_mul_neg(c, @one_const, output: result)
             @neg_const_pool[c] = result
+            result
+        end
+    end
+
+    def constant_verbatim (c : BigInt) : Wire
+        if c < 0
+            neg_c = -c
+            return constant_neg(neg_c.to_u64!.to_u128!) if neg_c <= UInt64::MAX
+        else
+            return constant(c.to_u64!.to_u128!) if c <= UInt64::MAX
+        end
+        return @big_const_pool.fetch(c) do
+            result = allocate_wire! DynamicRange.new_for_undefined
+            @outbuf.write_const_mul_verbatim(c, @one_const, output: result)
+            @big_const_pool[c] = result
             result
         end
     end

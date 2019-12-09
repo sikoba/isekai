@@ -11,17 +11,19 @@ module Isekai::AltBackend::Arith
 struct Backend
     private alias JoinedRequest = RequestFactory::JoinedRequest
     private alias SplitRequest = RequestFactory::SplitRequest
+    private alias NagaiRequest = RequestFactory::NagaiRequest
 
     @req_factory : RequestFactory
     @cache_joined = {} of UInt64 => JoinedRequest
     @cache_split = {} of UInt64 => SplitRequest
+    @cache_nagai = {} of UInt64 => NagaiRequest
 
     def initialize (@req_factory)
     end
 
     def visit_dependencies (expr : DFGExpr) : Nil
         case expr
-        when InputBase, Constant
+        when NagaiVerbatim, InputBase, Constant
             # no dependencies
         when Conditional
             yield expr.@cond
@@ -100,7 +102,7 @@ struct Backend
 
     def has_cached? (expr : DFGExpr)
         key = expr.object_id
-        @cache_joined.has_key?(key) || @cache_split.has_key?(key)
+        @cache_joined.has_key?(key) || @cache_split.has_key?(key) || @cache_nagai.has_key?(key)
     end
 
     private def get_joined (expr : DFGExpr) : JoinedRequest
@@ -122,6 +124,10 @@ struct Backend
         return {@cache_joined[key]?, @cache_split[key]?}
     end
 
+    private def get_nagai (expr : DFGExpr) : NagaiRequest
+        return @cache_nagai[expr.object_id]
+    end
+
     private struct ProofOfCache
     end
 
@@ -132,6 +138,11 @@ struct Backend
 
     private def cache_split! (expr : DFGExpr, request : SplitRequest) : ProofOfCache
         @cache_split[expr.object_id] = request
+        return ProofOfCache.new
+    end
+
+    private def cache_nagai! (expr : DFGExpr, request : NagaiRequest) : ProofOfCache
+        @cache_nagai[expr.object_id] = request
         return ProofOfCache.new
     end
 
@@ -162,9 +173,15 @@ struct Backend
 
         when Conditional
             cond = get_joined(expr.@cond)
-            valtrue = get_joined(expr.@valtrue)
-            valfalse = get_joined(expr.@valfalse)
-            return cache_joined! expr, @req_factory.joined_cond(cond, valtrue, valfalse)
+            if expr.@bitwidth.undefined?
+                valtrue = get_nagai(expr.@valtrue)
+                valfalse = get_nagai(expr.@valfalse)
+                return cache_nagai! expr, @req_factory.nagai_cond(cond, valtrue, valfalse)
+            else
+                valtrue = get_joined(expr.@valtrue)
+                valfalse = get_joined(expr.@valfalse)
+                return cache_joined! expr, @req_factory.joined_cond(cond, valtrue, valfalse)
+            end
 
         when Add
             left = get_joined(expr.@left)
@@ -289,6 +306,44 @@ struct Backend
                 c = cache_split! expr, req_split.first(new_width)
             end
             return c.not_nil!
+
+        when Nagai
+            arg = get_joined(expr.@expr)
+            nagai = @req_factory.nagai_create(arg, negative: expr.@negative)
+            return cache_nagai! expr, nagai
+
+        when NagaiVerbatim
+            return cache_nagai! expr, @req_factory.nagai_create(expr.@value)
+
+        when NagaiAdd
+            left = get_nagai(expr.@left)
+            right = get_nagai(expr.@right)
+            return cache_nagai! expr, @req_factory.nagai_add(left, right)
+
+        when NagaiMultiply
+            left = get_nagai(expr.@left)
+            right = get_nagai(expr.@right)
+            return cache_nagai! expr, @req_factory.nagai_mul(left, right)
+
+        when NagaiDivide
+            left = get_nagai(expr.@left)
+            right = get_nagai(expr.@right)
+            return cache_nagai! expr, @req_factory.nagai_div(left, right)
+
+        when NagaiLowBits
+            arg = get_nagai(expr.@expr)
+            return cache_split! expr, @req_factory.nagai_lowbits(arg)
+
+        when NagaiNonZero
+            arg = get_nagai(expr.@expr)
+            return cache_joined! expr, @req_factory.nagai_nonzero(arg)
+
+        when NagaiGetBit
+            left = get_nagai(expr.@left)
+            right = get_joined(expr.@right)
+            pos = right.as_constant
+            raise "Not yet implemented: NagaiGetBit with non-const position" unless pos
+            return cache_nagai! expr, @req_factory.nagai_getbit(left, pos)
 
         else
             raise "Not implemented for #{expr.class}"

@@ -9,7 +9,7 @@ end
 
 private def self.convert_leafs! (expr : DFGExpr, &block : DFGExpr -> DFGExpr) : DFGExpr
     case expr
-    when Constant, InputBase, Field
+    when NagaiVerbatim, Constant, InputBase, Field
         block.call(expr)
     when Conditional
         expr.set_operands!(
