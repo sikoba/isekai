@@ -141,10 +141,15 @@ class R1CS
         return str_res;
     end
   
-  
+    
     #generate the header for the j-r1cs file
     def json_header(constraint_nb : Int32, prime : BigInt, instance_nb : UInt32, witness_nb : Int32)
-        return "{\"r1cs\":{\"constraint_nb\":#{constraint_nb},\"extension_degree\":1,\"field_characteristic\":\"#{prime}\",\"instance_nb\":#{instance_nb},\"version\":\"1.0\",\"witness_nb\":#{witness_nb}}}"
+        #header is limited to 2048 characters because we are updating it after the file has been written. It should be safe and anyway it is easy to change.
+        header = "{\"r1cs\":{\"constraint_nb\":#{constraint_nb},\"extension_degree\":1,\"field_characteristic\":\"#{prime}\",\"instance_nb\":#{instance_nb},\"version\":\"1.0\",\"witness_nb\":#{witness_nb}}}"
+        if (header.size > 2048)
+            raise "ERROR - Header too big!"
+        end
+        header += " "*(2048-header.size)
     end
   
     #generate the json for one constraint a*b=c
@@ -168,6 +173,45 @@ class R1CS
                     json.array do
                     json.number @gate_keeper.getWireIdx(item[0])
                     json.string item[1]
+                    end
+                end
+            end
+        end
+        return JSON.parse(str)      #TODO it must be possible to generate the json directly
+    end
+
+
+        #generate the json for one constraint a*b=c
+    def to_json_str_raw(a : Array(Tuple(UInt32,BigInt)), b : Array(Tuple(UInt32,BigInt)), c : Array(Tuple(UInt32,BigInt)))
+            str_res = JSON.build do |json|
+                json.object do 
+                    json.field "A", to_json_raw(a);
+                    json.field "B", to_json_raw(b);
+                    json.field "C", to_json_raw(c);
+                end
+            end
+            return str_res;
+        end
+    def to_json_raw(lc : Array(Tuple(UInt32,String)))
+        str = JSON.build do |json|
+            json.array do
+                lc.each do |item|
+                    json.array do
+                    json.number item[0]
+                    json.string item[1]
+                    end
+                end
+            end
+        end
+        return JSON.parse(str)      #TODO it must be possible to generate the json directly
+    end
+    def to_json_raw(lc : Array(Tuple(UInt32,BigInt)))
+        str = JSON.build do |json|
+            json.array do
+                lc.each do |item|
+                    json.array do
+                        json.number item[0]
+                        json.string item[1].to_s
                     end
                 end
             end

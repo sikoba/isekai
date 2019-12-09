@@ -65,6 +65,7 @@ class LinearCombination
             @lc << {item[0], (item[1] * scalar).modulo(prime)};
         end
     end
+
 end
 
 class InternalVar
@@ -101,6 +102,7 @@ class GateKeeper
         @output_nb = 0_u32;
         @constraint_nb = 0;
         @witness_nb = 0;
+        @invalid_wire = UInt32::MAX;
         case @zkp
         when .dalek?
             @prime_field  = BigInt.new(2)**252 + BigInt.new("27742317777372353535851937790883648493")  ##Bullet proof
@@ -132,6 +134,16 @@ class GateKeeper
         ff.close();
     end
 
+    #Overwrite the header. To be called after the second pass when the header has already been written once to the file
+    def update_header
+        s = j1cs_helper().json_header(@constraint_nb, @prime_field, @inputs_nb-1+ @output_nb, @witness_nb + @nzik_nb)    
+        io = IO::Memory.new s
+        slice = Bytes.new(s.size)
+        io.read(slice)
+        f = File.open(@j1csName, mode = "r+")
+            f.write slice
+        f.close
+    end
 
     def read_ari_input_values (source_filename) : Array(BigInt)
         #filename = "#{source_filename}.in"
@@ -184,6 +196,7 @@ class GateKeeper
 
         cp.set_callback(:mul, ->(s : Int32, i : Array(UInt32), o : Array(UInt32))
         {
+            ## mul gate can now be optimized, somtimes there will not be new constraints. These numbers will be updated after the second pass.
             @constraint_nb += 1;
             @witness_nb += 1;
             return;
@@ -195,6 +208,22 @@ class GateKeeper
             @witness_nb += o.size();
             return;
         });
+
+        cp.set_callback(:dload, ->(s : Int32, i:  Array(UInt32), o : Array(UInt32))
+        {
+            @constraint_nb += i.size() *2 + 1;
+            @witness_nb += (i.size()-1) *2 + o.size();
+            return;
+        });
+
+        cp.set_callback(:divide, ->(s : Int32, i:  Array(UInt32), o : Array(UInt32))
+        {
+    ##TODO
+    @constraint_nb += 68;
+    @witness_nb += 67;
+            return;
+        });
+
         cp.set_callback(:zerop, ->(s : Int32, i : Array(UInt32), o : Array(UInt32))
         {
             @constraint_nb += 2;
@@ -219,6 +248,8 @@ class GateKeeper
         ##load_inputs(@arithName);
         header = j1cs_helper().json_header(@constraint_nb, @prime_field, @inputs_nb-1+ @output_nb, @witness_nb + @nzik_nb)    
         writeToJ1CS(header)    #Write the r1cs header in the file
+        @constraint_nb = 0; #We are counting again, but with correct number for mul gate this time
+        @witness_nb = 0;
         cp = CircuitParser.new();
         #cp.enable_log(@log);       #TODO 
 
@@ -227,6 +258,8 @@ class GateKeeper
         cp.set_callback(:const_mul, ->constMul(Int32, BigInt, Array(UInt32),  Array(UInt32)));
         cp.set_callback(:const_mul_neg, ->constMulNeg(Int32,  BigInt, Array(UInt32),  Array(UInt32)));
         cp.set_callback(:split, ->split(Int32,  Array(UInt32),  Array(UInt32)));
+        cp.set_callback(:dload, ->dload(Int32,  Array(UInt32),  Array(UInt32)));
+        cp.set_callback(:divide, ->divide(Int32,  Array(UInt32),  Array(UInt32)));
         cp.set_callback(:zerop, ->zerop(Int32,  Array(UInt32),  Array(UInt32)));
         cp.set_callback(:done, ->
         {
@@ -235,12 +268,21 @@ class GateKeeper
             return;
         })
         cp.parse_arithmetic_circuit(@arithName)
+        @witness_nb = @witness_nb - @output_nb;     #outputs are always multiplied by 1 during the output-cat at the end (dummy multiplication by 1)
+        update_header();
         if @cur_idx-@inputs_nb-@output_nb != @witness_nb + @nzik_nb
             pp "WARNING - inconsistent witness value #{@cur_idx-@inputs_nb-@output_nb}"
         end
     end
 
 
+
+    def set_witness(val : BigInt) : UInt32
+        wire = @invalid_wire
+        set_witness(wire, val, false);
+        @invalid_wire = @invalid_wire -1
+        return wire
+    end
 
     def set_witness(wire : UInt32, val : BigInt, check = false)
         #we check for an existing wire only when 'check' is true, may be this optimization is not worth, the idea is only outputs should already be in the cache and outputs should come from a mul gate
@@ -255,7 +297,7 @@ class GateKeeper
         end
         @internalCache[wire] = InternalVar.new(LinearCombination.new([{wire, BigInt.new(1)}]), val, @cur_idx);
         @cur_idx += 1;
-
+    
        # if wire < @out_wire    
        #     @internalCache[wire] = InternalVar.new(LinearCombination.new([{wire, BigInt.new(1)}]), val, @cur_idx);
        #     @cur_idx += 1;
@@ -286,7 +328,7 @@ class GateKeeper
                 return w
             end
         end
-
+        ##UInt32::MAX is used for internal witness variables having NO wire. THEY should be never retrieved!!!
         raise Exception.new("wire #{wire} not found"); 
     end
 
@@ -304,6 +346,13 @@ class GateKeeper
     #Returns the wire representing the one-constant (for Pinocchio circuits). It should be mapped to variable x0
     def one_constant
         return  [{@inputs_nb-1, BigInt.new(1)}]
+    end
+
+    def is_const(expr : LinearCombination)
+        if (expr.@lc.size == 1 && expr.@lc[0][0] == @inputs_nb-1)
+            return true;
+        end
+        return false;
     end
 
     def scalar(c : Int32)
@@ -356,13 +405,37 @@ class GateKeeper
         return;
     end
 
+
+
     ## Multiplication gate
     def mul(s : Int32, in_wires : Array, out_wires : Array)
         @stage = s;
         #We suppose there are only 2 input wires
         cache1 = substitute(in_wires[0])
         cache2 = substitute(in_wires[1])
-        val = cache1.@val * cache2.@val;      
+        val = cache1.@val * cache2.@val; 
+        out = false;
+        v = @internalCache[out_wires[0]]?
+        if (v)
+            out = true; #if the wire is already in the cache, it must be an output
+        end
+        if (!out)
+            lc = LinearCombination.new();
+            #we optimize constant inputs
+            if (is_const(cache1.@expression))
+                lc.multiply_lc(cache2.@expression.@lc, cache1.@expression.@lc[0][1], @prime_field);
+                @internalCache[out_wires[0]] =  InternalVar.new(lc, val.modulo(@prime_field), nil); 
+                return;
+            else
+                if (is_const(cache2.@expression))
+                    lc.multiply_lc(cache1.@expression.@lc, cache2.@expression.@lc[0][1], @prime_field);
+                    @internalCache[out_wires[0]] =  InternalVar.new(lc, val.modulo(@prime_field), nil); 
+                    return;
+                end
+            end
+        end
+        @constraint_nb += 1;
+        @witness_nb += 1;     
         set_witness(out_wires[0], val.modulo(@prime_field), true)
         str_res = @j1cs.not_nil!.to_json_str(cache1.@expression.@lc, cache2.@expression.@lc,  [{out_wires[0], BigInt.new(1)}])
         #DEBUG:  satisfy(cache1.@expression.@lc, cache2.@expression.@lc,  [{out_wires[0], BigInt.new(1)}])
@@ -391,6 +464,8 @@ class GateKeeper
     def zerop(s : Int32, in_wires : Array, out_wires : Array)
         @stage = s;
         cache = substitute(in_wires[0]);
+        @constraint_nb += 2;
+        @witness_nb += 2;
         ##compute outputs
         val0, val1 =  BigInt.new(0),  BigInt.new(0);
         if (cache.@val != BigInt.new(0))
@@ -409,9 +484,20 @@ class GateKeeper
         return;
     end
 
+    def divide(s : Int32, in_wires : Array, out_wires : Array)
+        #WIP
+  
+    end
+
+    def dload(s : Int32, in_wires : Array, out_wires : Array)
+       #WIP
+    end
+
     
     def split(s : Int32, in_wires : Array, out_wires : Array)
         @stage = s;
+        @constraint_nb += out_wires.size() + 1;
+        @witness_nb += out_wires.size();
         a_lc = Array(Tuple(UInt32, BigInt)).new;
         s = out_wires.size;
         e = BigInt.new(1);
