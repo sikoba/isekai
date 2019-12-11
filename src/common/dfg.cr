@@ -51,9 +51,9 @@ private def is_safe_bigint (
 
     limit = BigInt.new(1) << (p_bits_min - 1)
     if accept_negative
-        0 <= value < limit
-    else
         -limit < value < limit
+    else
+        0 <= value < limit
     end
 end
 
@@ -1003,7 +1003,7 @@ class NagaiLowBits < UnaryOp
         super(:nagai_lowbits, expr, bitwidth: BitWidth.new(64))
     end
 
-    def self.bake (expr : DFGExpr, p_bits_min)
+    def self.bake (expr : DFGExpr, p_bits_min : Int32)
         if expr.is_a? NagaiVerbatim && is_safe_bigint(expr.@value, p_bits_min)
             return Constant.new(
                 expr.@value.to_u64!.to_i64!,

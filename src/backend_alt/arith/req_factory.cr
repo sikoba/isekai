@@ -494,18 +494,15 @@ struct RequestFactory
     end
 
     private def nagai_add_const (j : NagaiRequest, c : BigInt) : NagaiRequest
-        if j.is_a? NagaiConstant && j.@value == 0
-            return NagaiConstant.new(c)
-        end
+        return j if c == 0
+        return NagaiConstant.new(c) if (j.is_a? NagaiConstant && j.@value == 0)
 
         j_wire = nagai_to_wire! j
         NagaiWire.new(@board.const_add(c, j_wire))
     end
 
     private def nagai_mul_const (j : NagaiRequest, c : BigInt) : NagaiRequest
-        if c == 0
-            return NagaiConstant.new(BigInt.new(0))
-        end
+        return NagaiConstant.new(BigInt.new(0)) if c == 0
 
         if j.is_a? NagaiConstant
             if (-1 <= j.@value <= 1) || (-1 <= c <= 1)
