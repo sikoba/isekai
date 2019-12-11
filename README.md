@@ -48,6 +48,7 @@ Here is our tentative "to do" list for the coming months.
 - add FHE library  
 - add MPC library  
 - python, java frontends
+- Domain-specific functions
 
 
 
