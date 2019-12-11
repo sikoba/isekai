@@ -21,6 +21,7 @@ The initial development of isekai until version 1.0 has been made possible by th
 # Roadmap
 
 Here is our tentative "to do" list for the coming months.
+
 *Additional language features*:
  - Integer division and modulo
  - Array look-up and dynamic storage optimisations
