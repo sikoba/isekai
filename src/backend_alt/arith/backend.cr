@@ -15,6 +15,7 @@ struct Backend
     @req_factory : RequestFactory
     @cache_joined = {} of UInt64 => JoinedRequest
     @cache_split = {} of UInt64 => SplitRequest
+    @cache_asplit = {} of {UInt64, Int32} => JoinedRequest
 
     def initialize (@req_factory)
     end
@@ -32,6 +33,13 @@ struct Backend
             yield expr.@right
         when UnaryOp
             yield expr.@expr
+        when Asplit
+            yield expr.@expr
+        when DynLoad
+            yield expr.@idx
+            expr.@storage.each do |e|
+                yield e
+            end
         else
             raise "Not implemented for #{expr.class}"
         end
@@ -106,6 +114,13 @@ struct Backend
     private def get_joined (expr : DFGExpr) : JoinedRequest
         key = expr.object_id
         @cache_joined.fetch(key) do
+            if (expr.class == Asplit)
+                asplit = expr.as(Asplit)
+                skey = { asplit.@expr.object_id, asplit.@index }
+                return @cache_asplit.fetch(skey) do
+                    raise "asplit not found in cache"
+                end
+            end
             @cache_joined[key] = @req_factory.split_to_joined(@cache_split[key])
         end
     end
@@ -116,6 +131,14 @@ struct Backend
             @cache_split[key] = @req_factory.joined_to_split(@cache_joined[key])
         end
     end
+
+    private def get_asplit (expr : DFGExpr, indice : Int32) : JoinedRequest
+        key = { expr.object_id , indice}
+        @cache_asplit.fetch(key) do
+            raise "asplit not found in cache"
+        end
+    end
+
 
     private def get_both (expr : DFGExpr) : {JoinedRequest?, SplitRequest?}
         key = expr.object_id
@@ -135,12 +158,49 @@ struct Backend
         return ProofOfCache.new
     end
 
+    private def cache_asplit! (key , request : JoinedRequest) : ProofOfCache
+        @cache_asplit[key] = request
+        return ProofOfCache.new
+    end
+
     private def cache_either! (expr : DFGExpr, request : JoinedRequest | SplitRequest) : ProofOfCache
         if request.is_a? JoinedRequest
             cache_joined! expr, request
         else
             cache_split! expr, request
         end
+    end
+
+    private def sign(req : JoinedRequest)
+        return @req_factory.joined_to_split(req).last
+    end
+
+    private def negate(req : JoinedRequest)
+        a = @req_factory.joined_sub(JoinedRequest.new_for_const(0_u128, req.@width), req)
+        if a.is_a? SplitRequest
+            a = @req_factory.split_to_joined(a)
+        end
+        return a;
+    end
+
+    private def signed_division(a : JoinedRequest, b : JoinedRequest, getdiv : Bool, getmod : Bool) : Array(JoinedRequest)
+        a_s = sign(a)
+        b_s = sign(b)
+        a_neg = negate(a);
+        a_abs = @req_factory.joined_cond(a_s, a_neg, a);
+        b_neg = negate(b);
+        b_abs = @req_factory.joined_cond(b_s, b_neg, b);
+        div_req = @req_factory.joined_divide(a_abs, b_abs);  
+        result = Array(JoinedRequest).new;
+        if (getdiv)
+            q_neg = negate(div_req[0])
+            result << @req_factory.joined_cond(a_s, @req_factory.joined_cond(b_s, div_req[0], q_neg), @req_factory.joined_cond(b_s, q_neg , div_req[0])); 
+        end
+        if (getmod)
+            r_neg = negate(div_req[1])
+            result << @req_factory.joined_cond(a_s, r_neg, div_req[1])
+        end
+        return result;
     end
 
     def lay_down_and_cache (expr : DFGExpr) : ProofOfCache
@@ -289,6 +349,50 @@ struct Backend
                 c = cache_split! expr, req_split.first(new_width)
             end
             return c.not_nil!
+
+        when DynLoad    
+            storage_req = Array(JoinedRequest).new();
+            expr.@storage.each do |i_expr|
+                storage_req << get_joined(i_expr)
+            end
+            idx_req = get_joined(expr.@idx);
+            return cache_joined! expr, @req_factory.joined_dload(storage_req, idx_req) 
+
+        when Asplit
+            if  !@cache_asplit.has_key?({expr.@expr.object_id, expr.@index})
+                idx_req = get_joined(expr.@expr);   
+                di = @req_factory.joined_asplit(idx_req, expr.@nindices) 
+                (0..di.size-1).each do |i|
+                    key = { expr.@expr.object_id, i }
+                    cache_asplit! key, di[i]
+                end
+            end
+            return ProofOfCache.new            
+            
+        when Modulo
+            left = get_joined(expr.@left)
+            right = get_joined(expr.@right)
+            div_requests = @req_factory.joined_divide(left, right)
+            return cache_joined! expr, div_requests[1]
+
+        when SignedModulo
+            left = get_joined(expr.@left)
+            right = get_joined(expr.@right)
+            div_requests = signed_division(left,right, false, true);
+            return cache_joined! expr, div_requests[0]
+
+        when SignedDivide
+            left = get_joined(expr.@left)
+            right = get_joined(expr.@right)
+            div_requests = signed_division(left,right, true, false);
+            return cache_joined! expr, div_requests[0]
+      
+        when Divide
+            left = get_joined(expr.@left)
+            right = get_joined(expr.@right)
+            div_requests = @req_factory.joined_divide(left, right)
+            return cache_joined! expr, div_requests[0]
+
 
         else
             raise "Not implemented for #{expr.class}"

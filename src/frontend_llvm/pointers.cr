@@ -124,7 +124,7 @@ class StaticFieldPointer < AbstractPointer
 end
 
 # Points to an array element with statically unknown index.
-class DynamicFieldPointer < AbstractPointer
+class DynamicFieldPointer_legacy < AbstractPointer
     @max_size : Int32?
 
     # Assumes that '@field' is of integer type.
@@ -146,6 +146,7 @@ class DynamicFieldPointer < AbstractPointer
             Log.log.info("possible undefined behavior: index is undefined or always invalid")
             return LLVMFrontend.make_undef_array_elem(@base)
         end
+
         result = assumption.reduce(@base.@elems[0])
         (1...n).each do |i|
             i_const = Constant.new(i.to_i64, bitwidth: @field.@bitwidth)
@@ -184,6 +185,71 @@ class DynamicFieldPointer < AbstractPointer
         return PointerFactory.bake_field_pointer(base: @base, field: new_field)
     end
 end
+
+
+class DynamicFieldPointer < DynamicFieldPointer_legacy
+    ##TODO to test
+    def load (assumption : Assumption) : DFGExpr
+        unless (n = @max_size)
+            Log.log.info("possible undefined behavior: index is undefined or always invalid")
+            return LLVMFrontend.make_undef_array_elem(@base)
+        end
+        storage = [] of DFGExpr;
+        bitwidth = 1;
+        (0...n).each do |i|
+            storage.push(assumption.reduce(@base.@elems[i]));
+            if (@base.@elems[i].@bitwidth.@width > bitwidth)
+                bitwidth = @base.@elems[i].@bitwidth.@width
+            end
+        end
+        result = DynLoad.new(storage, @field, BitWidth.new(bitwidth));
+        return result;
+    end
+
+    #load using asplit gate. It should replace the load function BUT the result is not as good as with the dedicated dload gate (r1cs is much bigger). However the dload gate does the same as this so we should have only the asplit gate.. TODO make it as optimised as dload.
+    def load_split (assumption : Assumption) : DFGExpr
+        unless (n = @max_size)
+            Log.log.info("possible undefined behavior: index is undefined or always invalid")
+            return LLVMFrontend.make_undef_array_elem(@base)
+        end
+
+        result = assumption.reduce(@base.@elems[0])
+        
+        (1...n).each do |i|
+            di = Asplit.new(@field, i, n)
+            zero = Constant.new(0_i64, bitwidth: @base.@elems[i].@bitwidth)
+            result = Add.new(result, Conditional.bake(
+                di,
+                assumption.reduce(@base.@elems[i]),
+                zero))
+        end
+        return result
+    end
+    
+    def store! (value : DFGExpr, assumption : Assumption) : Nil
+        unless (n = @max_size)
+            Log.log.info("possible undefined behavior: index is undefined or always invalid")
+            return
+        end
+
+        if n == 1
+            @base.@elems[0] = assumption.conditionalize(
+                old_expr: @base.@elems[0],
+                new_expr: value)
+        else
+            (0...n).each do |i|
+                di = Asplit.new(@field, i, n)
+                assumption.push(di, true)
+                @base.@elems[i] = assumption.conditionalize(
+                    old_expr: @base.@elems[i],
+                    new_expr: value)
+                assumption.pop
+            end
+        end
+    end
+
+end
+
 
 module PointerFactory
     def self.bake_field_pointer (base : Structure, field : DFGExpr) : AbstractPointer

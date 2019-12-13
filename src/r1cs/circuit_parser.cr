@@ -303,6 +303,39 @@ class CircuitParser
         log_line "   zerop #{$1.to_i} => #{a}"
         callback(:zerop, stage, [$1.to_u32], a)
 
+        # dload
+      elsif line =~ /^dload in (\d+) <([\s\d]+)> out 1 <(\d+)>$/
+        ua = Array(UInt32).new
+        ua = $2.split.map{ |x| x.to_u32 }
+        log_abort "Inconsistent number of wires:  #{line} " if ua.size != $1.to_i
+
+        log_line "  dload #{$1.to_i} => #{ua}"
+        callback(:dload, stage, ua, [$3.to_u32]);    
+        
+        # divide
+      elsif line =~ /^div_(\d+) in (\d+) <([\s\d]+)> out 2 <([\s\d]+)>$/
+        ua = Array(UInt32).new
+        ua = $3.split.map{ |x| x.to_u32 }
+        log_abort "Inconsistent number of wires:  #{line} " if ua.size != $2.to_i
+        ua << $1.to_u32
+        uo = Array(UInt32).new
+        uo = $4.split.map{ |x| x.to_u32 }
+        log_abort "Inconsistent number of wires:  #{line} " if ua.size != 2
+       ## uo << $1.to_u32  ##TODO TEMP HACK
+        log_line "  divide #{$2.to_i} => #{ua}"
+        callback(:divide, stage, ua, uo); 
+
+        # asplit
+      elsif line =~ /^asplit in (\d+) <([\s\d]+)> out (\d+) <([\s\d]+)>$/
+        ua = Array(UInt32).new
+        ua = $2.split.map{ |x| x.to_u32 }
+        log_abort "Inconsistent number of wires:  #{line} " if ua.size != $1.to_i
+        uo = Array(UInt32).new
+        uo = $4.split.map{ |x| x.to_u32 }
+        log_abort "Inconsistent number of wires:  #{line} " if ua.size != $3.to_i
+        log_line "  asplit #{$2.to_i} => #{ua}"
+        callback(:asplit, stage, ua, uo); 
+
         # unknown gate #
       else
         #ops << [ :imlost ] #TODO add a unknown operation callback to the circuit checker

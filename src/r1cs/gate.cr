@@ -218,9 +218,9 @@ class GateKeeper
 
         cp.set_callback(:divide, ->(s : Int32, i:  Array(UInt32), o : Array(UInt32))
         {
-    ##TODO
-    @constraint_nb += 68;
-    @witness_nb += 67;
+            bitwidth = i[2].to_i32
+            @constraint_nb += 2 + bitwidth
+            @witness_nb += 2+ bitwidth    
             return;
         });
 
@@ -259,6 +259,7 @@ class GateKeeper
         cp.set_callback(:const_mul_neg, ->constMulNeg(Int32,  BigInt, Array(UInt32),  Array(UInt32)));
         cp.set_callback(:split, ->split(Int32,  Array(UInt32),  Array(UInt32)));
         cp.set_callback(:dload, ->dload(Int32,  Array(UInt32),  Array(UInt32)));
+        cp.set_callback(:asplit, ->asplit(Int32,  Array(UInt32),  Array(UInt32)));
         cp.set_callback(:divide, ->divide(Int32,  Array(UInt32),  Array(UInt32)));
         cp.set_callback(:zerop, ->zerop(Int32,  Array(UInt32),  Array(UInt32)));
         cp.set_callback(:done, ->
@@ -380,8 +381,6 @@ class GateKeeper
     
         str_res =  @j1cs.not_nil!.inputs_to_json(inputs,witnesses);
         return str_res + "\n" + @j1cs.not_nil!.decomplement_json(inputs, @inputs_nb-1)
-    
-        ##TODO check the nzik!!! + write the result (decomplement) object#######################################################################################################################################################################################
     end
 
 
@@ -484,13 +483,220 @@ class GateKeeper
         return;
     end
 
+
     def divide(s : Int32, in_wires : Array, out_wires : Array)
-        #WIP
-  
+        @stage = s;
+        bitwidth = in_wires[2].to_i32           ##it is not nice to use the list of wires to pass the bits width... 
+        cache_a = substitute(in_wires[0]);
+        cache_b = substitute(in_wires[1]);
+        @constraint_nb += 1;
+        @witness_nb += 2;
+        val_q = cache_a.@val // cache_b.@val;   ##TODO should we check divide by 0?
+        val_r = cache_a.@val - val_q*cache_b.@val;
+        set_witness(out_wires[0], val_q);
+        set_witness(out_wires[1], val_r);
+        #a-r = q*b
+        lc = LinearCombination.new();
+        lc.add(cache_a.@expression.@lc, @prime_field);
+        lc.add([{out_wires[1], @prime_field + BigInt.new(-1)}], @prime_field)
+        str_res = j1cs_helper().to_json_str([{out_wires[0], BigInt.new(1)}], cache_b.@expression.@lc, lc.@lc)
+        writeToJ1CS(str_res); 
+        #q is 32 bits
+        new_split(out_wires[0], bitwidth)
+        #b-r > 0
+        if (val_r > cache_b.@val)
+            raise "invalid remainder for wire #{out_wires[1]}"
+        end
+        var_r = InternalVar.new(LinearCombination.new([{out_wires[1], BigInt.new(1)}]), val_r, nil)
+        compare(var_r, cache_b, bitwidth, false);
+        return;
+    end
+
+    #a<b or b>=a
+    def compare(a : InternalVar, b : InternalVar, width : Int32, signed : Bool)
+        bitwidth = width
+        if (!signed)
+            bitwidth = bitwidth + 1
+        end
+        cmp_lc = LinearCombination.new();
+        cmp_lc.add(a.@expression, @prime_field);
+        minus = BigInt.new(1)**(bitwidth) - BigInt.new(1);
+        b_lc = LinearCombination.new();
+        b_lc.multiply_lc(b.@expression.@lc, minus, @prime_field);
+        cmp_lc.add(b_lc, @prime_field);
+        val = (a.@val  + minus*b.@val).modulo(@prime_field);
+        a_lc = split_compare(val, width, signed)
+        str_res = j1cs_helper().to_json_str(a_lc, one_constant, cmp_lc.@lc)
+        writeToJ1CS(str_res); 
+        @constraint_nb = @constraint_nb + 1
+ 
+    end
+
+
+    #prepare constraints that state a<b or a>=b
+    def split_compare( val : BigInt, width : Int32, signed : Bool)
+        bitwidth = 2 * width
+        bitset = width
+        if (signed)
+            bitwidth = bitwidth -1
+            bitset = bitset -1
+        end
+        @constraint_nb = @constraint_nb + bitwidth-1
+        @witness_nb = @witness_nb +  bitwidth -1
+        a_lc = Array(Tuple(UInt32, BigInt)).new;
+        e = BigInt.new(1);      
+        w : UInt32 = 0_u32
+        (0..bitwidth-1).each do |i|
+            w_val = val.bit(i).to_big_i;
+            if (i != bitset)
+                w = set_witness(w_val)
+                a_lc << {w, e}
+                str_res = j1cs_helper().to_json_str([{w, BigInt.new(1)}], [{w, BigInt.new(1)}], [{w, BigInt.new(1)}])
+                writeToJ1CS(str_res);
+            else
+                a_lc << {@inputs_nb-1,e*w_val}
+            end
+            e = e * 2;
+        end
+        return a_lc;
+    end
+    
+    def new_split(in_wire : UInt32, bitwidth : Int32)
+        cache = substitute(in_wire)
+        new_split(cache.@val, cache.@expression, bitwidth)
+    end
+
+    def pre_split(val : BigInt, bitwidth : Int32) : Array(Tuple(UInt32, BigInt))
+        a_lc = Array(Tuple(UInt32, BigInt)).new;
+        e = BigInt.new(1);      
+        w : UInt32 = 0_u32
+        (0..bitwidth-1).each do |i|
+            w_val = val.bit(i).to_big_i;
+            w = set_witness(w_val)
+            a_lc << {w, e}
+            e = e * 2;
+            str_res = j1cs_helper().to_json_str([{w, BigInt.new(1)}], [{w, BigInt.new(1)}], [{w, BigInt.new(1)}])
+            writeToJ1CS(str_res);
+        end
+        return a_lc;
+    end
+
+
+    def new_split(val : BigInt, expr : LinearCombination, bitwidth : Int32)
+        a_lc = Array(Tuple(UInt32, BigInt)).new;
+        e = BigInt.new(1);
+       
+        s_value = BigInt.new(0);
+        w : UInt32 = 0_u32
+        (0..bitwidth-1).each do |i|
+            w_val = val.bit(i).to_big_i;
+            w = set_witness(w_val)
+            s_value = s_value + w_val * e;
+            a_lc << {w, e}
+            e = e * 2;
+            str_res = j1cs_helper().to_json_str([{w, BigInt.new(1)}], [{w, BigInt.new(1)}], [{w, BigInt.new(1)}])
+            writeToJ1CS(str_res);
+        end
+        str_res = j1cs_helper().to_json_str(a_lc, one_constant, expr.@lc)
+        writeToJ1CS(str_res); 
+        @constraint_nb = @constraint_nb + bitwidth+1
+        @witness_nb = @witness_nb +  bitwidth 
+    end
+
+    def not_null(in_val : BigInt, expr : Array(Tuple(UInt32, BigInt)))
+        if (in_val == BigInt.new(0))
+            raise "Error - value should not be null"
+        end   
+        m_val = Maths.new().modulo_inverse(in_val, @prime_field); 
+        m = set_witness(m_val)
+        str_res = j1cs_helper().to_json_str(expr, [{m, BigInt.new(1)}], one_constant)
+        writeToJ1CS(str_res);
+    end
+
+
+    def asplit(s : Int32, in_wires : Array, out_wires : Array)
+        @stage = s;
+        cache_b = substitute(in_wires[0]);
+        n = out_wires.size();
+        @constraint_nb += n + 2;
+        @witness_nb += n;
+
+        #dirac constraints: d1...dn
+        var0 = Array(Tuple(UInt32, BigInt)).new;
+        var1 = Array(Tuple(UInt32, BigInt)).new;
+        (0..n-1).each do |i|
+            if (cache_b.@val != i)
+                set_witness(out_wires[i], BigInt.new(0));
+            else
+                set_witness(out_wires[i], BigInt.new(1));
+            end
+            str_res = j1cs_helper().to_json_str([{out_wires[i], BigInt.new(1)}], [{out_wires[i], BigInt.new(1)}], [{out_wires[i], BigInt.new(1)}])
+            var0 << { out_wires[i],  BigInt.new(1) }
+            var1 << { out_wires[i],  BigInt.new(i) }
+            writeToJ1CS(str_res);  
+        end
+        
+        # sum di = 1
+        str_res = j1cs_helper().to_json_str(one_constant, var0, one_constant)
+        writeToJ1CS(str_res); 
+        # b = sum i*di
+        str_res = j1cs_helper().to_json_str(one_constant, var1, cache_b.@expression.@lc)
+        writeToJ1CS(str_res); 
     end
 
     def dload(s : Int32, in_wires : Array, out_wires : Array)
-       #WIP
+        @stage = s;
+        cache_b = substitute(in_wires[0]);
+        n = in_wires.size();
+        @constraint_nb += n*2 + 1;
+        @witness_nb += (n-1) *2 + out_wires.size();
+
+        #dirac constraints
+        #dirac variables have no wire, they should come an asplit gate instead..
+        #but it's ok as they are not re-used after.
+        #d1...dn
+        d_idx = @invalid_wire;
+        var0 = Array(Tuple(UInt32, BigInt)).new;
+        var1 = Array(Tuple(UInt32, BigInt)).new;
+        (1..n-1).each do |i|
+            if (cache_b.@val != i-1)
+                set_witness(BigInt.new(0));
+            else
+                set_witness(BigInt.new(1));
+            end
+            str_res = j1cs_helper().to_json_str_raw([{@cur_idx-1, BigInt.new(1)}], [{@cur_idx-1, BigInt.new(1)}], [{@cur_idx-1, BigInt.new(1)}])
+            var0 << { @cur_idx -1,  BigInt.new(1) }
+            var1 << { @invalid_wire +1,  BigInt.new(i-1) }
+            writeToJ1CS(str_res);  
+        end
+        
+        # sum di = 1
+        str_res = j1cs_helper().to_json_str_raw([{0_u32, BigInt.new(1)}], var0, [{0_u32, BigInt.new(1)}])
+        writeToJ1CS(str_res); 
+        # b = sum i*di
+        str_res = j1cs_helper().to_json_str(one_constant, var1, cache_b.@expression.@lc)
+        writeToJ1CS(str_res); 
+        # ci = ai*di
+        var2 = Array(Tuple(UInt32, BigInt)).new;
+        out_val = BigInt.new(0);
+        (1..n-1).each do |i|
+            cache_i = substitute(in_wires[i]);
+            if (cache_b.@val != i-1)
+                set_witness(BigInt.new(0));
+            else
+                set_witness(cache_i.@val);
+                out_val = cache_i.@val
+            end
+            str_res = j1cs_helper().to_json_str(cache_i.@expression.@lc, [{d_idx-i+1, BigInt.new(1)}], [{@invalid_wire+1, BigInt.new(1)}])
+            var2 << { @cur_idx-1 ,  BigInt.new(1) }
+            writeToJ1CS(str_res);
+        end
+        # out = sum ci
+        set_witness(out_wires[0], out_val); 
+        str_res = j1cs_helper().to_json_str_raw([{0_u32, BigInt.new(1)}], var2, [{ @cur_idx-1, BigInt.new(1)}])
+        writeToJ1CS(str_res); 
+        #.todo we can probably reduce the nb of constraints
+        return;
     end
 
     

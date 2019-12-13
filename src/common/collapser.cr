@@ -76,7 +76,7 @@ end
 # Expression evaluator - evaluates the expression to scalar
 # constants
 class ExpressionEvaluator(ExprType, ReducedType) < Collapser(ExprType, ReducedType)
-    def get_dependencies(expr)
+    def get_dependencies(expr)  : Array(ExprType)
         return expr.collapse_dependencies()
     end
 
@@ -108,7 +108,7 @@ class ExpressionCollapser(ExprType, ReducedType) < Collapser(ExprType, ReducedTy
         super()
     end
 
-    def get_dependencies (expr)
+    def get_dependencies (expr) : Array(ExprType)
         return expr.collapse_dependencies()
     end
 
