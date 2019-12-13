@@ -23,9 +23,10 @@ The initial development of isekai until version 1.0 has been made possible by th
 Here is our tentative "to do" list for the coming months.
 
 *Additional language features*:
- - Integer division and modulo
- - Array look-up and dynamic storage optimisations
+ - ~~Integer division and modulo~~  &#x2705; DONE!
+ - ~~Array look-up and dynamic storage optimisations~~ &#x2705; DONE!
  - Native field operations for efficient cryptgraphic primitives implementation
+ - Floating point operations
 
 *LLVM support improvements*:  
 - full function call  
@@ -36,6 +37,7 @@ Here is our tentative "to do" list for the coming months.
 - Fractal  
 - Plonk  
 - Marlin  
+- Starks
 
 *LLVM Frontends* : 
 - C/C++ (i.e integrating Clang into isekai)  
@@ -54,7 +56,9 @@ Here is our tentative "to do" list for the coming months.
 
 ## Overview
 
-Isekai is a tool for zero-knowledge applications. It currently parses a C/C++ program and outputs the arithmetic and/or boolean circuit representing the expression equivalent to the input program. Support for more languages will be added in the future. isekai uses libclang to parse the C program, so most of the preprocessor (including the includes) is available. Then isekai generates a rank-1 constraints system from the arithmetic representation. Isekai can then proove and verify the program execution using several ZKP libraries (libsnak, bulletproof and libiop). isekai is written using crystal programming language allowing for a strong type safety and it is compiled to a native executable, ensuring maximum efficiency in parsing.
+Isekai is a tool for zero-knowledge applications. It currently parses a C/C++ program and outputs the arithmetic and/or boolean circuit representing the expression equivalent to the input program. 
+Support for more languages will be added in the future. isekai uses libclang to parse the C program, so most of the preprocessor (including the includes) is available. Then isekai generates an arithmetic representation and converts it to a rank-1 constraints system. 
+Isekai can proove and verify the program execution using several ZKP libraries (libsnak, bulletproof and libiop). isekai is written using crystal programming language allowing for a strong type safety and it is compiled to a native executable, ensuring maximum efficiency in parsing.
 
 # isekai 1.0 released! - November 2019
 
@@ -208,7 +212,36 @@ In order to use Bulletproof instead of libsnark, you need to specify the dalek s
 As you can see, the verification requires (for now) the .j1 file (and also the public inputs), contrary to libsnark.
 Please note that although very similar, the r1cs generated for libsnark and bulletproof are not compatible, this is why you need to specify the scheme when generating it.
 
-## ZKP Schemes
+## Features and Limitations
+
+### Programming language
+isekai is the most versatile ZKP project that we know of, regarding high-level programming languages supported features:
+* full C/C++ pre-processing support
+* include files (header files)
+* Integer operations:
+   * Arithmetic: + , - , * , / , %
+   * Binary: and, or, not, xor, left/right shift
+   * Comparisons: < , > , <=, >=, ==, !=
+* Control flow graphs from C99 code, without goto, break, continue and return statements
+* Inline function calls
+* Loops with constant (or provided maximum) iterations
+* Arrays
+* Pointers
+
+
+### Limitations
+However there are still some limitations:
+* Function calls must be in-lined
+* No support for dynamic pointers, as well as:
+  * Dynamic arrays 
+  * Dynamic allocations
+  * Pointers created from a constant
+* Source code must be in one file (except for include files)
+* Global/static variables are not supported
+* No floating point types
+* Entry point must have C name mangling
+
+### ZKP Schemes
 
 With isekai 1.0 we now support more ZKP schemes, the --scheme option can be used with the following values.
 
