@@ -1,11 +1,54 @@
 [![Build Status](https://api.travis-ci.com/shdown/isekai.svg?branch=develop)](https://travis-ci.com/shdown/isekai)
 
-# isekai
 
-Isekai is a **verifiable computation framework** that allows to work with several programming languages and verifiable computation systems while using a single code-to-circuit module. Isekai is being developed by [Sikoba Research](http://research.sikoba.com) with the support of [Fantom Foundation](http://fantom.foundation). We seek to cooperate with researchers and developers who work on verifiable computation projects, as well as with blockchain projects that want to offer verifiable computation.
+# isekai in a nutshell
 
-To find out more, please consult the **[isekai Technical documentation](https://github.com/sikoba/isekai/blob/develop/isekai_technical_documentation.pdf)**, read this [Medium post](https://medium.com/sikoba-network/isekai-verifiable-computation-framework-introduction-and-call-for-partners-daea383b1277) or contact us: isekai at protonmail dot com.
+Isekai is a **verifiable computation framework** that allows to work with several programming languages and verifiable computation systems while using a single code-to-circuit module. **Our aim is to make zero-knowledge proofs accessible to mainstream programmers.** Specifically:
 
+* isekai is the *only tool to support 3 ZKP libraries and 5 proof systems*: libsnark (Groth16 and BCTV14a), dalek (Bulletproofs) and libiop (Aurora and Ligero)
+
+* isekai is the *first tool allowing programmers to take existing C or C++ code and generally require only slight modifications to make it compatible with isekai*. This is because isekai supports more features of regular programming languages than any other project we know of, without using a domain specific language.
+
+Isekai is being developed by [Sikoba Research](http://research.sikoba.com) with the support of [Fantom Foundation](http://fantom.foundation). We seek to cooperate with researchers and developers who work on verifiable computation projects, as well as with blockchain projects that want to offer verifiable computation.
+
+To find out more, please consult the [isekai Medium posts](https://medium.com/sikoba-network/isekai/home) or contact us at isekai at protonmail dot com. There is also a (slightly outdated) [isekai Technical documentation](https://github.com/sikoba/isekai/blob/develop/isekai_technical_documentation.pdf) from July 2019.
+
+
+# Call for sponsors and partners
+
+The initial development of isekai until version 1.0 has been made possible by the support of [Fantom Foundation](http://fantom.foundation). We are now looking for new sponsors and partners for the months ahead. Our goal is to make isekai a community project and to keep it free and open source.
+ 
+# Roadmap
+
+Here is our tentative "to do" list for the coming months.
+
+*Additional language features*:
+ - Integer division and modulo
+ - Array look-up and dynamic storage optimisations
+ - Native field operations for efficient cryptgraphic primitives implementation
+
+*LLVM support improvements*:  
+- full function call  
+- new LLVM instructions: bitcast, memcpy, memset  
+- global/static variables  
+
+*Support for additional ZKP systems* :  
+- Fractal  
+- Plonk  
+- Marlin  
+
+*LLVM Frontends* : 
+- C/C++ (i.e integrating Clang into isekai)  
+- Rust  
+- Crystal
+
+*More long-term goals*:  
+- WebAssembly frontend  
+- TinyRAM  
+- add FHE library  
+- add MPC library  
+- python, java frontends
+- Domain-specific functions
 
 
 
@@ -13,14 +56,16 @@ To find out more, please consult the **[isekai Technical documentation](https://
 
 Isekai is a tool for zero-knowledge applications. It currently parses a C/C++ program and outputs the arithmetic and/or boolean circuit representing the expression equivalent to the input program. Support for more languages will be added in the future. isekai uses libclang to parse the C program, so most of the preprocessor (including the includes) is available. Then isekai generates a rank-1 constraints system from the arithmetic representation. Isekai can then proove and verify the program execution using several ZKP libraries (libsnak, bulletproof and libiop). isekai is written using crystal programming language allowing for a strong type safety and it is compiled to a native executable, ensuring maximum efficiency in parsing.
 
-# isekai 1.0 released!
-This version is fullfilling our goals for a tool integrating several standard programming languages with several ZKP scheme. 
+# isekai 1.0 released! - November 2019
+
+This version is fullfilling our goals for a tool integrating several standard programming languages with several ZKP schemes. 
 
 # Major Update - October 2019
 
 isekai now supports LLVM bitcode! This means in theory that you can compile any language to work with isekai as long as you have an LLVM frontend for it. In practise we have successfully tested C and C++ through LLVM. With the support of LLVM comes many improvements; pointers, arrays, function call and many other C features are supported, and of course, also C++.
 Another feature we are proud to deliver is the support of Bulletproof zero-knowledge scheme. One major advantage of this scheme is that proofs do not need a trusted setup. This does not come for free unfortunately as it has impact on performances. Nevertheless, with isekai you can now easily compare with zk-snarks by simply changing the scheme!
 We believe isekai is the first project that can handle multiple languages and multiple zero-knowledge proof systems.
+
 
 # Building the project
 
