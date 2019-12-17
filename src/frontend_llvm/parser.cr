@@ -40,7 +40,12 @@ def self.make_input_expr_of_type (type, which : InputBase::Kind) : DFGExpr
             offset += 1
             result
         when .pointer_type_kind?
-            raise "Input structure contains a pointer"
+            result = InputBase.new(
+                which: which,
+                idx: offset,
+                bitwidth: BitWidth.new_for_undefined)
+            offset += 1
+            result
         else
             raise "unreachable"
         end
@@ -53,7 +58,7 @@ def self.make_output_expr_of_type (type) : DFGExpr
         when .integer_type_kind?
             Constant.new(0, bitwidth: TypeUtils.get_type_bitwidth_unchecked(scalar_type))
         when .pointer_type_kind?
-            raise "Output structure contains a pointer"
+            NagaiVerbatim.new(BigInt.new(0))
         else
             raise "unreachable"
         end

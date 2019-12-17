@@ -42,8 +42,11 @@ private def self.each_logical_input (
             value = values[i - 1]? || 0
             bitwidth = nizk_inputs[i - 1 - n_inputs]
         end
-        unsigned_value = bitwidth.truncate(value.to_u64!)
-        yield unsigned_value, bitwidth
+        if bitwidth.undefined?
+            yield value, bitwidth
+        else
+            yield bitwidth.truncate(value.to_u64!), bitwidth
+        end
     end
 end
 
@@ -58,6 +61,7 @@ end
 def self.boolean_write_inputs (circuit_filename, values, inputs, nizk_inputs)
     InputWriter.generate("#{circuit_filename}.in") do |writer|
         each_logical_input(values, inputs, nizk_inputs) do |value, bitwidth|
+            raise "Nagai values on boolean boards are not supported" if bitwidth.undefined?
             (0...bitwidth.@width).each do |i|
                 writer.write((value >> i) & 1)
             end

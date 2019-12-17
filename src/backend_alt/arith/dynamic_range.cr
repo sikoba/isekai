@@ -36,7 +36,11 @@ private struct DynamicRange
 
     @[AlwaysInline]
     def self.new_for_bitwidth (bitwidth : BitWidth)
-        return self.new(width: bitwidth.@width)
+        if bitwidth.undefined?
+            self.new_for_undefined
+        else
+            self.new(width: bitwidth.@width)
+        end
     end
 
     @[AlwaysInline]

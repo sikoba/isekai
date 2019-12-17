@@ -67,14 +67,22 @@ struct RequestFactory
     def initialize (@board, @sloppy)
     end
 
-    def bake_input (idx : Int32) : JoinedRequest
-        wire, bitwidth = @board.input(idx)
-        return JoinedRequest.new_for_wire(wire, width: bitwidth.@width)
+    private def bake_joined_or_nagai_request (wire, bitwidth) : JoinedRequest | NagaiRequest
+        if bitwidth.undefined?
+            NagaiWire.new(wire)
+        else
+            JoinedRequest.new_for_wire(wire, width: bitwidth.@width)
+        end
     end
 
-    def bake_nizk_input (idx : Int32) : JoinedRequest
+    def bake_input (idx : Int32) : JoinedRequest | NagaiRequest
+        wire, bitwidth = @board.input(idx)
+        bake_joined_or_nagai_request(wire, bitwidth)
+    end
+
+    def bake_nizk_input (idx : Int32) : JoinedRequest | NagaiRequest
         wire, bitwidth = @board.nizk_input(idx)
-        return JoinedRequest.new_for_wire(wire, width: bitwidth.@width)
+        bake_joined_or_nagai_request(wire, bitwidth)
     end
 
     def bake_const (c : UInt128, width : Int32) : JoinedRequest
@@ -604,6 +612,13 @@ struct RequestFactory
         else
             NagaiConstant.new(BigInt.new(0))
         end
+    end
+
+    def nagai_add_output! (j : NagaiRequest) : Nil
+        @board.add_output!(
+            nagai_to_wire!(j),
+            policy: TruncatePolicy.new_no_truncate
+        )
     end
 end
 

@@ -146,11 +146,25 @@ struct Backend
         return ProofOfCache.new
     end
 
-    private def cache_either! (expr : DFGExpr, request : JoinedRequest | SplitRequest) : ProofOfCache
+    private def cache_joined_or_split! (
+            expr : DFGExpr,
+            request : JoinedRequest | SplitRequest) : ProofOfCache
+
         if request.is_a? JoinedRequest
             cache_joined! expr, request
         else
             cache_split! expr, request
+        end
+    end
+
+    private def cache_joined_or_nagai! (
+            expr : DFGExpr,
+            request : JoinedRequest | NagaiRequest) : ProofOfCache
+
+        if request.is_a? JoinedRequest
+            cache_joined! expr, request
+        else
+            cache_nagai! expr, request
         end
     end
 
@@ -159,9 +173,9 @@ struct Backend
         when InputBase
             case expr.@which
             when .input?
-                return cache_joined! expr, @req_factory.bake_input(expr.@idx)
+                return cache_joined_or_nagai! expr, @req_factory.bake_input(expr.@idx)
             when .nizk_input?
-                return cache_joined! expr, @req_factory.bake_nizk_input(expr.@idx)
+                return cache_joined_or_nagai! expr, @req_factory.bake_nizk_input(expr.@idx)
             else
                 raise "unreachable"
             end
@@ -191,7 +205,7 @@ struct Backend
         when Subtract
             left = get_joined(expr.@left)
             right = get_joined(expr.@right)
-            return cache_either! expr, @req_factory.joined_sub(left, right)
+            return cache_joined_or_split! expr, @req_factory.joined_sub(left, right)
 
         when Multiply
             left = get_joined(expr.@left)
@@ -290,7 +304,7 @@ struct Backend
             return cache_joined! expr, @req_factory.joined_add_const(1, not_leq)
 
         when ZeroExtend
-            return cache_either! expr, lay_down_zero_extend(expr.@expr, to: expr.@bitwidth.@width)
+            return cache_joined_or_split! expr, lay_down_zero_extend(expr.@expr, to: expr.@bitwidth.@width)
 
         when SignExtend
             arg = get_split(expr.@expr)
@@ -351,7 +365,11 @@ struct Backend
     end
 
     def add_output_cached! (expr : DFGExpr) : Nil
-        @req_factory.joined_add_output!(get_joined(expr))
+        if expr.@bitwidth.undefined?
+            @req_factory.nagai_add_output!(get_nagai(expr))
+        else
+            @req_factory.joined_add_output!(get_joined(expr))
+        end
     end
 end
 
