@@ -23,8 +23,8 @@ The initial development of isekai until version 1.0 has been made possible by th
 Here is our tentative "to do" list for the coming months.
 
 *Additional language features*:
- - ~~Integer division and modulo~~  &#x2705; DONE!
- - ~~Array look-up and dynamic storage optimisations~~ &#x2705; DONE!
+ - ~~Integer division and modulo~~  &#x2705; DONE (13-DEC-19)!
+ - ~~Array look-up and dynamic storage optimisations~~ &#x2705; DONE (13-DEC-19)!
  - Native field operations for efficient cryptgraphic primitives implementation
  - Floating point operations
 
@@ -58,7 +58,7 @@ Here is our tentative "to do" list for the coming months.
 
 Isekai is a tool for zero-knowledge applications. It currently parses a C/C++ program and outputs the arithmetic and/or boolean circuit representing the expression equivalent to the input program. 
 Support for more languages will be added in the future. isekai uses libclang to parse the C program, so most of the preprocessor (including the includes) is available. Then isekai generates an arithmetic representation and converts it to a rank-1 constraints system. 
-Isekai can proove and verify the program execution using several ZKP libraries (libsnak, bulletproof and libiop). isekai is written using crystal programming language allowing for a strong type safety and it is compiled to a native executable, ensuring maximum efficiency in parsing.
+Isekai can prove and verify the program execution using several ZKP libraries (libsnak, bulletproof and libiop). isekai is written using crystal programming language allowing for a strong type safety and it is compiled to a native executable, ensuring maximum efficiency in parsing.
 
 # isekai 1.0 released! - November 2019
 
