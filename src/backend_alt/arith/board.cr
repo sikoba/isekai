@@ -60,7 +60,6 @@ private struct OutputBuffer
     private struct Datum
         enum Command
             Input
-            OneInput
             NizkInput
             Output
             ConstMul
@@ -88,21 +87,30 @@ private struct OutputBuffer
 
     @data = Array(Datum).new
     @verbatims = Array(BigInt).new
+    @comments = Array(::Symbol).new
     @file : File
 
     def initialize (@file)
     end
 
-    def write_input (w : Wire) : Nil
-        @data << Datum.new(Datum::Command::Input, w)
+    private def add_comment! (comment : ::Symbol? = nil) : Int32
+        if comment
+            result = @comments.size
+            @comments << comment
+            result
+        else
+            -1
+        end
     end
 
-    def write_one_input (w : Wire) : Nil
-        @data << Datum.new(Datum::Command::OneInput, w)
+    def write_input (w : Wire, comment : ::Symbol? = nil) : Nil
+        comment ||= :"input"
+        @data << Datum.new(Datum::Command::Input, w, add_comment!(comment))
     end
 
-    def write_nizk_input (w : Wire) : Nil
-        @data << Datum.new(Datum::Command::NizkInput, w)
+    def write_nizk_input (w : Wire, comment : ::Symbol? = nil) : Nil
+        comment ||= :"input"
+        @data << Datum.new(Datum::Command::NizkInput, w, add_comment!(comment))
     end
 
     def write_const_mul (c : UInt128, w : Wire, output : Wire) : Nil
@@ -139,8 +147,14 @@ private struct OutputBuffer
         @data << Datum.new(Datum::Command::Zerop, w, dummy_output, output)
     end
 
-    def write_output (w : Wire) : Nil
-        @data << Datum.new(Datum::Command::Output, w)
+    def write_output (w : Wire, comment : ::Symbol? = nil) : Nil
+        @data << Datum.new(Datum::Command::Output, w, add_comment!(comment))
+    end
+
+    private def append_comment_to_file! (idx : Int32)
+        unless idx == -1
+            @file << " # " << @comments[idx]
+        end
     end
 
     def flush! (total : Int32) : Nil
@@ -150,16 +164,19 @@ private struct OutputBuffer
             case datum.@command
 
             when .input?
-                @file << "input " << datum.@arg1 << " # input\n"
-
-            when .one_input?
-                @file << "input " << datum.@arg1 << " # one-input\n"
+                @file << "input " << datum.@arg1
+                append_comment_to_file!(datum.@arg2)
+                @file << "\n"
 
             when .nizk_input?
-                @file << "nizkinput " << datum.@arg1 << " # input\n"
+                @file << "nizkinput " << datum.@arg1
+                append_comment_to_file!(datum.@arg2)
+                @file << "\n"
 
             when .output?
-                @file << "output " << datum.@arg1 << "\n"
+                @file << "output " << datum.@arg1
+                append_comment_to_file!(datum.@arg2)
+                @file << "\n"
 
             when .const_mul?
                 @file << "const-mul-"
@@ -307,9 +324,15 @@ struct Board
             {allocate_wire!(DynamicRange.new_for_bitwidth(bitwidth)), bitwidth}
         end
 
-        @inputs.each { |(w, _)| @outbuf.write_input(w) }
-        @outbuf.write_one_input(@one_const)
-        @nizk_inputs.each { |(w, _)| @outbuf.write_nizk_input(w) }
+        @inputs.each do |(wire, bitwidth)|
+            @outbuf.write_input wire, comment: (:"input NAGAI" if bitwidth.undefined?)
+        end
+
+        @outbuf.write_input(@one_const, comment: :"one-input")
+
+        @nizk_inputs.each do |(wire, bitwidth)|
+            @outbuf.write_nizk_input wire, comment: (:"input NAGAI" if bitwidth.undefined?)
+        end
     end
 
     def max_nbits (w : Wire) : Int32?
@@ -615,16 +638,18 @@ struct Board
         end
     end
 
-    def add_output! (w : Wire, policy : TruncatePolicy) : Nil
+    def add_output! (w : Wire, policy : TruncatePolicy, nagai : Bool = false) : Nil
         if (width = policy.truncate_to_width)
             arg = truncate(w, to: width)
         else
             arg = w
         end
+
         # do the output-cast thing
         o = allocate_wire! @dynamic_ranges[arg.@index]
         @outbuf.write_mul(arg, @one_const, output: o)
-        @outbuf.write_output o
+
+        @outbuf.write_output o, comment: (:"NAGAI" if nagai)
     end
 
     def done! : Nil

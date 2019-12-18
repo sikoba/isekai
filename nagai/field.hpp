@@ -20,7 +20,13 @@ public:
     }
 
     __attribute__((always_inline))
-    Field(uint64_t value, bool negative = false) noexcept
+    static Field copy_from(Nagai *ptr) noexcept
+    {
+        return Field{nagai_copy(ptr)};
+    }
+
+    __attribute__((always_inline))
+    Field(uint64_t value = 0, bool negative = false) noexcept
         : ptr_{negative ? nagai_init_neg(value) : nagai_init_pos(value)}
     {}
 
@@ -107,6 +113,18 @@ public:
     operator uint64_t () const noexcept
     {
         return nagai_lowbits(ptr_);
+    }
+
+    __attribute__((always_inline)) explicit
+    operator Nagai * () const noexcept
+    {
+        return ptr_;
+    }
+
+    __attribute__((always_inline))
+    Nagai *release() const noexcept
+    {
+        return nagai_copy(ptr_);
     }
 
     __attribute__((always_inline))

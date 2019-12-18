@@ -617,8 +617,8 @@ struct RequestFactory
     def nagai_add_output! (j : NagaiRequest) : Nil
         @board.add_output!(
             nagai_to_wire!(j),
-            policy: TruncatePolicy.new_no_truncate
-        )
+            policy: TruncatePolicy.new_no_truncate,
+            nagai: true)
     end
 end
 
