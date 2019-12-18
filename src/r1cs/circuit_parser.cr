@@ -325,6 +325,18 @@ class CircuitParser
         log_line "  divide #{$2.to_i} => #{ua}"
         callback(:divide, stage, ua, uo); 
 
+        # div
+      elsif line =~ /^div in 2 <([\s\d]+)> out 1 <([\s\d]+)>$/
+        ua = Array(UInt32).new
+        ua = $1.split.map{ |x| x.to_u32 }
+        log_abort "Inconsistent number of wires:  #{line} " if ua.size != 2
+        uo = Array(UInt32).new
+        uo = $2.split.map{ |x| x.to_u32 }
+        log_abort "Inconsistent number of wires:  #{line} " if uo.size != 1
+        log_line "  div #{ua} => #{uo}"
+
+        callback(:div, stage, ua, uo); 
+
         # asplit
       elsif line =~ /^asplit in (\d+) <([\s\d]+)> out (\d+) <([\s\d]+)>$/
         ua = Array(UInt32).new

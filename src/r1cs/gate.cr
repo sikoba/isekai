@@ -224,6 +224,13 @@ class GateKeeper
             return;
         });
 
+        cp.set_callback(:div, ->(s : Int32, i:  Array(UInt32), o : Array(UInt32))
+        {
+            @constraint_nb += 1
+            @witness_nb += 1   
+            return;
+        });
+
         cp.set_callback(:zerop, ->(s : Int32, i : Array(UInt32), o : Array(UInt32))
         {
             @constraint_nb += 2;
@@ -261,6 +268,7 @@ class GateKeeper
         cp.set_callback(:dload, ->dload(Int32,  Array(UInt32),  Array(UInt32)));
         cp.set_callback(:asplit, ->asplit(Int32,  Array(UInt32),  Array(UInt32)));
         cp.set_callback(:divide, ->divide(Int32,  Array(UInt32),  Array(UInt32)));
+        cp.set_callback(:div, ->div(Int32,  Array(UInt32),  Array(UInt32)));
         cp.set_callback(:zerop, ->zerop(Int32,  Array(UInt32),  Array(UInt32)));
         cp.set_callback(:done, ->
         {
@@ -413,12 +421,8 @@ class GateKeeper
         cache1 = substitute(in_wires[0])
         cache2 = substitute(in_wires[1])
         val = cache1.@val * cache2.@val; 
-        out = false;
-        v = @internalCache[out_wires[0]]?
-        if (v)
-            out = true; #if the wire is already in the cache, it must be an output
-        end
-        if (!out)
+
+        if (is_const([] of InternalVar, out_wires))
             lc = LinearCombination.new();
             #we optimize constant inputs
             if (is_const(cache1.@expression))
@@ -433,6 +437,7 @@ class GateKeeper
                 end
             end
         end
+
         @constraint_nb += 1;
         @witness_nb += 1;     
         set_witness(out_wires[0], val.modulo(@prime_field), true)
@@ -483,6 +488,52 @@ class GateKeeper
         return;
     end
 
+    def is_const( in_lc : Array, out_wires : Array)
+        out_wires.each do |o|
+            v = @internalCache[o]?
+            if (v)
+               return false; #if the wire is already in the cache, it must be an output
+            end
+        end
+        in_lc.each do |i_lc|
+            if !(is_const(i_lc.@expression))
+                return false;
+            end
+        end
+        return true;
+    end
+
+
+    def div(s : Int32, in_wires : Array, out_wires : Array)
+        @stage = s;
+        cache_a = substitute(in_wires[0]);
+        cache_b = substitute(in_wires[1]);
+        #TODO: should we ensure b is not null with an additional constraint?
+        if (cache_b.@val == BigInt.new(0))
+            raise "Invalid value divide by zero @wire #{in_wires[1]}"
+        end
+        # compute out = a*b^-1
+        inv_b =  Maths.new().modulo_inverse(cache_b.@val, @prime_field);
+        val = cache_a.@val * inv_b;
+        val = val.modulo(@prime_field);
+
+        ##optimize division by constant
+        if (is_const([cache_b], out_wires))
+            pp "const optim"
+            lc = LinearCombination.new();
+            #we optimize constant inputs
+            lc.multiply_lc(cache_a.@expression.@lc, inv_b, @prime_field);
+            @internalCache[out_wires[0]] =  InternalVar.new(lc, val.modulo(@prime_field), nil); 
+            return;
+        end
+
+        #constrain out*b = a
+        @constraint_nb += 1;
+        @witness_nb += 1;    
+        set_witness(out_wires[0], val);
+        str_res = j1cs_helper().to_json_str([{out_wires[0], BigInt.new(1)}], cache_b.@expression.@lc, cache_a.@expression.@lc)
+        writeToJ1CS(str_res); 
+    end
 
     def divide(s : Int32, in_wires : Array, out_wires : Array)
         @stage = s;
@@ -495,7 +546,7 @@ class GateKeeper
         val_r = cache_a.@val - val_q*cache_b.@val;
         set_witness(out_wires[0], val_q);
         set_witness(out_wires[1], val_r);
-        #a-r = q*b
+        #a-r = q*b                              ##TODO if b is const, we can save one constraint
         lc = LinearCombination.new();
         lc.add(cache_a.@expression.@lc, @prime_field);
         lc.add([{out_wires[1], @prime_field + BigInt.new(-1)}], @prime_field)
