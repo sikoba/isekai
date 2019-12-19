@@ -322,7 +322,7 @@ struct RequestFactory
     def joined_dload (w :  Array(JoinedRequest), idx : JoinedRequest) : JoinedRequest
         ##TODO - should we check for constant requests? it should have been handled before
         bitwidth = 1;
-        wires = WireList.new();
+        wires = Array(Wire).new();
         w.each do |i_req|
              wires << joined_to_wire! i_req
              if (bitwidth < i_req.@width)
@@ -400,7 +400,7 @@ struct RequestFactory
 
         j_wire = joined_to_wire! j
         k_wire = joined_to_wire! k
-        wires = WireList.new();
+        wires = Array(Wire).new();
         wires << j_wire << k_wire
         division = @board.divide(wires, width)   
         result = Array(JoinedRequest).new()

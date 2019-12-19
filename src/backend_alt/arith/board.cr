@@ -161,16 +161,16 @@ private struct OutputBuffer
         end
     end
 
-    def write_dload (inputs_wire : WireList, idx : Wire, output : Wire) : Nil
+    def write_dload (inputs_wire : Array(Wire), idx : Wire, output : Wire) : Nil
         @data << Datum.new(Datum::Command::Dload, idx, 0, output, inputs_wire)    
     end
 
-    def write_divide (inputs_wire : WireList, output : WireList, width : Int32) : Nil
+    def write_divide (inputs_wire : Array(Wire), output : Array(Wire), width : Int32) : Nil
         com = Datum::Command::Divide;
         @data << Datum.new(com, width, output[0], output[1], inputs_wire)    
     end
 
-    def write_asplit (input_wire : Wire, output : WireList) : Nil
+    def write_asplit (input_wire : Wire, output : Array(Wire)) : Nil
         com = Datum::Command::Asplit;
         @data << Datum.new(com, input_wire, output[0], output[output.size-1] )    
     end
@@ -472,14 +472,14 @@ struct Board
         result
     end
 
-    def dyn_load (w : WireList, idx : Wire, bitwidth : Int32 ) : Wire  
+    def dyn_load (w : Array(Wire), idx : Wire, bitwidth : Int32 ) : Wire  
         result = allocate_wire! DynamicRange.new_for_width(bitwidth)  
         @outbuf.write_dload(inputs_wire: w, idx: idx, output: result)
         result
     end
 
-    def a_split (w : Wire, size : Int32) : WireList 
-        result = WireList.new();
+    def a_split (w : Wire, size : Int32) : Array(Wire) 
+        result = Array(Wire).new();
         (0..size-1).each do 
             result << allocate_wire! DynamicRange.new_for_bool()     
         end
@@ -487,10 +487,10 @@ struct Board
         return result;
      end
 
-    def divide(w : WireList, width : Int32) : WireList    
+    def divide(w : Array(Wire), width : Int32) : Array(Wire)    
         q = allocate_wire! DynamicRange.new_for_width(width)     ##to check
         r = allocate_wire! DynamicRange.new_for_width(width)     
-        result = WireList.new();
+        result = Array(Wire).new();
         result << q << r
         @outbuf.write_divide(inputs_wire: w,  output: result, width: width) 
         return result;
