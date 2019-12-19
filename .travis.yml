@@ -8,7 +8,7 @@ before_install:
   - wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
   - sudo add-apt-repository 'deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main'
   - sudo apt-get update
-  - sudo apt-get install -y llvm-8-dev libclang-8-dev clang-8 libprocps-dev libgmp-dev
+  - sudo apt-get install -y llvm-8-dev libclang-8-dev clang-8 libprocps-dev libgmp-dev libsodium-dev
 
 script:
   - sed 's/Burgos/crystal-lang/' -i shard.yml
