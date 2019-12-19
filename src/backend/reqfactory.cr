@@ -184,7 +184,14 @@ module Isekai::Backend
                     if i < @circuit_inputs_val.size
                         val = @circuit_inputs_val[i];
                     end
-                    file.print("#{i} #{val.to_u32.to_s(16)}\n")  #No value..yet...
+
+					## workaround to have -1 in hexa, because the to_s(16) is giving -1 instead of FFFFFFFF
+					if (@board.bit_width() == 64)		 #TODO handle other bit_width
+						file.print("#{i} #{val.to_u64.to_s(16)}\n")  #No value..yet...
+					else
+						file.print("#{i} #{val.to_u32.to_s(16)}\n")  #No value..yet...
+					end
+
                     i += 1                   
                 end
                 file.print("#{i} 1\n")      # the ONE constant

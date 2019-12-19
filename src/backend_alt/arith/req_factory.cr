@@ -319,6 +319,32 @@ struct RequestFactory
         end
     end
 
+    def joined_dload (w :  Array(JoinedRequest), idx : JoinedRequest) : JoinedRequest
+        ##TODO - should we check for constant requests? it should have been handled before
+        bitwidth = 1;
+        wires = WireList.new();
+        w.each do |i_req|
+             wires << joined_to_wire! i_req
+             if (bitwidth < i_req.@width)
+                bitwidth = i_req.@width
+             end
+        end
+        i_wire = joined_to_wire! idx
+        result = @board.dyn_load(wires , i_wire, bitwidth) 
+        return JoinedRequest.new_for_wire(result, width: bitwidth)
+    end
+
+    def joined_asplit (w : JoinedRequest, nindices : Int32) : Array(JoinedRequest)
+        ##TODO - should we check for constant requests? it should have been handled before
+        i_wire = joined_to_wire! w
+        splits = @board.a_split(i_wire, nindices)
+        result =  Array(JoinedRequest).new()
+        (0..nindices-1).each do |i|
+            result << JoinedRequest.new_for_wire(splits[i], 1) 
+        end
+        return result;
+    end
+
     def joined_zero_extend (j : JoinedRequest, to new_width : Int32) : JoinedRequest | SplitRequest
         old_width = j.@width
         return j if old_width == new_width
@@ -360,6 +386,26 @@ struct RequestFactory
                 end
             end
         end
+    end
+
+    
+    def joined_divide (j : JoinedRequest, k : JoinedRequest) : Array(JoinedRequest)
+        width = common_width! j.@width, k.@width 
+        #if k.constant?  the frontend should have take care of this because ax/k != (a/k)*x
+
+        if j.@b == k.@b && j.@x == k.@x
+            #TODO quid division by 0??
+            JoinedRequest.new_for_const(1, width: 1)
+        end
+
+        j_wire = joined_to_wire! j
+        k_wire = joined_to_wire! k
+        wires = WireList.new();
+        wires << j_wire << k_wire
+        division = @board.divide(wires, width)   
+        result = Array(JoinedRequest).new()
+        result << JoinedRequest.new_for_wire(division[0], width: width)
+        result << JoinedRequest.new_for_wire(division[1], width: width)
     end
 
     def joined_trunc (j : JoinedRequest, to new_width : Int32) : JoinedRequest

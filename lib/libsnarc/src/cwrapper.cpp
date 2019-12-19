@@ -1,7 +1,11 @@
 #include <stdlib.h>
 #include <fstream> 
 #include "cwrapper.h"
-#include "r1cs_utils.hpp"
+#include "libsnark_wrapper.hpp"
+#include "skAurora.hpp"
+#include "skLigero.hpp"
+#include "skFractal.hpp"
+#include "util.hpp""
 
 using namespace std; 
 
@@ -55,7 +59,7 @@ bool generateR1cs(char* arithFile, char* inputsFile, char * r1csFile)
 			jfname = afname + ".r1cs";
 	}
 
-	R1CSUtils r1cs;
+	Snarks r1cs;
 	return r1cs.Arith2Jsonl(afname, ifname, jfname);
 }
 
@@ -64,13 +68,14 @@ bool generateR1cs(char* arithFile, char* inputsFile, char * r1csFile)
 //setupFile: name of the out file that will contain the trusted setup in json
 //TEMP ts:output verifiable computing setup, to return the data in the out argument, but we need to properly allocate the strings; should be allocated byt the called first
 //For debuggin purpose, if r1csFile ends with .arith, it will consider the file as a circuit and convert it first to r1cs
-void vcSetup(char* r1csFile, char * setupFile /*, char** ts*/)
+void vcSetup(char* r1csFile, char * setupFile /*, char** ts*/, int scheme)
 {
 	std::string afname(r1csFile);
 	std::string setupfName(setupFile);
 	std::string trustedSetup;
-	R1CSUtils r1cs;
-	r1cs.VCSetup(afname, trustedSetup);
+	Snarks r1cs;
+	Snarks::zkp_scheme zcheme = Snarks::zkp_scheme(scheme);
+	r1cs.VCSetup(afname, trustedSetup, zcheme);
 	//*ts = (char *)trustedSetup.c_str();
 	std::ofstream o(setupfName);
 	o << trustedSetup;
@@ -79,18 +84,43 @@ void vcSetup(char* r1csFile, char * setupFile /*, char** ts*/)
 
 //Generate a proof
 //setup: file name of the trusted setup in json format
-//inputs: file name of the inputs in json format. We need the full assignments.
+//inputs: file name of the inputs in json format. We need the full assignments OR filename of the r1cs in j1cs format, assignements must also be present as .in file
 //proofFile: file name of the out file that will contain the proof in json format. Optional, no file created if not defined
 // returns: the proof in json format
-char * Prove(char * setup, char * inputs, char * proofFile)
+char * Prove(char * setup, char * inputs, char * proofFile, int scheme)
 {
-	R1CSUtils r1cs;
 	std::string ts(setup);
 	std::string ins(inputs);
+	
 	std::string pfile = "";
 	if (proofFile != NULL)
 		pfile = std::string(proofFile);
-	nlohmann::json jkey = r1cs.Proof(ins, ts);
+
+	Snarks::zkp_scheme zcheme = Snarks::zkp_scheme(scheme);
+	if (scheme == Snarks::zkp_scheme::aurora)
+	{
+		skAurora aurora;	//TODO try factory pattern
+		nlohmann::json jkey = aurora.Proof(ins, ts);
+		skUtils::WriteJson2File(pfile, jkey);
+		return "";	//TODO
+	}
+	else if (scheme == Snarks::zkp_scheme::ligero)
+	{
+		skLigero ligero;
+		nlohmann::json jkey = ligero.Proof(ins, ts);
+		skUtils::WriteJson2File(pfile, jkey);
+		return "";
+	}
+	else if (scheme == Snarks::zkp_scheme::fractal)
+	{
+		skFractal fractal;
+		nlohmann::json jkey = fractal.Proof(ins, ts);
+		skUtils::WriteJson2File(pfile, jkey);
+		return ""; //TODO 
+	}
+	Snarks r1cs;
+
+	nlohmann::json jkey = r1cs.Proof(ins, ts, zcheme);
 	
 	if (pfile.length() > 0)
 	{
@@ -109,9 +139,34 @@ char * Prove(char * setup, char * inputs, char * proofFile)
 //proof: file name of the proof in json format.
 bool Verify(char * setup, char * inputs, char * proof)
 {
-	R1CSUtils r1cs;
-	std::string ts(setup);
-	std::string ins(inputs);
+
+	//load proof from file
 	std::string p(proof);
-	return r1cs.Verify(ts, ins, p);
+	std::string ins(inputs);
+
+	json jProof = skUtils::LoadJsonFromFile(p);
+	if (jProof["type"] == "ligero")
+	{
+		skLigero ligero;
+		return ligero.Verify(ins, jProof);
+	}
+	else if (jProof["type"] == "aurora")
+	{
+		skAurora aurora;
+		return aurora.Verify(ins, jProof);	
+	}
+	else 	if (jProof["type"] == "fractal")
+	{
+	//	skFractal fractal;
+	//	return fractal.Verify(ins, jProof);
+	}
+	else
+	{
+		Snarks r1cs;
+		std::string ts(setup);
+
+		return r1cs.Verify(ts, ins, jProof);
+	}
+	return false;
+	
 }

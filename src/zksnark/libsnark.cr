@@ -7,12 +7,12 @@ class LibSnark
     LibSnarc.generateR1cs(arith_file, input_file, r1cs_outfile)
   end
 
-  def vcSetup(r1cs_file : String, setup_outfile : String)
-    LibSnarc.vcSetup(r1cs_file, setup_outfile)
+  def vcSetup(r1cs_file : String, setup_outfile : String, scheme : UInt8)
+    LibSnarc.vcSetup(r1cs_file, setup_outfile, scheme)
   end
 
-  def proof(setup_file : String, inputs_file : String, proof_outfile : String)
-    LibSnarc.Prove(setup_file, inputs_file, proof_outfile)
+  def proof(setup_file : String, inputs_file : String, proof_outfile : String, scheme : UInt8)
+    LibSnarc.Prove(setup_file, inputs_file, proof_outfile, scheme)
   end
 
   def verify(setup_file : String, inputs_file : String, proof_outfile : String) : Bool

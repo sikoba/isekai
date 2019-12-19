@@ -236,7 +236,7 @@ module Isekai::Backend
         end
 
         def get_trace_count 
-            return Math.max(Isekai::Backend.ceillg2(@value), @bus.get_trace_count)
+			return Math.max(Isekai::Backend.ceillg2(@value), @bus.get_trace_count)
         end
 
         def get_wire_count
@@ -260,6 +260,7 @@ module Isekai::Backend
 
     # Bus that performs XOR on boolean bus and the constant value
     abstract class ConstantBitXorBusBase < BooleanBus
+
         def initialize (@board, @value : Int64, @bus : Bus)
             super(@board, Constants::MAJOR_LOGIC)
             raise "Can't OR non-boolean buses" if @bus.get_trace_type != Constants::BOOLEAN_TRACE
@@ -272,9 +273,11 @@ module Isekai::Backend
         # count of previously set bits.
         private def fill_bitmap
             val = @value
+            if (val < 0)
+                val = UInt32.new(val)       #TODO - here we assume 32 bits, should also depends on get_active_bits() plus handling of negative values...
+            end
             biti = 0
             count = 0
-
             while (val != 0)
                 if val & 1 != 0
                     @bit_map[biti] = count
@@ -317,6 +320,7 @@ module Isekai::Backend
         def get_field_ops
             cmds = Array(FieldOp).new()
             k = wires_per_xor()
+
             if (w = @wire_list)
                 (0..get_trace_count()-1).each do |i|
                     if count = @bit_map[i]?
@@ -380,6 +384,7 @@ module Isekai::Backend
         end
 
         def get_trace_count()
+        
             return @board.bit_width.truncate(Math.max(0, @bus.get_trace_count() + @left_shift))
         end
 
@@ -393,7 +398,7 @@ module Isekai::Backend
 
         def do_trace (i)
             parent_bit = i - @left_shift
-            if parent_bit == 0 || i > get_trace_count()
+            if parent_bit < 0 || i > get_trace_count()
                 return @board.zero_wire
             else
                 return @bus.get_trace(parent_bit)

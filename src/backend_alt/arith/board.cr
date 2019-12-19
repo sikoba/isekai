@@ -70,15 +70,19 @@ private struct OutputBuffer
             Div
             Split
             Zerop
+            Dload
+            Asplit
+            Divide
         end
 
         @arg1 : UInt128
         @arg2 : Int32
         @arg3 : Int32
+        @arg_list : Array(Wire) 
         @command : Command
 
         @[AlwaysInline]
-        def initialize (@command, arg1, arg2 = -1, arg3 = -1)
+        def initialize (@command, arg1, arg2 = -1, arg3 = -1, @arg_list = Array(Wire).new)
             @arg1 = arg1.to_u128
             @arg2 = arg2.to_i32
             @arg3 = arg3.to_i32
@@ -157,6 +161,20 @@ private struct OutputBuffer
         end
     end
 
+    def write_dload (inputs_wire : WireList, idx : Wire, output : Wire) : Nil
+        @data << Datum.new(Datum::Command::Dload, idx, 0, output, inputs_wire)    
+    end
+
+    def write_divide (inputs_wire : WireList, output : WireList, width : Int32) : Nil
+        com = Datum::Command::Divide;
+        @data << Datum.new(com, width, output[0], output[1], inputs_wire)    
+    end
+
+    def write_asplit (input_wire : Wire, output : WireList) : Nil
+        com = Datum::Command::Asplit;
+        @data << Datum.new(com, input_wire, output[0], output[output.size-1] )    
+    end
+
     def flush! (total : Int32) : Nil
         @file << "total " << total << "\n"
 
@@ -217,6 +235,33 @@ private struct OutputBuffer
 
             when .zerop?
                 @file << "zerop in 1 <" << datum.@arg1 << "> out 2 <" << datum.@arg2 << " " << datum.@arg3 << ">\n"
+
+            when .dload?
+                @file << "dload in " << datum.@arg_list.size() + 1 << " <" << datum.@arg1
+                datum.@arg_list.each do |ai|
+                    @file << " " << ai.to_i32
+                end
+                @file <<  "> out 1 <" << datum.@arg3 << ">\n" 
+
+            when .asplit?
+                out_begin, out_end = datum.@arg2, datum.@arg3
+                out_num = out_end - out_begin
+                @file << "asplit in 1 <" << datum.@arg1 << "> out " << out_num << " <"
+                (out_begin..out_end).each { |i| @file << " " << i}
+                @file << ">\n"
+
+            when .divide?
+                @file << "div_" << datum.@arg1 << " in " << datum.@arg_list.size() << " <" 
+                f = true;
+                datum.@arg_list.each do |ai|
+                    if f
+                       f = false;
+                    else
+                        @file << " " 
+                    end
+                    @file << ai.to_i32
+                end
+                @file <<  "> out 2 <" << datum.@arg2 << " " << datum.@arg3 << ">\n" 
 
             else
                 raise "unreachable"
@@ -426,6 +471,32 @@ struct Board
         @outbuf.write_zerop(arg, dummy_output: dummy, output: result)
         result
     end
+
+    def dyn_load (w : WireList, idx : Wire, bitwidth : Int32 ) : Wire  
+        result = allocate_wire! DynamicRange.new_for_width(bitwidth)  
+        @outbuf.write_dload(inputs_wire: w, idx: idx, output: result)
+        result
+    end
+
+    def a_split (w : Wire, size : Int32) : WireList 
+        result = WireList.new();
+        (0..size-1).each do 
+            result << allocate_wire! DynamicRange.new_for_bool()     
+        end
+        @outbuf.write_asplit(input_wire: w, output: result)
+        return result;
+     end
+
+    def divide(w : WireList, width : Int32) : WireList    
+        q = allocate_wire! DynamicRange.new_for_width(width)     ##to check
+        r = allocate_wire! DynamicRange.new_for_width(width)     
+        result = WireList.new();
+        result << q << r
+        @outbuf.write_divide(inputs_wire: w,  output: result, width: width) 
+        return result;
+    end     
+    
+
 
     private def cast_to_safe_ww (w : Wire, x : Wire, policy : OverflowPolicy)
         case

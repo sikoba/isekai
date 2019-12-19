@@ -60,6 +60,32 @@ class ArithAddReq < BinaryOpReq
     end
 end
 
+class SubstractReq < BinaryOpReq
+    def initialize(@reqfactory, @expr, @trace_type : String)
+        super(@reqfactory, @expr, @trace_type)
+    end
+
+    def natural_type()
+       return Constants::ARITHMETIC_TRACE
+    end
+
+    def has_constant_opt()
+         return false
+    end
+    
+    def var_impl(*busses)
+        pp "substracting..."
+        rbus = get_bus_from_req(@reqfactory.make_req((@expr.as(Add)).@right, Constants::ARITHMETIC_TRACE))
+        lbus = get_bus_from_req(@reqfactory.make_req((@expr.as(Add)).@left, Constants::ARITHMETIC_TRACE))
+      
+       
+        nbus = ConstantMultiplyBus.new(board(), -1_i64, rbus)
+        @reqfactory.add_extra_bus(nbus)
+        return ArithAddBus.new(board(), to_s(),lbus, rbus)
+    end
+end
+
+
 class ArithMultiplyReq < BinaryOpReq
 	def initialize(@reqfactory, @expr, @trace_type : String)
         super(@reqfactory, @expr, @trace_type)
@@ -253,7 +279,7 @@ class CmpNEQReqArith < CmpReq
         constant_one = ConstantArithmeticBus.new(board(), 1)  #@reqfactory.@board.get_one_bus()  is not working but I did not investigate why
         @reqfactory.add_extra_bus(constant_one)
         comment = "1 - CmpEQ #{typeof(@expr.as(BinaryOp))}"
-        plus1_bus = ArithAddBus.new(board(), comment, zerop_bus, constant_one)
+        plus1_bus = ArithAddBus.new(board(), comment, neg_bus, constant_one)
         @reqfactory.add_extra_bus(plus1_bus)
         return plus1_bus
      

@@ -325,7 +325,7 @@ module Isekai::Backend
     end
 
     class ConstantReq < BaseReq
-        def get_dependencies
+        def get_dependencies :  Array(BaseReq)
             return Array(BaseReq).new
         end
 

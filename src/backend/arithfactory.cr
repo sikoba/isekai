@@ -44,6 +44,7 @@ class ArithFactory < RequestFactory
     end
 
     def make_req(expr, type : String) : BaseReq
+        pp "processing: #{expr}"
         case expr
         when .is_a? Field
             case expr.@key.@storage
@@ -71,13 +72,16 @@ class ArithFactory < RequestFactory
 		when .is_a? Subtract
 			# NB trying something new here. expr factory does memoization
 			# against existing graph, so rolling up a late expr ensures
-			# we'll avoid generating a duplicate Negate.
+            # we'll avoid generating a duplicate Negate.
+            pp "create substract request"
 			neg_expr = Negate.new(expr.as(Subtract).@right)
 			add_expr = Add.new(expr.as(Subtract).@left, neg_expr)
-			result = ArithAddReq.new(self, add_expr, type)
+        	result = ArithAddReq.new(self, add_expr, type)
+            #result = SubstractReq.new(self, expr.as(Subtract), type)
 		when .is_a? Multiply
 			result = ArithMultiplyReq.new(self, expr.as(Multiply), type)
-		when .is_a? Negate
+        when .is_a? Negate
+            pp "negate request"
 			result = NegateReq.new(self, expr.as(Negate), type)
 		else
             result = super(expr, type)

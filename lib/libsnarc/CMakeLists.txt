@@ -138,6 +138,17 @@ if("${USE_ASM}")
   add_definitions(-DUSE_ASM)
 endif()
 
+if("${USE_LINKED_LIBRARIES}")
+  # libfqfft
+  find_path(LIBFQFFT_INCLUDE_DIR NAMES libfqfft)
+  set(LIBFQFFT_DIRECTORY ${LIBFQFFT_INCLUDE_DIR}/libfqfft)
+  include_directories(${LIBFQFFT_DIRECTORY})
+
+  # libff
+  find_path(LIBFF_INCLUDE_DIR NAMES libff)
+  include_directories(${LIBFF_INCLUDE_DIR}/libff)
+  find_library(LIBFF_LIBRARIES NAMES ff libff)
+endif()
 
 add_library(
   snarc
@@ -149,7 +160,17 @@ add_library(
   src/CircuitReader.cpp
   src/r1cs_utils.hpp
   src/r1cs_utils.cpp
+  src/libsnark_wrapper.hpp
+  src/libsnark_wrapper.cpp
   src/cwrapper.cpp
+  src/skAurora.hpp
+  src/skAurora.cpp
+  src/skLigero.hpp
+  src/skLigero.cpp
+  src/skFractal.hpp
+  src/skFractal.cpp
+  src/r1cs_libiop.hpp
+  src/r1cs_libiop.cpp
 )
 
 
@@ -169,8 +190,10 @@ target_include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}/../../zkp/libsnark
 	${CMAKE_CURRENT_SOURCE_DIR}/../../zkp/libsnark/depends/libff
 	${CMAKE_CURRENT_SOURCE_DIR}/../../zkp/libsnark/depends/libfqfft
+	${CMAKE_CURRENT_SOURCE_DIR}/../../zkp/libiop
+	${CMAKE_CURRENT_SOURCE_DIR}/../../zkp/libiop/depends/gtest/googletest/include
   )
-  
+
   set_target_properties(snarc PROPERTIES
 		 ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 

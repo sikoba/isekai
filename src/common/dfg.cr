@@ -149,6 +149,28 @@ class ArrayOp < DFGExpr
     end
 end
 
+
+class DynLoad  < DFGExpr
+    # Params:
+    #     type = type of the storage
+    #     storage = storage instance
+    #     idx = index in the storage
+    def initialize (@storage : Array(DFGExpr), @idx : DFGExpr, bitwidth)
+        super(bitwidth)
+    end
+end
+
+class Asplit  < DFGExpr
+    # Params:
+    #     expr = input value
+    #     index = index of the splitted element
+    #     nindices = number of splitted elements
+    def initialize (@expr : DFGExpr, @index : Int32, @nindices : Int32)
+        super(@expr.@bitwidth)      # Bit width is not useful for this operation; it returns nindices booleans
+    end
+
+end
+
 # Reference to the part of an existing node
 class StorageRef < ArrayOp
     #add_object_helpers

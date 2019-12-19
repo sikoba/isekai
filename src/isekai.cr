@@ -5,9 +5,14 @@ require "./frontend_llvm/parser.cr"
 require "./backend/arithfactory"
 require "./backend/booleanfactory"
 require "./zksnark/libsnark.cr"
+require "../lib/libproof/libproof.cr"
 require "file_utils"
 require "option_parser"
 # TODO require "./crystal/ast_dump"
+
+require "./r1cs/r1cs.cr"
+require "./r1cs/gate.cr"
+
 require "./backend_alt/arith/board"
 require "./backend_alt/arith/req_factory"
 require "./backend_alt/arith/backend"
@@ -17,6 +22,8 @@ require "./backend_alt/boolean/backend"
 require "./backend_alt/lay_down_output"
 require "./backend_alt/utils"
 require "./fmtconv"
+require "./zkp_bench.cr"
+
 
 include Isekai
 
@@ -43,6 +50,8 @@ struct ProgramOptions
     property root_file = ""
     # root name for trusted setup and proof (snark)
     property verif_file = ""
+    # bulletproof proof file
+    property bullet_file = ""
     # Number of bits in the word - used in the bitwise operations
     # (left shift/right shift/etc) and in calculations/side-effects that
     # are bitwidth-aware - 2nd complement's arithmetic/overflow detection
@@ -58,6 +67,22 @@ struct ProgramOptions
     property p_bits_max = 254
     # Force use of primary backend
     property force_primary_backend = false
+    # ZKP
+    property zkp_scheme = ZKP::Snark
+    # Benchmark
+    property benchmark = "none"
+end
+
+enum ZKP
+    Snark
+    Groth16
+    Bctv14a    
+    Libsnark            #use libsnark style to generate r1cs
+    Libsnark_legacy     #use libsnark to generate r1cs
+    Dalek               #bulletproof
+    Aurora,
+    Ligero,
+    Fractal
 end
 
 private class InputFile
@@ -96,6 +121,7 @@ private def run_alt_backend (
         input_values,
         arith_outfile, bool_outfile, options)
 
+
     unless arith_outfile.empty?
         File.open(arith_outfile, "w") do |file|
             board = AltBackend::Arith::Board.new(
@@ -110,6 +136,7 @@ private def run_alt_backend (
             backend = AltBackend::Arith::Backend.new(req_factory)
             outputs.each { |expr| AltBackend.lay_down_output(backend, expr) }
             board.done!
+
         end
         AltBackend.arith_write_inputs(arith_outfile, input_values, inputs, nizk_inputs)
     end
@@ -201,6 +228,9 @@ class ParserProgram
         else
             raise "Unsupported input file extension"
         end
+
+        return input_values.size()  #TODO - We should use the input size coming from the code parsing,
+        # because if one provide more input values in the input file, the post-processing will fail while the rest is working fine
     end
 
     # Main
@@ -214,13 +244,14 @@ class ParserProgram
 
         # Parse the program options. For the detailed
         # explanations refer to struct ProgramOptions
-        OptionParser.parse! do |parser|
+        OptionParser.parse do |parser|
             parser.banner = "Usage: isekai [arguments] file"
             parser.on("-c", "--cpparg=ARGS", "Extra arguments to clang") { |args| opts.clang_args = args }
             parser.on("-a", "--arith=FILE", "Arithmetic circuit output file") { |file| opts.arith_file = file }
             parser.on("-b", "--bool=FILE", "Boolean circuit output file") { |file| opts.bool_file = file }
             parser.on("-r", "--r1cs=FILE", "R1CS output file") { |file| opts.r1cs_file = file }
-            parser.on("-s", "--snark=FILE", "root file name") { |file| opts.root_file = file }
+            parser.on("-s", "--prove=FILE", "root file name") { |file| opts.root_file = file }
+            parser.on("-e", "--scheme=SCHEME", "Zero-Knowledge scheme") { |scheme| opts.zkp_scheme = ZKP.parse(scheme) }
             parser.on("-v", "--verif=FILE", "input file name") { |file| opts.verif_file = file }
             parser.on("-w", "--bit-width=WIDTH", "Width of the word in bits (used for overflow/bitwise operations)") { |width| opts.bit_width = width.to_i() }
             parser.on("-l", "--loop-sanity-limit=LIMIT", "Limit on statically-measured loop unrolling") { |limit| opts.loop_sanity_limit = limit.to_i }
@@ -236,6 +267,7 @@ class ParserProgram
             end
             parser.on("-z", "--primary-backend", "Force use of primary backend") { opts.force_primary_backend = true }
             parser.on("-h", "--help", "Show this help") { puts parser; exit 0 }
+            parser.on("-bb", "--bench=SCHEME_LIST", "benchmark zkp libraries") { |bench| opts.benchmark = bench }
         end
 
         # Filename is passed as the last argument.
@@ -245,42 +277,74 @@ class ParserProgram
         end
         filename = ARGV[-1]
 
+        if (opts.benchmark != "none")
+            ZKPBenchmark.new.benchmark(filename, opts.benchmark);
+            return
+        end
+
         #snakes
         if opts.verif_file != ""
             #verify
-            snarc = LibSnark.new()
             root_name = opts.verif_file
-            result = snarc.verify(root_name + ".s", filename, root_name + ".p")
+            case opts.zkp_scheme
+            when .dalek?
+                result = LibProof.bpVerify( filename, root_name + ".p")
+            else ##when .snark? , .libsnark?
+                snarc = LibSnark.new()
+                result = snarc.verify(root_name + ".s", filename, root_name + ".p")
+            end
+           
             if result == true
                 puts "Congratulations, the proof is correct!\n"
             else
                 puts "Incorrect statement\n"
             end
+
             return
         end
 
         if opts.root_file != ""
             #proof
-            snarc = LibSnark.new()
-            snarc.vcSetup(filename, opts.root_file + ".s")
-            snarc.proof(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
 
-            if snarc.verify(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
-                puts "Proved execution successfully with libSnark, generated:
-                    Trusted setup : #{opts.root_file}.s
-                    Proof: #{opts.root_file}.p"
+            case opts.zkp_scheme
+            when .dalek?
+                LibProof.bpProve(filename, opts.root_file + ".p");
+
+                #Check the proof
+                if LibProof.bpVerify( filename, opts.root_file + ".p")
+                    puts "Proved execution successfully with bulletproof, generated:
+                        Proof: #{opts.root_file}.p"
+                else
+                    puts "error generating the proof\n"
+                end
+            when .snark? , .libsnark?, .groth16?, .bctv14a?
+                snarc = LibSnark.new()
+                snarc.vcSetup(filename, opts.root_file + ".s", opts.zkp_scheme.value.to_u8)
+                snarc.proof(opts.root_file + ".s", filename + ".in", opts.root_file + ".p", opts.zkp_scheme.value.to_u8)
+
+                ##Check the proof:
+                if snarc.verify(opts.root_file + ".s", filename + ".in", opts.root_file + ".p")
+                    puts "Proved execution successfully with libSnark, generated:
+                        Trusted setup : #{opts.root_file}.s
+                        Proof: #{opts.root_file}.p"
+                else
+                    puts "error generating the proof\n"
+                end
+            when .aurora?, .ligero?, .fractal?
+                snarc = LibSnark.new()
+                snarc.proof(opts.root_file + ".s", filename, opts.root_file + ".p", opts.zkp_scheme.value.to_u8)
             else
-                puts "error generating the proof\n"
+                puts "error invalid scheme\n"
             end
+
             return
         end
 
         Log.setup(opts.progress)
 
         input_file = InputFile.new(filename)
-
+        inputs_nb = -1
         # Generate the arithmetic circuit if arith option is set or r1cs option is set (a temp arith file) and none is provided
-
         unless input_file.@kind.arith?
             tempArith = ""
             if opts.arith_file != ""
@@ -288,7 +352,7 @@ class ParserProgram
             elsif opts.r1cs_file != ""
                 tempArith = File.tempfile("arith").path
             end
-            create_circuit(input_file, tempArith, opts.bool_file, opts)
+            inputs_nb = create_circuit(input_file, tempArith, opts.bool_file, opts)
         else
             tempArith = input_file.@filename
         end
@@ -299,7 +363,21 @@ class ParserProgram
             if File.exists?(tempIn) == false
                 puts "inputs file #{tempIn} is missing\n"
             else
-                LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
+                if (opts.zkp_scheme == ZKP::Libsnark_legacy)
+                    LibSnarc.generateR1cs(tempArith, tempIn, opts.r1cs_file)
+                    #post - processing - only if r1cs is coming from libsnark, when we generate ourself, we already take care of this postprocessing
+                    r1 = R1CS.new(opts.bit_width)
+                    if (inputs_nb == -1)
+                        ##count the number of inputs - we start with -1 because of the 1 constant
+                        File.each_line(tempIn) do |line|
+                           inputs_nb += 1
+                        end
+                    end
+                    r1.postprocess(opts.r1cs_file + ".in" , inputs_nb)
+                else
+                    gates : GateKeeper = GateKeeper.new(tempArith, tempIn, opts.r1cs_file, Hash(UInt32,InternalVar).new, opts.zkp_scheme)
+                    gates.process_circuit;
+                end         
             end
             #clean-up
             if opts.arith_file == "" && input_file.@kind.arith? == false
