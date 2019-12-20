@@ -18,6 +18,10 @@ enum class Opcode {
     ZEROP,
     SPLIT,
     OUTPUT,
+    DLOAD,
+    ASPLIT,
+    INT_DIV,
+    FIELD_DIV,
 };
 
 class CircuitReader
@@ -40,7 +44,7 @@ class CircuitReader
         Opcode opcode;
         ConstSlice<unsigned> inputs;
         ConstSlice<unsigned> outputs;
-        const char *inline_hex;
+        char *inline_hex;
         bool ok;
 
         operator bool() const { return ok; }
@@ -59,37 +63,13 @@ class CircuitReader
     std::vector<unsigned> inputs_buf_;
     std::vector<unsigned> outputs_buf_;
 
-    static char * try_slurp_(char *s, const char *prefix)
-    {
-        const size_t nprefix = strlen(prefix);
-        return strncmp(s, prefix, nprefix) == 0 ? s + nprefix : nullptr;
-    }
-
-    static void slurp_(char *&s, const char *prefix)
-    {
-        if (!(s = try_slurp_(s, prefix))) {
-            throw UnexpectedInput(s, prefix);
-        }
-    }
-
-    static void skip_ws_(char *&s)
-    {
-        while (*s == ' ') {
-            ++s;
-        }
-    }
-
     void handle_inline_hex_(char *&s)
     {
         inline_hex_ = s;
-        while (static_cast<unsigned char>(*s) > 32) {
-            ++s;
-        }
-        if (*s != ' ') {
-            throw UnexpectedInput(s, "(space)");
-        }
-        *s = '\0';
-        ++s;
+        slurp_any_printable(s);
+        char *inline_hex_end = s;
+        slurp_some_ws(s);
+        *inline_hex_end = '\0';
     }
 
     void reset_()
@@ -99,42 +79,45 @@ class CircuitReader
         inline_hex_ = nullptr;
     }
 
-    void read_inline_input_(char *s)
+    void read_inline_input_(char *&s)
     {
-        skip_ws_(s);
         unsigned u;
-        parse_uint(s, u, BaseDec{});
+        slurp_uint(s, u, /*base=*/10);
         inputs_buf_.push_back(u);
+        slurp_any_ws(s);
     }
 
-    void read_args_part_(char *&s, const char *keyword, std::vector<unsigned> &out)
+    void read_args_part_(char *&s, std::vector<unsigned> &out)
     {
-        skip_ws_(s);
-        slurp_(s, keyword);
-
-        skip_ws_(s);
         unsigned nargs;
-        parse_uint(s, nargs, BaseDec{});
+        slurp_uint(s, nargs, /*base=*/10);
 
-        skip_ws_(s);
-        slurp_(s, "<");
+        slurp_any_ws(s);
+        slurp(s, "<");
 
         out.reserve(nargs);
         for (unsigned i = 0; i < nargs; ++i) {
-            skip_ws_(s);
+            slurp_any_ws(s);
             unsigned u;
-            parse_uint(s, u, BaseDec{});
+            slurp_uint(s, u, /*base=*/10);
             out.push_back(u);
         }
 
-        skip_ws_(s);
-        slurp_(s, ">");
+        slurp_any_ws(s);
+        slurp(s, ">");
+
+        slurp_any_ws(s);
     }
 
     void read_args_(char *s)
     {
-        read_args_part_(s, "in ", inputs_buf_);
-        read_args_part_(s, "out ", outputs_buf_);
+        slurp(s, "in");
+        slurp_some_ws(s);
+        read_args_part_(s, inputs_buf_);
+
+        slurp(s, "out");
+        slurp_some_ws(s);
+        read_args_part_(s, outputs_buf_);
     }
 
     Command make_command_(Opcode opcode)
@@ -166,16 +149,18 @@ public:
     size_t total()
     {
         do {
-            if (!read_line_()) {
+            if (!read_line_())
                 throw UnexpectedInput("error or EOF before 'total' line");
-            }
         } while (should_skip_line_());
 
         char *s = line_.c_str();
-        slurp_(s, "total ");
-        skip_ws_(s);
+
+        slurp(s, "total");
+        slurp_some_ws(s);
+
         unsigned u;
-        parse_uint(s, u, BaseDec{});
+        slurp_uint(s, u, /*base=*/10);
+
         return u;
     }
 
@@ -184,61 +169,75 @@ public:
         reset_();
 
         do {
-            if (!read_line_()) {
+            if (!read_line_())
                 return Command::invalid();
-            }
         } while (should_skip_line_());
 
         char *s = line_.c_str();
-        char *v;
 
-        if ((v = try_slurp_(s, "input "))) {
-            read_inline_input_(v);
+        if (maybe_slurp(s, "input", /*only_with_ws=*/true)) {
+            read_inline_input_(s);
             return make_command_(Opcode::INPUT);
         }
 
-        if ((v = try_slurp_(s, "nizkinput "))) {
-            read_inline_input_(v);
+        if (maybe_slurp(s, "nizkinput", /*only_with_ws=*/true)) {
+            read_inline_input_(s);
             return make_command_(Opcode::NIZK_INPUT);
         }
 
-        if ((v = try_slurp_(s, "output "))) {
-            read_inline_input_(v);
+        if (maybe_slurp(s, "output", /*only_with_ws=*/true)) {
+            read_inline_input_(s);
             return make_command_(Opcode::OUTPUT);
         }
 
-        if ((v = try_slurp_(s, "const-mul-neg-"))) {
-            handle_inline_hex_(v);
-            read_args_(v);
+        if (maybe_slurp(s, "const-mul-neg-")) {
+            handle_inline_hex_(s);
+            read_args_(s);
             return make_command_(Opcode::CONST_MUL_NEG);
         }
 
-        if ((v = try_slurp_(s, "const-mul-"))) {
-            handle_inline_hex_(v);
-            read_args_(v);
+        if (maybe_slurp(s, "const-mul-")) {
+            handle_inline_hex_(s);
+            read_args_(s);
             return make_command_(Opcode::CONST_MUL);
         }
 
-        if ((v = try_slurp_(s, "add "))) {
-            read_args_(v);
+        if (maybe_slurp(s, "add", /*only_with_ws=*/true)) {
+            read_args_(s);
             return make_command_(Opcode::ADD);
         }
 
-        if ((v = try_slurp_(s, "mul "))) {
-            read_args_(v);
+        if (maybe_slurp(s, "mul", /*only_with_ws=*/true)) {
+            read_args_(s);
             return make_command_(Opcode::MUL);
         }
 
-        if ((v = try_slurp_(s, "zerop "))) {
-            read_args_(v);
+        if (maybe_slurp(s, "zerop", /*only_with_ws=*/true)) {
+            read_args_(s);
             return make_command_(Opcode::ZEROP);
         }
 
-        if ((v = try_slurp_(s, "split "))) {
-            read_args_(v);
+        if (maybe_slurp(s, "split", /*only_with_ws=*/true)) {
+            read_args_(s);
             return make_command_(Opcode::SPLIT);
         }
 
-        throw UnexpectedInput(s, "(command)");
+        if (maybe_slurp(s, "dload", /*only_with_ws=*/true)) {
+            read_args_(s);
+            return make_command_(Opcode::DLOAD);
+        }
+
+        if (maybe_slurp(s, "div_")) {
+            read_inline_input_(s); // width
+            read_args_(s);
+            return make_command_(Opcode::INT_DIV);
+        }
+
+        if (maybe_slurp(s, "div", /*only_with_ws=*/true)) {
+            read_args_(s);
+            return make_command_(Opcode::FIELD_DIV);
+        }
+
+        throw UnexpectedInput(/*found=*/s, /*expected=*/"(command)");
     }
 };

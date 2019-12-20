@@ -54,13 +54,13 @@ int main(int argc, char **argv)
     for (int c; (c = getopt(argc, argv, "w:c:s:")) != -1;) {
         switch (c) {
         case 'w':
-            parse_uint_until_nul(optarg, output_width, BaseDec{});
+            parse_uint_until_nul(optarg, output_width, /*base=*/10);
             break;
         case 'c':
-            parse_uint_until_nul(optarg, cost_fd, BaseDec{});
+            parse_uint_until_nul(optarg, cost_fd, /*base=*/10);
             break;
         case 's':
-            parse_uint_until_nul(optarg, split_check_bits, BaseDec{});
+            parse_uint_until_nul(optarg, split_check_bits, /*base=*/10);
             break;
         default:
             print_usage_and_exit();
@@ -83,7 +83,7 @@ int main(int argc, char **argv)
         ValueListReader reader(arci_filename + ".in");
         while (auto value = reader.next_value()) {
             FieldT res;
-            parse_uint_until_nul(value.hex, res, BaseHex{});
+            parse_uint_until_nul(value.hex, res, /*base=*/16);
             wires.emplace_back(res);
         }
     }
@@ -113,7 +113,7 @@ int main(int argc, char **argv)
                 CHECK(command.inputs.size() == 1);
                 CHECK(command.outputs.size() == 1);
                 FieldT arg;
-                parse_uint_until_nul(command.inline_hex, arg, BaseHex{});
+                parse_uint_until_nul(command.inline_hex, arg, /*base=*/16);
                 wires.at(command.outputs[0]) = wires.at(command.inputs[0]) * arg;
             }
             break;
@@ -122,7 +122,7 @@ int main(int argc, char **argv)
                 CHECK(command.inputs.size() == 1);
                 CHECK(command.outputs.size() == 1);
                 FieldT arg;
-                parse_uint_until_nul(command.inline_hex, arg, BaseHex{});
+                parse_uint_until_nul(command.inline_hex, arg, /*base=*/16);
                 wires.at(command.outputs[0]) = wires.at(command.inputs[0]) * arg * minus_one;
             }
             break;
@@ -153,6 +153,32 @@ int main(int argc, char **argv)
         case Opcode::OUTPUT:
             CHECK(command.inputs.size() == 1);
             print_field_bits(wires.at(command.inputs[0]), output_width);
+            break;
+        case Opcode::DLOAD:
+            {
+                CHECK(command.inputs.size() > 1);
+                CHECK(command.outputs.size() == 1);
+                FElem v = wires.at(command.inputs[0]);
+                uint32_t uv = 0;
+                for (unsigned i = 0; i < split_check_bits; ++i) {
+                    if (v.getBit(i, R1P)) {
+                        CHECK(i < 31);
+                        uv |= 1ul << i;
+                    }
+                }
+                CHECK(1 + uv < command.inputs.size());
+                wires.at(command.outputs[0]) = wires.at(command.inputs[1 + uv]);
+            }
+            break;
+        case Opcode::ASPLIT:
+            {
+                CHECK(command.inputs.size() == 1);
+                FElem v = wires.at(command.inputs[0]);
+                const size_t noutputs = command.outputs.size();
+                for (size_t i = 0; i < noutputs; ++i) {
+                    wires.at(command.outputs[i]) = (v == i) ? 1 : 0;
+                }
+            }
             break;
         }
     }

@@ -2,6 +2,7 @@
 
 #include <exception>
 #include <string>
+#include <string.h>
 
 class UnexpectedInput : public std::exception
 {
@@ -18,68 +19,92 @@ public:
     const char *what() const noexcept override { return what_.c_str(); }
 };
 
-struct BaseDec
+static inline bool is_ws(char c)
 {
-    static int parse(char c)
-    {
-        return static_cast<int>(c) - '0';
-    }
-
-    static bool is_invalid(int digit)
-    {
-        return digit < 0 || digit > 9;
-    }
-
-    static const int radix = 10;
-};
-
-struct BaseHex
-{
-    static int parse(char c)
-    {
-        if ('0' <= c && c <= '9') {
-            return c - '0';
-        }
-        if ('a' <= c && c <= 'f') {
-            return c - 'a' + 10;
-        }
-        if ('A' <= c && c <= 'F') {
-            return c - 'A' + 10;
-        }
-        return -1;
-    }
-
-    static bool is_invalid(int digit)
-    {
-        return digit < 0;
-    }
-
-    static const int radix = 16;
-};
-
-template<class T, class Iterator, class Base>
-static void parse_uint(Iterator &it, T &out, Base)
-{
-    out = 0;
-    int ndigits = 0;
-    for (;; ++it, ++ndigits) {
-        const auto digit = Base::parse(*it);
-        if (Base::is_invalid(digit)) {
-            break;
-        }
-        out *= Base::radix;
-        out += digit;
-    }
-    if (!ndigits) {
-        throw UnexpectedInput(it, "(digit)");
-    }
+    return c == ' ' || c == '\t';
 }
 
-template<class T, class Base>
-static void parse_uint_until_nul(const char *it, T &out, Base base)
+static inline bool is_printable(unsigned char c)
 {
-    parse_uint(it, out, base);
-    if (*it != '\0') {
-        throw UnexpectedInput(it, "(end of string)");
+    return c > 32;
+}
+
+static bool maybe_slurp(char *&s, const char *prefix, bool only_with_ws = false)
+{
+    const auto nprefix = strlen(prefix);
+    if (strncmp(s, prefix, nprefix) != 0)
+        return false;
+    s += nprefix;
+    if (only_with_ws) {
+        if (!is_ws(*s)) {
+            s -= nprefix;
+            return false;
+        }
+        do {
+            ++s;
+        } while (is_ws(*s));
     }
+    return true;
+}
+
+static inline void slurp(char *&s, const char *prefix)
+{
+    if (!maybe_slurp(s, prefix))
+        throw UnexpectedInput(/*found=*/s, /*expected=*/prefix);
+}
+
+static inline unsigned parse_digit(char c)
+{
+    if ('0' <= c && c <= '9')
+        return c - '0';
+    if ('a' <= c && c <= 'z')
+        return c - 'a' + 10;
+    if ('A' <= c && c <= 'Z')
+        return c - 'A' + 10;
+    return 255;
+}
+
+template<class T>
+static void slurp_uint(char *&s, T &out, unsigned base)
+{
+    out = 0;
+    bool got_digits = false;
+    for (; ; ++s, got_digits = true) {
+        const unsigned digit = parse_digit(*s);
+        if (digit >= base)
+            break;
+        out *= base;
+        out += digit;
+    }
+    if (!got_digits)
+        throw UnexpectedInput(/*found=*/s, /*expected=*/"(digit)");
+}
+
+static inline void slurp_any_ws(char *&s)
+{
+    while (is_ws(*s))
+        ++s;
+}
+
+static inline void slurp_any_printable(char *&s)
+{
+    while (is_printable(*s))
+        ++s;
+}
+
+static inline void slurp_some_ws(char *&s)
+{
+    if (!is_ws(*s))
+        throw UnexpectedInput(/*found=*/s, /*expected=*/"(whitespace)");
+    do {
+        ++s;
+    } while (is_ws(*s));
+}
+
+template<class T>
+static void parse_uint_until_nul(char *s, T &out, unsigned base)
+{
+    slurp_uint(s, out, base);
+    if (*s != '\0')
+        throw UnexpectedInput(/*found=*/s, /*expected=*/"(end of string)");
 }

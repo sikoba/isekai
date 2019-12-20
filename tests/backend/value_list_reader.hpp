@@ -14,7 +14,7 @@ class ValueListReader
     struct Value
     {
         bool ok;
-        const char *hex;
+        char *hex;
 
         operator bool() const { return ok; }
     };
@@ -26,29 +26,22 @@ public:
 
     Value next_value()
     {
-        if (line_.read_from(file_) <= 0) {
+        if (line_.read_from(file_) <= 0)
             return Value{false, nullptr};
-        }
+
         char *s = line_.c_str();
 
         unsigned index;
-        parse_uint(s, index, BaseDec{});
-        if (index != next_index_) {
+        slurp_uint(s, index, /*base=*/10);
+
+        if (index != next_index_)
             throw UnexpectedInput("unexpected index");
-        }
         ++next_index_;
 
-        if (*s != ' ') {
-            throw UnexpectedInput(s, "(space)");
-        }
-        do {
-            ++s;
-        } while (*s == ' ');
+        slurp_some_ws(s);
 
         char *hex_start = s;
-        while (static_cast<unsigned char>(*s) > 32) {
-            ++s;
-        }
+        slurp_any_printable(s);
         *s = '\0';
 
         return Value{true, hex_start};
