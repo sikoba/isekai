@@ -389,22 +389,23 @@ struct RequestFactory
     end
 
     def joined_divide (j : JoinedRequest, k : JoinedRequest) : Array(JoinedRequest)
-        width = common_width! j.@width, k.@width 
+        width = common_width! j.@width, k.@width
         #if k.constant?  the frontend should have take care of this because ax/k != (a/k)*x
 
-        if j.@b == k.@b && j.@x == k.@x
-            #TODO quid division by 0??
-            JoinedRequest.new_for_const(1, width: width)
+        if j.@a == k.@a && j.@b == k.@b && j.@x == k.@x
+            return [
+                JoinedRequest.new_for_const(1_u128, width: width),
+                JoinedRequest.new_for_const(0_u128, width: width),
+            ]
         end
 
         j_wire = joined_to_wire! j
         k_wire = joined_to_wire! k
-        wires = Array(Wire).new();
-        wires << j_wire << k_wire
-        division = @board.divide(wires, width)   
-        result = Array(JoinedRequest).new()
-        result << JoinedRequest.new_for_wire(division[0], width: width)
-        result << JoinedRequest.new_for_wire(division[1], width: width)
+        division = @board.divide([j_wire, k_wire], width)
+        return [
+            JoinedRequest.new_for_wire(division[0], width: width),
+            JoinedRequest.new_for_wire(division[1], width: width),
+        ]
     end
 
     def joined_trunc (j : JoinedRequest, to new_width : Int32) : JoinedRequest
