@@ -388,14 +388,13 @@ struct RequestFactory
         end
     end
 
-    
     def joined_divide (j : JoinedRequest, k : JoinedRequest) : Array(JoinedRequest)
         width = common_width! j.@width, k.@width 
         #if k.constant?  the frontend should have take care of this because ax/k != (a/k)*x
 
         if j.@b == k.@b && j.@x == k.@x
             #TODO quid division by 0??
-            JoinedRequest.new_for_const(1, width: 1)
+            JoinedRequest.new_for_const(1, width: width)
         end
 
         j_wire = joined_to_wire! j
