@@ -25,7 +25,7 @@ Here is our tentative "to do" list for the coming months.
 *Additional language features*:
  - ~~Integer division and modulo~~  &#x2705; DONE (13-DEC-19)!
  - ~~Array look-up and dynamic storage optimisations~~ &#x2705; DONE (13-DEC-19)!
- - Native field operations for efficient cryptgraphic primitives implementation
+ - ~~Native field operations for efficient cryptgraphic primitives implementation~~ &#x2705; DONE (20-DEC-19)!
  - Floating point operations
 
 *LLVM support improvements*:  
