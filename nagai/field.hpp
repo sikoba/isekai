@@ -6,8 +6,8 @@ class Field
 {
     Nagai *ptr_;
 
-    __attribute__((always_inline)) explicit
-    Field(Nagai *ptr) noexcept
+    __attribute__((always_inline))
+    explicit Field(Nagai *ptr) noexcept
         : ptr_{ptr}
     {}
 
@@ -31,7 +31,7 @@ public:
     {}
 
     __attribute__((always_inline))
-    Field(const char *s) noexcept
+    explicit Field(const char *s) noexcept
         : ptr_{nagai_init_from_str(s)}
     {}
 
@@ -98,6 +98,12 @@ public:
     }
 
     __attribute__((always_inline))
+    Field& operator -=(const Field &that) noexcept
+    {
+        return *this = *this - that;
+    }
+
+    __attribute__((always_inline))
     Field& operator *=(const Field &that) noexcept
     {
         return *this = *this * that;
@@ -109,20 +115,20 @@ public:
         return *this = *this / that;
     }
 
-    __attribute__((always_inline)) explicit
-    operator bool () const noexcept
+    __attribute__((always_inline))
+    explicit operator bool () const noexcept
     {
         return nagai_nonzero(ptr_);
     }
 
-    __attribute__((always_inline)) explicit
-    operator uint64_t () const noexcept
+    __attribute__((always_inline))
+    explicit operator uint64_t () const noexcept
     {
         return nagai_lowbits(ptr_);
     }
 
-    __attribute__((always_inline)) explicit
-    operator Nagai * () const noexcept
+    __attribute__((always_inline))
+    explicit operator Nagai * () const noexcept
     {
         return ptr_;
     }
