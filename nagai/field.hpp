@@ -47,12 +47,18 @@ public:
         nagai_free(ptr_);
         ptr_ = tmp;
         return *this;
-    }
+    }   
 
     __attribute__((always_inline))
     Field operator +(const Field &that) const noexcept
     {
         return Field{nagai_add(ptr_, that.ptr_)};
+    }
+
+    __attribute__((always_inline))
+    Field operator -(const Field &that) const noexcept
+    {
+        return Field{nagai_sub(ptr_, that.ptr_)};
     }
 
     __attribute__((always_inline))

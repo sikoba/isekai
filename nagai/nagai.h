@@ -71,6 +71,17 @@ Nagai *nagai_exp(Nagai *b, Nagai *e, unsigned limit)
     return r;
 }
 
+static inline __attribute__((always_inline, unused)) NAGAI_NOTHROW_
+Nagai *nagai_sub(Nagai *a, Nagai *b)
+{
+    Nagai *neg = nagai_init_neg(1);
+	Nagai *b_neg = nagai_mul(b, neg);
+    Nagai *result = nagai_add(a, b_neg);
+    nagai_free(neg);
+	nagai_free(b_neg);
+    return result;
+}
+
 #undef NAGAI_NOTHROW_
 
 #ifdef __cplusplus
