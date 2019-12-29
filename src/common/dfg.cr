@@ -944,20 +944,51 @@ class NagaiAdd < BinaryOp
         super(:nagai_add, left, right, bitwidth: BitWidth.new_for_undefined)
     end
 
-    def self.bake (left : DFGExpr, right : DFGExpr)
-        if left.is_a? NagaiVerbatim && left.@value == 0
-            return right
+    def self.verbatim_eval (x : NagaiVerbatim, y : NagaiVerbatim, p_bits_min : Int32)
+        a, b = x.@value, y.@value
+        sum = a + b
+        if a == 0 || b == 0 || is_safe_bigint(sum, p_bits_min, accept_negative: true)
+            NagaiVerbatim.new(sum)
+        else
+            self.new(x, y)
         end
-        if right.is_a? NagaiVerbatim && right.@value == 0
-            return left
+    end
+
+    def self.simplify_verbatim (x : DFGExpr, y : NagaiVerbatim)
+        if y.@value == 0
+            return x
+        else
+            return self.new(x, y)
         end
-        self.new(left, right)
+    end
+
+    def self.bake (left : DFGExpr, right : DFGExpr, p_bits_min : Int32)
+        case {left, right}
+        when {NagaiVerbatim, NagaiVerbatim}
+            self.verbatim_eval(left, right, p_bits_min: p_bits_min)
+        when {NagaiVerbatim, _}
+            self.simplify_verbatim(right, left)
+        when {_, NagaiVerbatim}
+            self.simplify_verbatim(left, right)
+        else
+            self.new(left, right)
+        end
     end
 end
 
 class NagaiMultiply < BinaryOp
     def initialize (left : DFGExpr, right : DFGExpr)
         super(:nagai_mul, left, right, bitwidth: BitWidth.new_for_undefined)
+    end
+
+    def self.verbatim_eval (x : NagaiVerbatim, y : NagaiVerbatim, p_bits_min : Int32)
+        a, b = x.@value, y.@value
+        product = a * b
+        if a == 1 || b == 1 || is_safe_bigint(product, p_bits_min, accept_negative: true)
+            NagaiVerbatim.new(product)
+        else
+            self.new(x, y)
+        end
     end
 
     def self.simplify_verbatim (x : DFGExpr, y : NagaiVerbatim)
@@ -971,14 +1002,17 @@ class NagaiMultiply < BinaryOp
         end
     end
 
-    def self.bake (left : DFGExpr, right : DFGExpr)
-        if left.is_a? NagaiVerbatim
-            return self.simplify_verbatim(right, left)
+    def self.bake (left : DFGExpr, right : DFGExpr, p_bits_min : Int32)
+        case {left, right}
+        when {NagaiVerbatim, NagaiVerbatim}
+            self.verbatim_eval(left, right, p_bits_min: p_bits_min)
+        when {NagaiVerbatim, _}
+            self.simplify_verbatim(right, left)
+        when {_, NagaiVerbatim}
+            self.simplify_verbatim(left, right)
+        else
+            self.new(left, right)
         end
-        if right.is_a? NagaiVerbatim
-            return self.simplify_verbatim(left, right)
-        end
-        self.new(left, right)
     end
 end
 

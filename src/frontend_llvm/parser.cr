@@ -375,12 +375,14 @@ class Parser
         when @specials.nagai_add
             @locals[ins.to_any] = NagaiAdd.bake(
                 as_expr(operands[0]),
-                as_expr(operands[1]))
+                as_expr(operands[1]),
+                p_bits_min: @p_bits_min)
 
         when @specials.nagai_mul
             @locals[ins.to_any] = NagaiMultiply.bake(
                 as_expr(operands[0]),
-                as_expr(operands[1]))
+                as_expr(operands[1]),
+                p_bits_min: @p_bits_min)
 
         when @specials.nagai_getbit
             @locals[ins.to_any] = NagaiGetBit.bake(
