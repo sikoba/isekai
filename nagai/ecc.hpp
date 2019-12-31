@@ -1,3 +1,5 @@
+#pragma once
+
 #include "field.hpp"
 
 class ECCPoint;
@@ -29,8 +31,8 @@ class ECCPoint
 {
 	
 	public:
-	Field x = Field((uint64_t)0);
-	Field y = Field((uint64_t)0);
+	Field x = 0;
+	Field y = 0;
 
 	private:
 	//Curve the point belongs to
@@ -66,8 +68,8 @@ __attribute__((always_inline))
 void ECCPoint::Double()
 {
 	Field x2 = x*x;
-	Field f3 = Field((uint64_t)3);
-	Field f2 = Field((uint64_t)2);
+	Field f3 = 3;
+	Field f2 = 2;
 	Field lambda = (f3*x2+ec->a)/(f2*y);
 	Field xr = lambda*lambda-f2*x;
 	y = lambda*(x-xr)-y;
@@ -97,9 +99,9 @@ void ECCPoint::Add(ECCPoint* q)
 __attribute__((always_inline))
 ECCPoint ECCPoint::Multiply(Field d)
 {
-	ECCPoint result(Field((uint64_t)0),Field((uint64_t)0), ec);
-	ECCPoint N(x,y, ec);
-	int limit = 256; //TODO
+	ECCPoint result(0, 0, ec);
+	ECCPoint N(x, y, ec);
+	unsigned limit = 256; //TODO
     bool first = true;
 	
 	for (unsigned i = 0; i < limit; ++i) 

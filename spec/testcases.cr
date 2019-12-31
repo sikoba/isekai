@@ -37,13 +37,15 @@ def run_isekai (on bitcode_file : String) : Nil
     File.open(File::NULL, "w") do |null_output|
         parser = Isekai::LLVMFrontend::Parser.new(
             bitcode_file,
-            loop_sanity_limit: 1_000_000)
+            loop_sanity_limit: 1_000_000,
+            p_bits_min: 254)
         inputs, nizk_inputs, outputs = parser.parse()
         board = Isekai::AltBackend::Arith::Board.new(
             inputs,
             nizk_inputs,
             output: null_output,
-            p_bits: 254)
+            p_bits_min: 254,
+            p_bits_max: 254)
         req_factory = Isekai::AltBackend::Arith::RequestFactory.new(board, sloppy: false)
         backend = Isekai::AltBackend::Arith::Backend.new(req_factory)
         outputs.each { |expr| Isekai::AltBackend.lay_down_output(backend, expr) }
