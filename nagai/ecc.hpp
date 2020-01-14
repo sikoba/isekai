@@ -43,6 +43,9 @@ class ECCPoint
 	ECCPoint(Field px, Field py, ECC * ecc);
 	
 	__attribute__((always_inline)) ~ECCPoint() {}
+
+	//Return the negation '-P' of 'this'.	*WARNING* this does not work for point at infinity
+	ECCPoint Negate();
 	
 	//Double the point.	*WARNING* this does not work for point at infinity
 	void Double();
@@ -63,6 +66,11 @@ ECCPoint ECC::NewPoint(Field x, Field y)
 	return ECCPoint(x,y,this);
 }
 
+__attribute__((always_inline))
+ECCPoint ECCPoint::Negate()
+{
+	return ECCPoint(x, y.negate(), ec);
+}
 
 __attribute__((always_inline))
 void ECCPoint::Double()

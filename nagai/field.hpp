@@ -61,6 +61,12 @@ public:
         return Field{nagai_sub(ptr_, that.ptr_)};
     }
 
+     __attribute__((always_inline))
+    Field negate() const noexcept
+    {
+        return Field((uint64_t)0) - *this;
+    }
+
     __attribute__((always_inline))
     Field operator *(const Field &that) const noexcept
     {
