@@ -80,8 +80,8 @@ enum ZKP
     Libsnark            #use libsnark style to generate r1cs
     Libsnark_legacy     #use libsnark to generate r1cs
     Dalek               #bulletproof
-    Aurora,
-    Ligero,
+    Aurora
+    Ligero
     Fractal
 end
 
