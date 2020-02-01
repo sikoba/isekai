@@ -317,9 +317,6 @@ class Parser
         end
     end
 
-    private def handle_unroll_hint_call (ins : LibLLVM::Instruction) : Nil
-    end
-
     @[AlwaysInline]
     private def set_binary (ins, klass) : Nil
         operands = ins.operands
