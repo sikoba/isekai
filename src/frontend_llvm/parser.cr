@@ -354,7 +354,7 @@ class Parser
 
         when @specials.unroll_hint_once
             arg = as_expr(operands[0])
-            raise "unroll_hint_once() argument is not constant" unless arg.is_a? Constant
+            raise "_unroll_hint_once() argument is not constant" unless arg.is_a? Constant
             @unroll_limit_pushed = arg.@value.to_u32
 
         when @specials.unroll_hint_once_pop
