@@ -1,10 +1,11 @@
 require "spec"
-require "../src/collapser.cr"
-require "../src/dfg.cr"
+require "../src/common/collapser.cr"
+require "../src/common/dfg.cr"
 
 describe Isekai do
-    five = Isekai::Constant.new(5)
-    four = Isekai::Constant.new(4)
+    bitw = Isekai::BitWidth.new(32);
+    five = Isekai::Constant.new(5, bitw)
+    four = Isekai::Constant.new(4, bitw)
     add_expr = Isekai::Add.new(five, four)
     mul_expr = Isekai::Multiply.new(five, four)
 

@@ -1,7 +1,7 @@
 require "file"
 require "./spec_helper"
-require "../src/parser.cr"
-require "../src/clangutils.cr"
+require "../src/frontend_c/parser.cr"
+require "../src/frontend_c/clangutils.cr"
 
 describe Isekai do
     cursor = parse_c_code("void foo(int x, int y)
@@ -11,25 +11,25 @@ describe Isekai do
                                       else { int w = 1; }
                                    }")
 
-    func_body = Isekai::ClangUtils.findFunctionBody(cursor)
+    func_body = Isekai::CFrontend::ClangUtils.findFunctionBody(cursor)
     raise "findFunctionBody failed" if func_body.is_a? Nil
     func_body.kind.should eq Clang::CursorKind::CompoundStmt
 
-    fun_params = Isekai::ClangUtils.findFunctionParams(cursor)
+    fun_params = Isekai::CFrontend::ClangUtils.findFunctionParams(cursor)
     fun_params.size.should eq 2
 
-    decl_statement = Isekai::ClangUtils.getFirstChild(func_body)
+    decl_statement = Isekai::CFrontend::ClangUtils.getFirstChild(func_body)
     raise "Can't find decl statement declaration" if decl_statement.is_a? Nil
     decl_statement.kind.should eq Clang::CursorKind::DeclStmt
 
-    var_decl = Isekai::ClangUtils.getFirstChild(decl_statement)
+    var_decl = Isekai::CFrontend::ClangUtils.getFirstChild(decl_statement)
     raise "Can't find variable declaration declaration" if var_decl.is_a? Nil
     var_decl.kind.should eq Clang::CursorKind::VarDecl
 
     binary_expr = get_first_child_of_kind(var_decl, Clang::CursorKind::BinaryOperator)
     raise "Can't find binary expression" if binary_expr.is_a? Nil
 
-    binary_elements = Isekai::ClangUtils.getBinaryOperatorExprs(binary_expr)
+    binary_elements = Isekai::CFrontend::ClangUtils.getBinaryOperatorExprs(binary_expr)
     binary_elements.size.should eq 2
 
     # Compile parser
@@ -54,7 +54,7 @@ describe Isekai do
         }");
     end
 
-    parser = Isekai::CParser.new(tempfile.path(), "", 100, 32, false)
+    parser = Isekai::CFrontend::Parser.new(tempfile.path(), "", 100, 32, false)
     parser.parse()
     tempfile.delete()
 

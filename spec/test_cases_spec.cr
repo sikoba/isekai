@@ -1,7 +1,7 @@
 require "file"
 require "./spec_helper"
-require "../src/parser.cr"
-require "../src/clangutils.cr"
+require "../src/frontend_c/parser.cr"
+require "../src/frontend_c/clangutils.cr"
 
 describe Isekai do
     it "Constant folding if expression" do
@@ -26,7 +26,7 @@ describe Isekai do
             }");
         end
 
-        parser = Isekai::CParser.new(tempfile.path(), "", 100, 32, false)
+        parser = Isekai::CFrontend::Parser.new(tempfile.path(), "", 100, 32, false)
         parser.parse()
         tempfile.delete()
         state = parser.parsed_state
@@ -58,7 +58,7 @@ describe Isekai do
             }");
         end
 
-        parser = Isekai::CParser.new(tempfile.path(), "", 100, 32, false)
+        parser = Isekai::CFrontend::Parser.new(tempfile.path(), "", 100, 32, false)
         parser.parse()
         tempfile.delete()
         state = parser.parsed_state
@@ -90,7 +90,7 @@ describe Isekai do
             }");
         end
 
-        parser = Isekai::CParser.new(tempfile.path(), "", 100, 32, false)
+        parser = Isekai::CFrontend::Parser.new(tempfile.path(), "", 100, 32, false)
         parser.parse()
         tempfile.delete()
         state = parser.parsed_state
@@ -133,7 +133,7 @@ describe Isekai do
             }");
         end
 
-        parser = Isekai::CParser.new(tempfile.path(), "", 100, 32, false)
+        parser = Isekai::CFrontend::Parser.new(tempfile.path(), "", 100, 32, false)
         parser.parse()
         tempfile.delete()
         state = parser.parsed_state
@@ -174,7 +174,7 @@ describe Isekai do
             }");
         end
 
-        parser = Isekai::CParser.new(tempfile.path(), "", 100, 32, false)
+        parser = Isekai::CFrontend::Parser.new(tempfile.path(), "", 100, 32, false)
         parser.parse()
         tempfile.delete()
         state = parser.parsed_state
@@ -204,7 +204,7 @@ describe Isekai do
             }");
         end
 
-        parser = Isekai::CParser.new(tempfile.path(), "", 100, 32, false)
+        parser = Isekai::CFrontend::Parser.new(tempfile.path(), "", 100, 32, false)
         parser.parse()
         tempfile.delete()
         state = parser.parsed_state

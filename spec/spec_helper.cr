@@ -1,5 +1,5 @@
 require "spec"
-require "../src/parser.cr"
+require "../src/frontend_c/parser.cr"
 require "clang"
 
 # Parses the C code and returns libclang cursor

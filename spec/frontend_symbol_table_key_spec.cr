@@ -1,6 +1,6 @@
 require "spec"
-require "../src/frontend/storage.cr"
-require "../src/frontend/symbol_table_key.cr"
+require "../src/common/storage.cr"
+require "../src/common/symbol_table_key.cr"
 
 describe Isekai do
     storage = Isekai::Storage.new("instance", 10)

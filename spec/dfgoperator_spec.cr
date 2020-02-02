@@ -1,10 +1,11 @@
 require "spec"
-require "../src/dfg.cr"
-require "../src/dfgoperator.cr"
+require "../src/common/dfg.cr"
+require "../src/common/dfgoperator.cr"
 
 describe Isekai do
+    bw = Isekai::BitWidth.new(32);
     op : Isekai::DFGOperator = Isekai::OperatorAdd.new()
-    op.evaluate(Isekai::Constant.new(1), Isekai::Constant.new(2)).should eq 3
+    op.evaluate(Isekai::Constant.new(1, bw), Isekai::Constant.new(2, bw)).should eq 3
     op = Isekai::OperatorMul.new()
-    op.evaluate(Isekai::Constant.new(1), Isekai::Constant.new(2)).should eq 2
+    op.evaluate(Isekai::Constant.new(1, bw), Isekai::Constant.new(2, bw)).should eq 2
 end

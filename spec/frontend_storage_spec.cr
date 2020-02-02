@@ -1,5 +1,5 @@
 require "spec"
-require "../src/frontend/storage.cr"
+require "../src/common/storage.cr"
 
 describe Isekai do
     nul1 = Isekai::Storage.null()

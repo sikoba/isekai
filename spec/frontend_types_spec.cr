@@ -1,5 +1,5 @@
 require "spec"
-require "../src/frontend/types.cr"
+require "../src/common/types.cr"
 
 describe Isekai do
     fields = [Isekai::StructField.new(Isekai::IntType.new(), "a"),
