@@ -1,14 +1,12 @@
-total 12
-input 0			 # The one-input wire.
-const-mul-0 in 1 <0> out 1 <1>
-input 2
-input 3
-input 4
-input 5
-mul in 2 <2 3> out 1 <6>
-add in 2 <4 5> out 1 <7>
-const-mul-5 in 1 <0> out 1 <8>
-add in 2 <6 8> out 1 <9>
-const-mul-6 in 1 <7> out 1 <10>
-mul in 2 <9 10> out 1 <11>
-output 11
+total 10
+input 0 # one-input
+nizkinput 1 # input
+nizkinput 2 # input
+const-mul-0 in 1 <0> out 1 <3> # zero
+const-mul-2 in 1 <2> out 1 <4> # multiply-by-constant 2
+const-mul-ffffffff in 1 <4> out 1 <5> # multiply-by-constant 4294967295
+const-mul-5 in 1 <0> out 1 <6> # constant 5
+add in 2 <1 6> out 1 <7> # #<Isekai::Backend::ArithAddReq:0x7f388cab4dc0>
+add in 2 <7 5> out 1 <8> # #<Isekai::Backend::ArithAddReq:0x7f388cab4e00>
+mul in 2 <0 8> out 1 <9> # output-cast
+output 9 # 

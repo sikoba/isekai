@@ -4,6 +4,19 @@ require "./gate.cr"
 
 module Isekai
     
+
+enum ZKP
+    Snark
+    Groth16
+    Bctv14a    
+    Libsnark            #use libsnark style to generate r1cs
+    Libsnark_legacy     #use libsnark to generate r1cs
+    Dalek               #bulletproof
+    Aurora,
+    Ligero,
+    Fractal
+end
+
 ##################### maths
 class Maths
 

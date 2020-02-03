@@ -73,17 +73,7 @@ struct ProgramOptions
     property benchmark = "none"
 end
 
-enum ZKP
-    Snark
-    Groth16
-    Bctv14a    
-    Libsnark            #use libsnark style to generate r1cs
-    Libsnark_legacy     #use libsnark to generate r1cs
-    Dalek               #bulletproof
-    Aurora,
-    Ligero,
-    Fractal
-end
+
 
 private class InputFile
     enum Kind
