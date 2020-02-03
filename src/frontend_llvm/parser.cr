@@ -76,12 +76,12 @@ end
 class Parser
 
     private struct UnrollCtl
-        @counter : Int32
-        @n_dynamic_iters : Int32
+        @counter : UInt32
+        @n_dynamic_iters : UInt32
 
-        def initialize (@junction : LibLLVM::BasicBlock, @limit : Int32, is_dynamic : Bool)
+        def initialize (@junction : LibLLVM::BasicBlock, @limit : UInt32, is_dynamic : Bool)
             @counter = 1
-            @n_dynamic_iters = is_dynamic ? 1 : 0
+            @n_dynamic_iters = is_dynamic ? 1_u32 : 0_u32
         end
 
         getter n_dynamic_iters, junction, limit
@@ -99,6 +99,8 @@ class Parser
 
     private class Specials
         property unroll_hint : LibLLVM::Any? = nil
+        property unroll_hint_once : LibLLVM::Any? = nil
+        property unroll_hint_once_pop : LibLLVM::Any? = nil
 
         property nagai_init_pos : LibLLVM::Any? = nil
         property nagai_init_neg : LibLLVM::Any? = nil
@@ -136,12 +138,16 @@ class Parser
 
     @llvm_module : LibLLVM::Module
 
+    @unroll_limit : UInt32
+    @unroll_limit_pushed : UInt32? = nil
+
     def initialize (
             input_file : String,
-            @loop_sanity_limit : Int32,
+            loop_sanity_limit : Int32,
             @p_bits_min : Int32)
 
         @llvm_module = LibLLVM.module_from_buffer(LibLLVM.buffer_from_file(input_file))
+        @unroll_limit = loop_sanity_limit.to_u32
     end
 
     private def inspect_outsource_param (value : LibLLVM::Any, which_param : OutsourceParam) : Nil
@@ -311,12 +317,6 @@ class Parser
         end
     end
 
-    private def handle_unroll_hint_call (ins : LibLLVM::Instruction) : Nil
-        arg = as_expr(ins.operands[0])
-        raise "_unroll_hint() argument is not constant" unless arg.is_a? Constant
-        @loop_sanity_limit = arg.@value.to_i32
-    end
-
     @[AlwaysInline]
     private def set_binary (ins, klass) : Nil
         operands = ins.operands
@@ -345,7 +345,17 @@ class Parser
         operands = ins.operands
         case ins.callee
         when @specials.unroll_hint
-            handle_unroll_hint_call(ins)
+            arg = as_expr(operands[0])
+            raise "_unroll_hint() argument is not constant" unless arg.is_a? Constant
+            @unroll_limit = arg.@value.to_u32
+
+        when @specials.unroll_hint_once
+            arg = as_expr(operands[0])
+            raise "_unroll_hint_once() argument is not constant" unless arg.is_a? Constant
+            @unroll_limit_pushed = arg.@value.to_u32
+
+        when @specials.unroll_hint_once_pop
+            @unroll_limit_pushed = nil
 
         when @specials.nagai_init_pos
             @locals[ins.to_any] = Nagai.bake(
@@ -497,59 +507,60 @@ class Parser
                 successors = ins.successors.to_a
                 successors.each { |succ| produce_phi_copies(from: bb, to: succ) }
 
-                if ins.conditional?
-                    cond = as_expr(ins.condition)
-                    if_true, if_false = successors
-
-                    if cond.is_a? Constant
-                        static_branch = (cond.@value != 0) ? if_true : if_false
-                    end
-
-                    sink, is_loop = @preproc_data[bb]
-                    if is_loop
-                        to_loop = (sink == if_true) ? if_false : if_true
-
-                        if !@unroll_ctls.empty? && @unroll_ctls[-1].junction == bb
-                            ctl = @unroll_ctls[-1]
-                            if ctl.done? || static_branch == sink
-                                # Stop generating iterations
-                                raise "Statically infinite loop" if static_branch == to_loop
-                                @assumption.pop(ctl.n_dynamic_iters)
-                                @unroll_ctls.pop
-                                return sink
-                            else
-                                # Generate another iteration
-                                @unroll_ctls[-1] = ctl.iteration(is_dynamic: !static_branch)
-                            end
-                        else
-                            if @loop_sanity_limit <= 0 || static_branch == sink
-                                raise "Statically infinite loop" if static_branch == to_loop
-                                return sink
-                            end
-                            # New loop, start the unroll
-                            @unroll_ctls << UnrollCtl.new(
-                                junction: bb,
-                                limit: @loop_sanity_limit,
-                                is_dynamic: !static_branch)
-                        end
-
-                        @assumption.push(cond, to_loop == if_true) unless static_branch
-                        return to_loop
-                    else
-                        return static_branch if static_branch
-
-                        @assumption.push(cond, true)
-                        inspect_basic_block_until(if_true, terminator: sink)
-                        @assumption.pop
-
-                        @assumption.push(cond, false)
-                        inspect_basic_block_until(if_false, terminator: sink)
-                        @assumption.pop
-
-                        return sink
-                    end
-                else
+                unless ins.conditional?
                     return successors[0]
+                end
+
+                cond = as_expr(ins.condition)
+                if_true, if_false = successors
+
+                if cond.is_a? Constant
+                    static_branch = (cond.@value != 0) ? if_true : if_false
+                end
+
+                sink, is_loop = @preproc_data[bb]
+                if is_loop
+                    to_loop = (sink == if_true) ? if_false : if_true
+
+                    if !@unroll_ctls.empty? && @unroll_ctls[-1].junction == bb
+                        ctl = @unroll_ctls[-1]
+                        if ctl.done? || static_branch == sink
+                            # Stop generating iterations
+                            raise "Statically infinite loop" if static_branch == to_loop
+                            @assumption.pop(ctl.n_dynamic_iters)
+                            @unroll_ctls.pop
+                            return sink
+                        else
+                            # Generate another iteration
+                            @unroll_ctls[-1] = ctl.iteration(is_dynamic: !static_branch)
+                        end
+                    else
+                        current_limit = @unroll_limit_pushed || @unroll_limit
+                        if current_limit == 0 || static_branch == sink
+                            raise "Statically infinite loop" if static_branch == to_loop
+                            return sink
+                        end
+                        # New loop, start the unroll
+                        @unroll_ctls << UnrollCtl.new(
+                            junction: bb,
+                            limit: current_limit,
+                            is_dynamic: !static_branch)
+                    end
+
+                    @assumption.push(cond, to_loop == if_true) unless static_branch
+                    return to_loop
+                else
+                    return static_branch if static_branch
+
+                    @assumption.push(cond, true)
+                    inspect_basic_block_until(if_true, terminator: sink)
+                    @assumption.pop
+
+                    @assumption.push(cond, false)
+                    inspect_basic_block_until(if_false, terminator: sink)
+                    @assumption.pop
+
+                    return sink
                 end
 
             when .switch?
@@ -657,6 +668,24 @@ class Parser
                 arg_types: [
                     :integral,
                 ]
+            )
+        end
+
+        if (func = find_special_func "_unroll_hint_once")
+            @specials.unroll_hint_once = check_special_func(
+                func,
+                return_type: LibLLVM::Type.new_void,
+                arg_types: [
+                    :integral,
+                ]
+            )
+        end
+
+        if (func = find_special_func "_unroll_hint_once_pop")
+            @specials.unroll_hint_once_pop = check_special_func(
+                func,
+                return_type: LibLLVM::Type.new_void,
+                arg_types: [] of TypeUtils::FuzzyType
             )
         end
 

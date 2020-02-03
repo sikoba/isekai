@@ -74,7 +74,6 @@ struct ProgramOptions
 end
 
 
-
 private class InputFile
     enum Kind
         Arith
