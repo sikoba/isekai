@@ -271,17 +271,17 @@ class CircuitParser
         
         # const-mul-neg-xx
       elsif line =~ /^const-mul-neg-([\dA-Fa-f]+) in 1 <(\d+)> out 1 <(\d+)>$/
-        c = $1.to_u64(16) # $1.to_u32
+        c = $1.to_big_i(16) # $1.to_u32
      
         log_line "   const_mul_neg -#{c}_C x #{$2.to_i} = #{$3.to_i}"
-        callback(:const_mul_neg, stage, BigInt.new(c), [$2.to_u32], [$3.to_u32])
+        callback(:const_mul_neg, stage, c, [$2.to_u32], [$3.to_u32])
     
         # const-mul-xx
       elsif line =~ /^const-mul-([\dA-Fa-f]+) in 1 <(\d+)> out 1 <(\d+)>$/
-        c = $1.to_u64(16)
+        c = $1.to_big_i(16)
     
         log_line "   const_mul #{c}_C x #{$2.to_i} = #{$3.to_i}"
-        callback(:const_mul, stage, BigInt.new(c), [$2.to_u32], [$3.to_u32])
+        callback(:const_mul, stage, c, [$2.to_u32], [$3.to_u32])
 
         # split
       elsif line =~ /^split in 1 <(\d+)> out (\d+) <([\s\d]+)>$/

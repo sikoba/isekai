@@ -128,6 +128,18 @@ public:
     }
 
     __attribute__((always_inline))
+    int operator ==(const Field &that) noexcept
+    {
+        return  *this - that == 0;
+    }
+
+    __attribute__((always_inline))
+    int operator !=(const Field &that) noexcept
+    {
+        return  *this - that != 0;
+    }
+
+    __attribute__((always_inline))
     explicit operator uint64_t () const noexcept
     {
         return nagai_lowbits(ptr_);

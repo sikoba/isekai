@@ -12,16 +12,23 @@ class ECC
 	Field a; 
 	Field b;
 
-__attribute__((always_inline))
-	ECC(Field fa, Field fb)
+	__attribute__((always_inline))
+	inline	ECC(Field fa, Field fb)
 	{
 		a = fa;
 		b = fb;
 	}
 	
-__attribute__((always_inline))
-	~ECC(){}
-	
+	__attribute__((always_inline))
+	inline	~ECC(){}
+
+	__attribute__((always_inline)) 
+	inline ECC(ECC const & e)
+	 {
+		 a = e.a;
+		 b = e.b;
+	 }
+
 	ECCPoint  NewPoint(Field x, Field y);
 };
 
@@ -61,7 +68,7 @@ class ECCPoint
 
 ////////////////////////////////////Implementation//////////////////////////
 __attribute__((always_inline))
-ECCPoint ECC::NewPoint(Field x, Field y)
+inline ECCPoint ECC::NewPoint(Field x, Field y) 
 {
 	return ECCPoint(x,y,this);
 }
@@ -96,7 +103,6 @@ inline ECCPoint::ECCPoint(Field px, Field py, ECC * ecc)
 __attribute__((always_inline))
 void ECCPoint::Add(ECCPoint* q)
 {
-	Field x2 = x*x;
 	Field lambda = (q->y-y)/(q->x-x);
 	Field xr = lambda*lambda-x-q->x;
 	y = lambda*(x-xr)-y;
