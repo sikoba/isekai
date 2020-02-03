@@ -6,6 +6,10 @@ def create_program (&block)
 #include <stdint.h>
 #include <stdlib.h>
 
+void _unroll_hint(unsigned n) { (void) n; }
+void _unroll_hint_once(unsigned n) { (void) n; }
+void _unroll_hint_once_pop(void) {}
+
 static uint64_t test_read(void)
 {
     static unsigned next_index = 0;
