@@ -37,6 +37,16 @@ class Maths
     def modulo_inverse(a : BigInt, mod : BigInt)
         return modulo_exp(a, mod-2, mod);     #TODO   anybetter inverse? 
     end
+
+    #return the bit length of n: ceil(log2(n))
+    def log2(n)
+        r = ((n & (n-1)) == 0 ? 0 : 1); # add 1 if n is not power of 2
+        while (n > 1)
+            n = n >> 1;
+            r += 1
+        end
+        return r;
+    end
 end
 
 class R1CS

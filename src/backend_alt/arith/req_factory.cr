@@ -133,7 +133,6 @@ struct RequestFactory
                 b: truncate(j.@b &+ k.@b, width),
                 width: width)
         end
-
         return joined_add_const(j.@b, k) if j.constant?
         return joined_add_const(k.@b, j) if k.constant?
 
@@ -320,7 +319,14 @@ struct RequestFactory
     end
 
     def joined_dload (w :  Array(JoinedRequest), idx : JoinedRequest) : JoinedRequest
-        ##TODO - should we check for constant requests? it should have been handled before
+        if idx.constant?
+            pp "ERROR - dload called with a constant index"
+        end
+        idx_width = Maths.new().log2(w.size); 
+        if (idx_width > idx.@width)
+            idx_width = idx.@width
+        end
+
         bitwidth = 1;
         wires = Array(Wire).new();
         w.each do |i_req|
@@ -329,15 +335,21 @@ struct RequestFactory
                 bitwidth = i_req.@width
              end
         end
-        i_wire = joined_to_wire! idx
+        i_wire = @board.truncate(joined_to_wire!(idx), to: idx_width)
         result = @board.dyn_load(wires , i_wire, bitwidth) 
         return JoinedRequest.new_for_wire(result, width: bitwidth)
     end
 
     def joined_asplit (w : JoinedRequest, nindices : Int32) : Array(JoinedRequest)
-        ##TODO - should we check for constant requests? it should have been handled before
+        if w.constant?
+            pp "ERROR - apslit called with a constant index"
+        end
         i_wire = joined_to_wire! w
-        splits = @board.a_split(i_wire, nindices)
+        idx_width = Maths.new().log2(nindices-1); 
+        if (idx_width > w.@width)
+            idx_width = w.@width
+        end
+        splits = @board.a_split(i_wire, nindices, policy: TruncatePolicy.new_to_width(idx_width))
         result =  Array(JoinedRequest).new()
         (0..nindices-1).each do |i|
             result << JoinedRequest.new_for_wire(splits[i], 1) 
@@ -456,7 +468,6 @@ struct RequestFactory
                 wire_summand = bit_wire
             end
         end
-
         if wire_summand
             return JoinedRequest.new(
                 a: 1,

@@ -245,7 +245,7 @@ private struct OutputBuffer
 
             when .asplit?
                 out_begin, out_end = datum.@arg2, datum.@arg3
-                out_num = out_end - out_begin
+                out_num = out_end - out_begin + 1
                 @file << "asplit in 1 <" << datum.@arg1 << "> out " << out_num << " <"
                 (out_begin..out_end).each { |i| @file << " " << i}
                 @file << ">\n"
@@ -478,12 +478,17 @@ struct Board
         result
     end
 
-    def a_split (w : Wire, size : Int32) : Array(Wire) 
+    def a_split (w : Wire, size : Int32, policy : TruncatePolicy) : Array(Wire) 
+        if (width = policy.truncate_to_width)
+            arg = truncate(w, to: width)
+        else
+            arg = w
+        end
         result = Array(Wire).new();
         (0..size-1).each do 
             result << allocate_wire! DynamicRange.new_for_bool()     
         end
-        @outbuf.write_asplit(input_wire: w, output: result)
+        @outbuf.write_asplit(input_wire: arg, output: result)
         return result;
      end
 

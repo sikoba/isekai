@@ -222,6 +222,12 @@ public:
             return make_command_(Opcode::SPLIT);
         }
 
+        if (maybe_slurp(s, "asplit", /*only_with_ws=*/true)) {
+            read_args_(s);
+            return make_command_(Opcode::ASPLIT);
+        }
+
+
         if (maybe_slurp(s, "dload", /*only_with_ws=*/true)) {
             read_args_(s);
             return make_command_(Opcode::DLOAD);
