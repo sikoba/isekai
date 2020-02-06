@@ -704,7 +704,7 @@ class GateKeeper
         @constraint_nb += n*2 + 1;
         @witness_nb += (n-1) *2 + out_wires.size();
         if (cache_b.@val >= n-1)
-            raise "ERROR - index too big (#{cache_b.@val} > #{n-2})"
+            pp "ERROR - index too big (#{cache_b.@val} > #{n-2})"
         end
         #dirac constraints
         #dirac variables have no wire, they should come an asplit gate instead..
