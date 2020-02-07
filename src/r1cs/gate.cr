@@ -672,7 +672,7 @@ class GateKeeper
         @constraint_nb += n + 2;
         @witness_nb += n;
         if (cache_b.@val >= n)
-            raise "ERROR - index too big (#{cache_b.@val} > #{n-1})"
+            raise "ERROR - index too big (#{cache_b.@val} > #{n-1}) at wire #{in_wires[0]}"
         end
         #dirac constraints: d1...dn
         var0 = Array(Tuple(UInt32, BigInt)).new;
@@ -704,7 +704,7 @@ class GateKeeper
         @constraint_nb += n*2 + 1;
         @witness_nb += (n-1) *2 + out_wires.size();
         if (cache_b.@val >= n-1)
-            pp "ERROR - index too big (#{cache_b.@val} > #{n-2})"
+            raise "ERROR - index too big (#{cache_b.@val} > #{n-2}) at wire #{in_wires[0]}"
         end
         #dirac constraints
         #dirac variables have no wire, they should come an asplit gate instead..
