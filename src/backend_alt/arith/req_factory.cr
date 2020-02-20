@@ -411,8 +411,8 @@ struct RequestFactory
             ]
         end
 
-        j_wire = joined_to_wire! j
-        k_wire = joined_to_wire! k
+        j_wire = @board.truncate(joined_to_wire!(j), to: width)
+        k_wire = @board.truncate(joined_to_wire!(k), to: width)
         division = @board.divide([j_wire, k_wire], width)
         return [
             JoinedRequest.new_for_wire(division[0], width: width),
