@@ -51,9 +51,7 @@ class CircuitReader
 
         static Command invalid()
         {
-            Command res;
-            res.ok = false;
-            return res;
+            return Command{static_cast<Opcode>(0), {}, {}, nullptr, false};
         }
     };
 

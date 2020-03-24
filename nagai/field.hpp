@@ -62,9 +62,9 @@ public:
     }
 
      __attribute__((always_inline))
-    Field negate() const noexcept
+    Field operator -() const noexcept
     {
-        return Field((uint64_t)0) - *this;
+        return *this * Field(/*value=*/1, /*negative=*/true);
     }
 
     __attribute__((always_inline))
@@ -128,15 +128,15 @@ public:
     }
 
     __attribute__((always_inline))
-    int operator ==(const Field &that) noexcept
+    bool operator ==(const Field &that) noexcept
     {
-        return  *this - that == 0;
+        return !static_cast<bool>(*this - that);
     }
 
     __attribute__((always_inline))
-    int operator !=(const Field &that) noexcept
+    bool operator !=(const Field &that) noexcept
     {
-        return  *this - that != 0;
+        return static_cast<bool>(*this - that);
     }
 
     __attribute__((always_inline))

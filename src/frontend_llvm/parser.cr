@@ -325,11 +325,38 @@ class Parser
         @locals[ins.to_any] = klass.bake(left, right)
     end
 
+    private def transform_pointer_comparison (p : DFGExpr, q : DFGExpr) : {DFGExpr, DFGExpr}
+        case p
+        when AbstractPointer
+            if q.is_a? AbstractPointer
+                PointerComparator.reduce_pointer_comparison(p, q)
+            else
+                left, right = transform_pointer_comparison(q, p)
+                {right, left}
+            end
+        when Conditional
+            t_pair = transform_pointer_comparison(p.@valtrue, q)
+            f_pair = transform_pointer_comparison(p.@valfalse, q)
+            {
+                Conditional.new(p.@cond, t_pair[0], f_pair[0]),
+                Conditional.new(p.@cond, t_pair[1], f_pair[1]),
+            }
+        else
+            raise "Cannot perform pointer comparison of #{p} and #{q}"
+        end
+    end
+
     @[AlwaysInline]
-    private def set_binary_swapped (ins, klass) : Nil
+    private def set_comparison (ins, klass, swap : Bool = false) : Nil
         operands = ins.operands
-        left = as_expr(operands[1])
-        right = as_expr(operands[0])
+        left = as_expr(operands[0])
+        right = as_expr(operands[1])
+        if swap
+            left, right = right, left
+        end
+        if left.@bitwidth.undefined?
+            left, right = transform_pointer_comparison(left, right)
+        end
         @locals[ins.to_any] = klass.bake(left, right)
     end
 
@@ -471,20 +498,20 @@ class Parser
             when .i_cmp?
                 case ins.icmp_predicate
 
-                when .int_eq? then set_binary(ins, CmpEQ)
-                when .int_ne? then set_binary(ins, CmpNEQ)
+                when .int_eq? then set_comparison(ins, CmpEQ)
+                when .int_ne? then set_comparison(ins, CmpNEQ)
 
-                when .int_slt? then set_binary(ins, SignedCmpLT)
-                when .int_ult? then set_binary(ins, CmpLT)
+                when .int_slt? then set_comparison(ins, SignedCmpLT)
+                when .int_ult? then set_comparison(ins, CmpLT)
 
-                when .int_sle? then set_binary(ins, SignedCmpLEQ)
-                when .int_ule? then set_binary(ins, CmpLEQ)
+                when .int_sle? then set_comparison(ins, SignedCmpLEQ)
+                when .int_ule? then set_comparison(ins, CmpLEQ)
 
-                when .int_sgt? then set_binary_swapped(ins, SignedCmpLT)
-                when .int_ugt? then set_binary_swapped(ins, CmpLT)
+                when .int_sgt? then set_comparison(ins, SignedCmpLT, swap: true)
+                when .int_ugt? then set_comparison(ins, CmpLT,       swap: true)
 
-                when .int_sge? then set_binary_swapped(ins, SignedCmpLEQ)
-                when .int_uge? then set_binary_swapped(ins, CmpLEQ)
+                when .int_sge? then set_comparison(ins, SignedCmpLEQ, swap: true)
+                when .int_uge? then set_comparison(ins, CmpLEQ,       swap: true)
 
                 else raise "unreachable"
                 end

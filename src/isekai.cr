@@ -119,9 +119,7 @@ private def run_alt_backend (
                 output: file,
                 p_bits_min: options.p_bits_min,
                 p_bits_max: options.p_bits_max)
-            req_factory = AltBackend::Arith::RequestFactory.new(
-                board,
-                sloppy: options.ignore_overflow)
+            req_factory = AltBackend::Arith::RequestFactory.new(board)
             backend = AltBackend::Arith::Backend.new(req_factory)
             outputs.each { |expr| AltBackend.lay_down_output(backend, expr) }
             board.done!

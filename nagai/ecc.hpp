@@ -76,7 +76,7 @@ inline ECCPoint ECC::NewPoint(Field x, Field y)
 __attribute__((always_inline))
 ECCPoint ECCPoint::Negate()
 {
-	return ECCPoint(x, y.negate(), ec);
+	return ECCPoint(x, -y, ec);
 }
 
 __attribute__((always_inline))

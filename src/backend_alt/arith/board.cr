@@ -26,14 +26,9 @@ struct Wire
         @index == other.@index
     end
 
-    @[AlwaysInline]
-    def to_u128
-        @index.to_u128
-    end
-
-    @[AlwaysInline]
-    def to_i32
-        @index
+    def to_s (io)
+        @index.to_s(io: io)
+        self
     end
 end
 
@@ -57,217 +52,259 @@ struct WireRange
 end
 
 private struct OutputBuffer
-    private struct Datum
-        enum Command
-            Input
-            NizkInput
-            Output
-            ConstMul
-            ConstMulNeg
-            ConstMulVerbatim
-            Mul
-            Add
-            Div
-            Split
-            Zerop
-            Dload
-            Asplit
-            Divide
-        end
 
-        @arg1 : UInt128
-        @arg2 : Int32
-        @arg3 : Int32
-        @arg_list : Array(Wire) 
-        @command : Command
-
-        @[AlwaysInline]
-        def initialize (@command, arg1, arg2 = -1, arg3 = -1, @arg_list = Array(Wire).new)
-            @arg1 = arg1.to_u128
-            @arg2 = arg2.to_i32
-            @arg3 = arg3.to_i32
+    def self.write_maybe_comment (comment : ::Symbol?, to file : File) : Nil
+        if comment
+            file << " # " << comment
         end
     end
 
-    @data = Array(Datum).new
-    @verbatims = Array(BigInt).new
-    @comments = Array(::Symbol).new
+    def self.write_collection (wires, to file : File) : Nil
+        n = wires.size
+        file << n << " <"
+        unless n == 0
+            file << wires[0]
+            (1...n).each do |i|
+                file << " " << wires[i]
+            end
+        end
+        file << ">"
+    end
+
+    private struct InputCmd
+        def initialize (@w : Wire, @comment : ::Symbol?)
+        end
+
+        def write (to file : File) : Nil
+            file << "input " << @w
+            OutputBuffer.write_maybe_comment(@comment, to: file)
+            file << "\n"
+        end
+    end
+
+    private struct NizkInputCmd
+        def initialize (@w : Wire, @comment : ::Symbol?)
+        end
+
+        def write (to file : File) : Nil
+            file << "nizkinput " << @w
+            OutputBuffer.write_maybe_comment(@comment, to: file)
+            file << "\n"
+        end
+    end
+
+    private struct OutputCmd
+        def initialize (@w : Wire, @comment : ::Symbol?)
+        end
+
+        def write (to file : File) : Nil
+            file << "output " << @w
+            OutputBuffer.write_maybe_comment(@comment, to: file)
+            file << "\n"
+        end
+    end
+
+    private struct ConstMulCmd
+        def initialize (@i : Wire, @c : UInt128, @o : Wire)
+        end
+
+        def write (to file : File) : Nil
+            file << "const-mul-"
+            @c.to_s(base: 16, io: file)
+            file << " in 1 <" << @i << "> out 1 <" << @o << ">\n"
+        end
+    end
+
+    private struct ConstMulNegCmd
+        def initialize (@i : Wire, @c : UInt128, @o : Wire)
+        end
+
+        def write (to file : File) : Nil
+            file << "const-mul-neg-"
+            @c.to_s(base: 16, io: file)
+            file << " in 1 <" << @i << "> out 1 <" << @o << ">\n"
+        end
+    end
+
+    private struct ConstMulVerbatimCmd
+        def initialize (@i : Wire, @c : BigInt, @o : Wire)
+        end
+
+        def write (to file : File) : Nil
+            if @c < 0
+                file << "const-mul-neg"
+            else
+                file << "const-mul-"
+            end
+            @c.to_s(base: 16, io: file)
+            file << " in 1 <" << @i << "> out 1 <" << @o << ">\n"
+        end
+    end
+
+    private struct MulCmd
+        def initialize (@i1 : Wire, @i2 : Wire, @o : Wire)
+        end
+
+        def write (to file : File) : Nil
+            file << "mul in 2 <" << @i1 << " " << @i2 << "> out 1 <" << @o << ">\n"
+        end
+    end
+
+    private struct AddCmd
+        def initialize (@i1 : Wire, @i2 : Wire, @o : Wire)
+        end
+
+        def write (to file : File) : Nil
+            file << "add in 2 <" << @i1 << " " << @i2 << "> out 1 <" << @o << ">\n"
+        end
+    end
+
+    private struct DivCmd
+        def initialize (@i1 : Wire, @i2 : Wire, @o : Wire)
+        end
+
+        def write (to file : File) : Nil
+            file << "div in 2 <" << @i1 << " " << @i2 << "> out 1 <" << @o << ">\n"
+        end
+    end
+
+    private struct SplitCmd
+        def initialize (@i : Wire, @o : WireRange)
+        end
+
+        def write (to file : File) : Nil
+            file << "split in 1 <" << @i << "> out "
+            OutputBuffer.write_collection(@o, to: file)
+            file << "\n"
+        end
+    end
+
+    private struct ZeropCmd
+        def initialize (@i : Wire, @o1 : Wire, @o2 : Wire)
+        end
+
+        def write (to file : File) : Nil
+            file << "zerop in 1 <" << @i << "> out 2 <" << @o1 << " " << @o2 << ">\n"
+        end
+    end
+
+    private struct DivideCmd
+        def initialize (@width : Int32, @i1 : Wire, @i2 : Wire, @o1 : Wire, @o2 : Wire)
+        end
+
+        def write (to file : File) : Nil
+            file << "div_" << @width << " in 2 <" << @i1 << " " << @i2 << "> out 2 <" << @o1
+            file << " " << @o2 << ">\n"
+        end
+    end
+
+    private struct DloadCmd
+        def initialize (@i : Array(Wire), @o : Wire)
+        end
+
+        def write (to file : File) : Nil
+            file << "dload in "
+            OutputBuffer.write_collection(@i, to: file)
+            file << " out 1 <" << @o << ">\n"
+        end
+    end
+
+    private struct AsplitCmd
+        def initialize (@i : Wire, @o : WireRange)
+        end
+
+        def write (to file : File) : Nil
+            file << "asplit in 1 <" << @i << "> out "
+            OutputBuffer.write_collection(@o, to: file)
+            file << "\n"
+        end
+    end
+
+    alias Cmd = Union(
+        InputCmd,
+        NizkInputCmd,
+        OutputCmd,
+        ConstMulCmd,
+        ConstMulNegCmd,
+        ConstMulVerbatimCmd,
+        MulCmd,
+        AddCmd,
+        DivCmd,
+        SplitCmd,
+        ZeropCmd,
+        DivideCmd,
+        DloadCmd,
+        AsplitCmd)
+
     @file : File
+    @commands = [] of Cmd
 
     def initialize (@file)
     end
 
-    private def add_comment! (comment : ::Symbol? = nil) : Int32
-        if comment
-            result = @comments.size
-            @comments << comment
-            result
-        else
-            -1
-        end
-    end
-
     def write_input (w : Wire, comment : ::Symbol? = nil) : Nil
-        comment ||= :"input"
-        @data << Datum.new(Datum::Command::Input, w, add_comment!(comment))
+        @commands << InputCmd.new(w, comment: comment || :"input")
     end
 
     def write_nizk_input (w : Wire, comment : ::Symbol? = nil) : Nil
-        comment ||= :"input"
-        @data << Datum.new(Datum::Command::NizkInput, w, add_comment!(comment))
-    end
-
-    def write_const_mul (c : UInt128, w : Wire, output : Wire) : Nil
-        @data << Datum.new(Datum::Command::ConstMul, c, w, output)
-    end
-
-    def write_const_mul_neg (c : UInt128, w : Wire, output : Wire) : Nil
-        @data << Datum.new(Datum::Command::ConstMulNeg, c, w, output)
-    end
-
-    def write_const_mul_verbatim (c : BigInt, w : Wire, output : Wire) : Nil
-        verbatim_idx = @verbatims.size
-        @verbatims << c
-        @data << Datum.new(Datum::Command::ConstMulVerbatim, verbatim_idx, w, output)
-    end
-
-    def write_mul (w : Wire, x : Wire, output : Wire) : Nil
-        @data << Datum.new(Datum::Command::Mul, w, x, output)
-    end
-
-    def write_add (w : Wire, x : Wire, output : Wire) : Nil
-        @data << Datum.new(Datum::Command::Add, w, x, output)
-    end
-
-    def write_div (w : Wire, x : Wire, output : Wire) : Nil
-        @data << Datum.new(Datum::Command::Div, w, x, output)
-    end
-
-    def write_split (w : Wire, outputs : WireRange) : Nil
-        @data << Datum.new(Datum::Command::Split, w, outputs.@start, outputs.@finish)
-    end
-
-    def write_zerop (w : Wire, dummy_output : Wire, output : Wire) : Nil
-        @data << Datum.new(Datum::Command::Zerop, w, dummy_output, output)
+        @commands << NizkInputCmd.new(w, comment: comment || :"input")
     end
 
     def write_output (w : Wire, comment : ::Symbol? = nil) : Nil
-        @data << Datum.new(Datum::Command::Output, w, add_comment!(comment))
+        @commands << OutputCmd.new(w, comment: comment)
     end
 
-    private def append_comment_to_file! (idx : Int32)
-        unless idx == -1
-            @file << " # " << @comments[idx]
-        end
+    def write_const_mul (c : UInt128, w : Wire, output : Wire) : Nil
+        @commands << ConstMulCmd.new(w, c, output)
     end
 
-    def write_dload (inputs_wire : Array(Wire), idx : Wire, output : Wire) : Nil
-        @data << Datum.new(Datum::Command::Dload, idx, 0, output, inputs_wire)    
+    def write_const_mul_neg (c : UInt128, w : Wire, output : Wire) : Nil
+        @commands << ConstMulNegCmd.new(w, c, output)
     end
 
-    def write_divide (inputs_wire : Array(Wire), output : Array(Wire), width : Int32) : Nil
-        com = Datum::Command::Divide;
-        @data << Datum.new(com, width, output[0], output[1], inputs_wire)    
+    def write_const_mul_verbatim (c : BigInt, w : Wire, output : Wire) : Nil
+        @commands << ConstMulVerbatimCmd.new(w, c, output)
     end
 
-    def write_asplit (input_wire : Wire, output : Array(Wire)) : Nil
-        com = Datum::Command::Asplit;
-        @data << Datum.new(com, input_wire, output[0], output[output.size-1] )    
+    def write_mul (w : Wire, x : Wire, output : Wire) : Nil
+        @commands << MulCmd.new(w, x, output)
+    end
+
+    def write_add (w : Wire, x : Wire, output : Wire) : Nil
+        @commands << AddCmd.new(w, x, output)
+    end
+
+    def write_div (w : Wire, x : Wire, output : Wire) : Nil
+        @commands << DivCmd.new(w, x, output)
+    end
+
+    def write_split (w : Wire, outputs : WireRange) : Nil
+        @commands << SplitCmd.new(w, outputs)
+    end
+
+    def write_zerop (w : Wire, dummy_output : Wire, output : Wire) : Nil
+        @commands << ZeropCmd.new(w, dummy_output, output)
+    end
+
+    def write_dload (values : Array(Wire), idx : Wire, output : Wire) : Nil
+        inputs = values.dup
+        inputs.unshift(idx)
+        @commands << DloadCmd.new(inputs, output)
+    end
+
+    def write_divide (w : Wire, x : Wire, output_q : Wire, output_r : Wire, width : Int32) : Nil
+        @commands << DivideCmd.new(width, w, x, output_q, output_r)
+    end
+
+    def write_asplit (w : Wire, outputs : WireRange) : Nil
+        @commands << AsplitCmd.new(w, outputs)
     end
 
     def flush! (total : Int32) : Nil
         @file << "total " << total << "\n"
-
-        @data.each do |datum|
-            case datum.@command
-
-            when .input?
-                @file << "input " << datum.@arg1
-                append_comment_to_file!(datum.@arg2)
-                @file << "\n"
-
-            when .nizk_input?
-                @file << "nizkinput " << datum.@arg1
-                append_comment_to_file!(datum.@arg2)
-                @file << "\n"
-
-            when .output?
-                @file << "output " << datum.@arg1
-                append_comment_to_file!(datum.@arg2)
-                @file << "\n"
-
-            when .const_mul?
-                @file << "const-mul-"
-                datum.@arg1.to_s(base: 16, io: @file)
-                @file << " in 1 <" << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
-
-            when .const_mul_neg?
-                @file << "const-mul-neg-"
-                datum.@arg1.to_s(base: 16, io: @file)
-                @file << " in 1 <" << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
-
-            when .const_mul_verbatim?
-                verbatim = @verbatims[datum.@arg1]
-                if verbatim < 0
-                    @file << "const-mul-neg"
-                else
-                    @file << "const-mul-"
-                end
-                verbatim.to_s(base: 16, io: @file)
-                @file << " in 1 <" << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
-
-            when .mul?
-                @file << "mul in 2 <" << datum.@arg1 << " " << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
-
-            when .add?
-                @file << "add in 2 <" << datum.@arg1 << " " << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
-
-            when .div?
-                @file << "div in 2 <" << datum.@arg1 << " " << datum.@arg2 << "> out 1 <" << datum.@arg3 << ">\n"
-
-            when .split?
-                range_start, range_finish = datum.@arg2, datum.@arg3
-                nrange = range_finish - range_start
-                @file << "split in 1 <" << datum.@arg1 << "> out " << nrange << " <"
-                @file << range_start unless nrange == 0
-                (range_start+1...range_finish).each { |i| @file << " " << i }
-                @file << ">\n"
-
-            when .zerop?
-                @file << "zerop in 1 <" << datum.@arg1 << "> out 2 <" << datum.@arg2 << " " << datum.@arg3 << ">\n"
-
-            when .dload?
-                @file << "dload in " << datum.@arg_list.size() + 1 << " <" << datum.@arg1
-                datum.@arg_list.each do |ai|
-                    @file << " " << ai.to_i32
-                end
-                @file <<  "> out 1 <" << datum.@arg3 << ">\n" 
-
-            when .asplit?
-                out_begin, out_end = datum.@arg2, datum.@arg3
-                out_num = out_end - out_begin + 1
-                @file << "asplit in 1 <" << datum.@arg1 << "> out " << out_num << " <"
-                (out_begin..out_end).each { |i| @file << " " << i}
-                @file << ">\n"
-
-            when .divide?
-                @file << "div_" << datum.@arg1 << " in " << datum.@arg_list.size() << " <" 
-                f = true;
-                datum.@arg_list.each do |ai|
-                    if f
-                       f = false;
-                    else
-                        @file << " " 
-                    end
-                    @file << ai.to_i32
-                end
-                @file <<  "> out 2 <" << datum.@arg2 << " " << datum.@arg3 << ">\n" 
-
-            else
-                raise "unreachable"
-            end
+        @commands.each do |cmd|
+            cmd.write to: @file
         end
-
         @file.flush
     end
 end
@@ -303,35 +340,13 @@ struct OverflowPolicy
     end
 end
 
-struct TruncatePolicy
-    @width : Int32
-
-    def initialize (@width)
-    end
-
-    def self.new_to_width (width : Int32)
-        self.new(width)
-    end
-
-    def self.new_no_truncate
-        self.new(-1)
-    end
-
-    def no_truncate?
-        @width == -1
-    end
-
-    def truncate_to_width : Int32?
-        @width unless no_truncate?
-    end
-end
-
 struct Board
     @one_const : Wire
     @const_pool = {} of UInt128 => Wire
     @neg_const_pool = {} of UInt128 => Wire
     @big_const_pool = {} of BigInt => Wire
     @cached_splits = {} of Int32 => WireRange
+    @cached_asplits = {} of Tuple(Int32, Int32) => WireRange
     @inputs : Array(Tuple(Wire, BitWidth))
     @nizk_inputs : Array(Tuple(Wire, BitWidth))
     @dynamic_ranges = [] of DynamicRange
@@ -453,55 +468,42 @@ struct Board
         end
     end
 
-    def zerop (w : Wire, policy : TruncatePolicy) : Wire
-        if (width = policy.truncate_to_width)
-            arg = truncate(w, to: width)
-        else
-            arg = w
-        end
-
-        n = @dynamic_ranges[arg.@index].max_nbits
+    def zerop (w : Wire) : Wire
+        n = @dynamic_ranges[w.@index].max_nbits
         if n && n <= 1
-            return arg
+            return w
         end
 
         # This operation has two output wires!
         dummy = allocate_wire! DynamicRange.new_for_bool
         result = allocate_wire! DynamicRange.new_for_bool
-        @outbuf.write_zerop(arg, dummy_output: dummy, output: result)
+        @outbuf.write_zerop(w, dummy_output: dummy, output: result)
         result
     end
 
-    def dyn_load (w : Array(Wire), idx : Wire, bitwidth : Int32 ) : Wire  
-        result = allocate_wire! DynamicRange.new_for_width(bitwidth)  
-        @outbuf.write_dload(inputs_wire: w, idx: idx, output: result)
+    def dload (values : Array(Wire), idx : Wire) : Wire
+        max_width = values.max_of { |w| @dynamic_ranges[w.@index].max_nbits.not_nil! }
+        result = allocate_wire! DynamicRange.new_for_width(max_width)
+        @outbuf.write_dload(values, idx, output: result)
         result
     end
 
-    def a_split (w : Wire, size : Int32, policy : TruncatePolicy) : Array(Wire) 
-        if (width = policy.truncate_to_width)
-            arg = truncate(w, to: width)
-        else
-            arg = w
+    def asplit (w : Wire, size : Int32) : WireRange
+        key = {w.@index, size}
+        @cached_asplits.fetch(key) do
+            result = allocate_wire_range! size, DynamicRange.new_for_bool
+            @outbuf.write_asplit(w, outputs: result)
+            @cached_asplits[key] = result
+            result
         end
-        result = Array(Wire).new();
-        (0..size-1).each do 
-            result << allocate_wire! DynamicRange.new_for_bool()     
-        end
-        @outbuf.write_asplit(input_wire: arg, output: result)
-        return result;
-     end
+    end
 
-    def divide(w : Array(Wire), width : Int32) : Array(Wire)    
-        q = allocate_wire! DynamicRange.new_for_width(width)     ##to check
-        r = allocate_wire! DynamicRange.new_for_width(width)     
-        result = Array(Wire).new();
-        result << q << r
-        @outbuf.write_divide(inputs_wire: w,  output: result, width: width) 
-        return result;
-    end     
-    
-
+    def divide (w : Wire, x : Wire, width : Int32) : {Wire, Wire}
+        q = allocate_wire! @dynamic_ranges[w.@index]
+        r = allocate_wire! @dynamic_ranges[x.@index]
+        @outbuf.write_divide(w, x, output_q: q, output_r: r, width: width)
+        {q, r}
+    end
 
     private def cast_to_safe_ww (w : Wire, x : Wire, policy : OverflowPolicy)
         case
@@ -657,15 +659,10 @@ struct Board
         add(constant_verbatim(c), w, OverflowPolicy.new_set_undef_range)
     end
 
-    def const_mul_neg (c : UInt128, w : Wire, policy : TruncatePolicy) : Wire
+    def const_mul_neg (c : UInt128, w : Wire) : Wire
         raise "Missed optimization" if c == 0
-        if (width = policy.truncate_to_width)
-            arg = truncate(w, to: width)
-        else
-            arg = w
-        end
         result = allocate_wire! DynamicRange.new_for_undefined
-        @outbuf.write_const_mul_neg(c, arg, output: result)
+        @outbuf.write_const_mul_neg(c, w, output: result)
         result
     end
 
@@ -714,16 +711,10 @@ struct Board
         end
     end
 
-    def add_output! (w : Wire, policy : TruncatePolicy, nagai : Bool = false) : Nil
-        if (width = policy.truncate_to_width)
-            arg = truncate(w, to: width)
-        else
-            arg = w
-        end
-
+    def add_output! (w : Wire, nagai : Bool = false) : Nil
         # do the output-cast thing
-        o = allocate_wire! @dynamic_ranges[arg.@index]
-        @outbuf.write_mul(arg, @one_const, output: o)
+        o = allocate_wire! @dynamic_ranges[w.@index]
+        @outbuf.write_mul(w, @one_const, output: o)
 
         @outbuf.write_output o, comment: (:"NAGAI" if nagai)
     end

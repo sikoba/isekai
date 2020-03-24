@@ -17,7 +17,6 @@ struct Backend
     @cache_joined = {} of UInt64 => JoinedRequest
     @cache_split = {} of UInt64 => SplitRequest
     @cache_nagai = {} of UInt64 => NagaiRequest
-    @cache_asplit = {} of {UInt64, Int32} => JoinedRequest
 
     def initialize (@req_factory)
     end
@@ -74,7 +73,7 @@ struct Backend
     end
 
     private def subtract_for_cmp (left : JoinedRequest, right : JoinedRequest) : SplitRequest
-        result = @req_factory.joined_sub(left, right, force_correct: true)
+        result = @req_factory.joined_sub(left, right)
         if result.is_a? JoinedRequest
             @req_factory.joined_to_split(result)
         else
@@ -116,13 +115,6 @@ struct Backend
     private def get_joined (expr : DFGExpr) : JoinedRequest
         key = expr.object_id
         @cache_joined.fetch(key) do
-            if (expr.class == Asplit)
-                asplit = expr.as(Asplit)
-                skey = { asplit.@expr.object_id, asplit.@index }
-                return @cache_asplit.fetch(skey) do
-                    raise "asplit not found in cache"
-                end
-            end
             @cache_joined[key] = @req_factory.split_to_joined(@cache_split[key])
         end
     end
@@ -133,14 +125,6 @@ struct Backend
             @cache_split[key] = @req_factory.joined_to_split(@cache_joined[key])
         end
     end
-
-    private def get_asplit (expr : DFGExpr, indice : Int32) : JoinedRequest
-        key = { expr.object_id , indice}
-        @cache_asplit.fetch(key) do
-            raise "asplit not found in cache"
-        end
-    end
-
 
     private def get_both (expr : DFGExpr) : {JoinedRequest?, SplitRequest?}
         key = expr.object_id
@@ -164,14 +148,8 @@ struct Backend
         return ProofOfCache.new
     end
 
-
     private def cache_nagai! (expr : DFGExpr, request : NagaiRequest) : ProofOfCache
         @cache_nagai[expr.object_id] = request
-        return ProofOfCache.new
-    end
-
-    private def cache_asplit! (key , request : JoinedRequest) : ProofOfCache
-        @cache_asplit[key] = request
         return ProofOfCache.new
     end
 
@@ -197,36 +175,37 @@ struct Backend
         end
     end
 
-    private def sign(req : JoinedRequest)
-        return @req_factory.joined_to_split(req).last
+    private def negate_if (j : JoinedRequest, c : JoinedRequest) : JoinedRequest
+        width = j.@width
+        minus_one = @req_factory.bake_const(
+            (1_u128 << width) - 1,
+            width: width)
+        one = @req_factory.bake_const(
+            1_u128,
+            width: width)
+        return @req_factory.joined_mul(j, @req_factory.joined_cond(c, minus_one, one))
     end
 
-    private def negate(req : JoinedRequest)
-        a = @req_factory.joined_sub(JoinedRequest.new_for_const(0_u128, req.@width), req)
-        if a.is_a? SplitRequest
-            a = @req_factory.split_to_joined(a)
-        end
-        return a;
+    private def signed_modulo (left_expr : DFGExpr, right_expr : DFGExpr) : JoinedRequest
+        left_sign = get_split(left_expr).last
+        left_abs = negate_if(get_joined(left_expr), left_sign)
+
+        right_sign = get_split(right_expr).last
+        right_abs = negate_if(get_joined(right_expr), right_sign)
+
+        q, r = @req_factory.joined_divide(left_abs, right_abs)
+        return negate_if(r, left_sign)
     end
 
-    private def signed_division(a : JoinedRequest, b : JoinedRequest, getdiv : Bool, getmod : Bool) : Array(JoinedRequest)
-        a_s = sign(a)
-        b_s = sign(b)
-        a_neg = negate(a);
-        a_abs = @req_factory.joined_cond(a_s, a_neg, a);
-        b_neg = negate(b);
-        b_abs = @req_factory.joined_cond(b_s, b_neg, b);
-        div_req = @req_factory.joined_divide(a_abs, b_abs);  
-        result = Array(JoinedRequest).new;
-        if (getdiv)
-            q_neg = negate(div_req[0])
-            result << @req_factory.joined_cond(a_s, @req_factory.joined_cond(b_s, div_req[0], q_neg), @req_factory.joined_cond(b_s, q_neg , div_req[0])); 
-        end
-        if (getmod)
-            r_neg = negate(div_req[1])
-            result << @req_factory.joined_cond(a_s, r_neg, div_req[1])
-        end
-        return result;
+    private def signed_divide (left_expr : DFGExpr, right_expr : DFGExpr) : JoinedRequest
+        left_sign = get_split(left_expr).last
+        left_abs = negate_if(get_joined(left_expr), left_sign)
+
+        right_sign = get_split(right_expr).last
+        right_abs = negate_if(get_joined(right_expr), right_sign)
+
+        q, r = @req_factory.joined_divide(left_abs, right_abs)
+        return negate_if(negate_if(q, left_sign), right_sign)
     end
 
     def lay_down_and_cache (expr : DFGExpr) : ProofOfCache
@@ -421,47 +400,33 @@ struct Backend
             return cache_nagai! expr, @req_factory.nagai_getbit(left, pos)
 
         when DynLoad
-            storage_req = Array(JoinedRequest).new();
-            expr.@storage.each do |i_expr|
-                storage_req << get_joined(i_expr)
-            end
-            idx_req = get_joined(expr.@idx);
-            return cache_joined! expr, @req_factory.joined_dload(storage_req, idx_req) 
+            values = expr.@storage.map { |e| get_joined(e) }
+            idx = get_joined(expr.@idx)
+            return cache_joined! expr, @req_factory.joined_dload(values, idx)
 
         when Asplit
-            if  !@cache_asplit.has_key?({expr.@expr.object_id, expr.@index})
-                idx_req = get_joined(expr.@expr);   
-                di = @req_factory.joined_asplit(idx_req, expr.@nindices) 
-                (0..di.size-1).each do |i|
-                    key = { expr.@expr.object_id, i }
-                    cache_asplit! key, di[i]
-                end
-            end
-            return ProofOfCache.new            
-            
+            j = get_joined(expr.@expr)
+            cache_joined! expr.@expr, @req_factory.joined_asplit_prepare(j)
+            bits = @req_factory.joined_asplit(j, expr.@nindices)
+            return cache_joined! expr, bits[expr.@index]
+
         when Modulo
             left = get_joined(expr.@left)
             right = get_joined(expr.@right)
-            div_requests = @req_factory.joined_divide(left, right)
-            return cache_joined! expr, div_requests[1]
+            q, r = @req_factory.joined_divide(left, right)
+            return cache_joined! expr, r
 
-        when SignedModulo
-            left = get_joined(expr.@left)
-            right = get_joined(expr.@right)
-            div_requests = signed_division(left,right, false, true);
-            return cache_joined! expr, div_requests[0]
-
-        when SignedDivide
-            left = get_joined(expr.@left)
-            right = get_joined(expr.@right)
-            div_requests = signed_division(left,right, true, false);
-            return cache_joined! expr, div_requests[0]
-      
         when Divide
             left = get_joined(expr.@left)
             right = get_joined(expr.@right)
-            div_requests = @req_factory.joined_divide(left, right)
-            return cache_joined! expr, div_requests[0]
+            q, r = @req_factory.joined_divide(left, right)
+            return cache_joined! expr, q
+
+        when SignedModulo
+            return cache_joined! expr, signed_modulo(expr.@left, expr.@right)
+
+        when SignedDivide
+            return cache_joined! expr, signed_divide(expr.@left, expr.@right)
 
         else
             raise "Not implemented for #{expr.class}"

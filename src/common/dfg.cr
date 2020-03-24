@@ -155,8 +155,8 @@ class DynLoad  < DFGExpr
     #     type = type of the storage
     #     storage = storage instance
     #     idx = index in the storage
-    def initialize (@storage : Array(DFGExpr), @idx : DFGExpr, bitwidth)
-        super(bitwidth)
+    def initialize (@storage : Array(DFGExpr), @idx : DFGExpr)
+        super(bitwidth: storage[0].@bitwidth)
     end
 end
 
@@ -166,7 +166,7 @@ class Asplit  < DFGExpr
     #     index = index of the splitted element
     #     nindices = number of splitted elements
     def initialize (@expr : DFGExpr, @index : Int32, @nindices : Int32)
-        super(@expr.@bitwidth)      # Bit width is not useful for this operation; it returns nindices booleans
+        super(BitWidth.new(1))
     end
 
 end

@@ -62,9 +62,8 @@ struct RequestFactory
     alias SplitRequest = Array(JoinedRequest)
 
     @board : Board
-    @sloppy : Bool
 
-    def initialize (@board, @sloppy)
+    def initialize (@board)
     end
 
     private def bake_joined_or_nagai_request (wire, bitwidth) : JoinedRequest | NagaiRequest
@@ -89,30 +88,27 @@ struct RequestFactory
         return JoinedRequest.new_for_const(c, width: width)
     end
 
-    def joined_add_output! (j : JoinedRequest) : Nil
-        wire = joined_to_wire! j
-        @board.add_output!(
-            wire,
-            policy: @sloppy ?
-                TruncatePolicy.new_no_truncate :
-                TruncatePolicy.new_to_width(j.@width))
-    end
-
-    private def bake_overflow_policy (width : Int32) : OverflowPolicy
-        if @sloppy && width != 1
-            OverflowPolicy.new_cannot_overflow(width)
-        else
-            OverflowPolicy.new_wrap_around(width)
-        end
-    end
-
-    private def joined_to_wire! (j : JoinedRequest) : Wire
+    private def joined_to_wire! (j : JoinedRequest, truncate : Bool = true) : Wire
         if j.constant?
             return @board.constant(j.@b)
         else
-            ax = @board.const_mul(j.@a, j.@x, policy: bake_overflow_policy(j.@width))
-            return @board.const_add(j.@b, ax, policy: bake_overflow_policy(j.@width))
+            ax = @board.const_mul(
+                j.@a,
+                j.@x,
+                policy: OverflowPolicy.new_wrap_around(j.@width))
+            result = @board.const_add(
+                j.@b,
+                ax,
+                policy: OverflowPolicy.new_wrap_around(j.@width))
+            if truncate
+                result = @board.truncate(result, to: j.@width)
+            end
+            result
         end
+    end
+
+    def joined_add_output! (j : JoinedRequest) : Nil
+        @board.add_output!(joined_to_wire! j)
     end
 
     def joined_add_const (c : UInt128, j : JoinedRequest) : JoinedRequest
@@ -136,11 +132,21 @@ struct RequestFactory
         return joined_add_const(j.@b, k) if j.constant?
         return joined_add_const(k.@b, j) if k.constant?
 
-        j_ax = @board.const_mul(j.@a, j.@x, policy: bake_overflow_policy(width))
-        k_ax = @board.const_mul(k.@a, k.@x, policy: bake_overflow_policy(width))
+        j_ax = @board.const_mul(
+            j.@a,
+            j.@x,
+            policy: OverflowPolicy.new_wrap_around(width))
+        k_ax = @board.const_mul(
+            k.@a,
+            k.@x,
+            policy: OverflowPolicy.new_wrap_around(width))
+        sum_ax = @board.add(
+            j_ax,
+            k_ax,
+            policy: OverflowPolicy.new_wrap_around(width))
         return JoinedRequest.new(
             a: 1,
-            x: @board.add(j_ax, k_ax, policy: bake_overflow_policy(width)),
+            x: sum_ax,
             b: truncate(j.@b &+ k.@b, width),
             width: width)
     end
@@ -169,63 +175,26 @@ struct RequestFactory
                 width: 1)
         end
 
-        j_wire = joined_to_wire! j
-        k_wire = joined_to_wire! k
-        result = @board.mul(j_wire, k_wire, policy: bake_overflow_policy(width))
+        j_wire = joined_to_wire! j, truncate: false
+        k_wire = joined_to_wire! k, truncate: false
+        result = @board.mul(
+            j_wire,
+            k_wire,
+            policy: OverflowPolicy.new_wrap_around(width))
         return JoinedRequest.new_for_wire(result, width: width)
     end
 
-    def joined_sub (
-            j : JoinedRequest,
-            k : JoinedRequest,
-            force_correct : Bool = false) : JoinedRequest | SplitRequest
-
+    def joined_sub (j : JoinedRequest, k : JoinedRequest) : JoinedRequest | SplitRequest
         width = common_width! j.@width, k.@width
         minus_one = (1_u128 << width) - 1
-
-        if @sloppy && width != 1
-            unless force_correct
-                j_wire = @board.truncate(joined_to_wire!(j), to: width)
-                k_wire = @board.truncate(joined_to_wire!(k), to: width)
-                minus_k_wire = @board.const_mul_neg(
-                    1,
-                    k_wire,
-                    policy: TruncatePolicy.new_no_truncate)
-                result = @board.add(
-                    j_wire,
-                    minus_k_wire,
-                    policy: OverflowPolicy.new_set_undef_range)
-                @board.assume_width!(result, @board.max_nbits(j_wire).not_nil!)
-                return JoinedRequest.new_for_wire(result, width: width)
-            end
-
-            j_wire = joined_to_wire! j
-            k_wire = joined_to_wire! k
-            minus_k_wire = @board.const_mul(
-                minus_one,
-                k_wire,
-                policy: OverflowPolicy.new_wrap_around(width))
-            result_wire = @board.add(
-                j_wire,
-                minus_k_wire,
-                policy: OverflowPolicy.new_wrap_around(width))
-
-            bits = @board.split(result_wire)
-            return SplitRequest.new(width) do |i|
-                if i < bits.size
-                    JoinedRequest.new_for_wire(bits[i], width: 1)
-                else
-                    JoinedRequest.new_for_const(0, width: 1)
-                end
-            end
-        end
-
         return joined_add(j, joined_mul_const(minus_one, k))
     end
 
     private def cond_wcc (c : Wire, t : UInt128, f : UInt128, width : Int32) : JoinedRequest
         diff = t.to_i128 - f.to_i128
-        return JoinedRequest.new_for_const(f, width: width) if diff == 0
+        if diff == 0
+            return JoinedRequest.new_for_const(f, width: width)
+        end
 
         c = @board.truncate(c, to: 1)
         if diff > 0
@@ -236,12 +205,18 @@ struct RequestFactory
         else
             left_summand = @board.const_mul_neg(
                 (-diff).to_u128,
-                c,
-                policy: TruncatePolicy.new_no_truncate)
+                c)
         end
 
-        result = @board.const_add(f, left_summand, policy: OverflowPolicy.new_set_undef_range)
-        @board.assume_width!(result, Math.max(BitManip.nbits(t), BitManip.nbits(f)))
+        result = @board.const_add(
+            f,
+            left_summand,
+            policy: OverflowPolicy.new_set_undef_range)
+
+        @board.assume_width!(
+            result,
+            Math.max(BitManip.nbits(t), BitManip.nbits(f)))
+
         return JoinedRequest.new_for_wire(result, width: width)
     end
 
@@ -265,29 +240,33 @@ struct RequestFactory
                 cond_wcc(c.@x, t.@b, f.@b, width: width))
         end
 
-        t_wire = joined_to_wire! t
-        f_wire = joined_to_wire! f
+        c_wire = @board.truncate(c.@x, to: 1)
+        t_wire = joined_to_wire! t, truncate: false
+        f_wire = joined_to_wire! f, truncate: false
 
         t_max_nbits = @board.max_nbits(t_wire).not_nil!
         f_max_nbits = @board.max_nbits(f_wire).not_nil!
 
         minus_f_wire = @board.const_mul_neg(
             1,
-            f_wire,
-            policy: TruncatePolicy.new_no_truncate)
+            f_wire)
         t_minus_f_wire = @board.add(
             t_wire,
             minus_f_wire,
             policy: OverflowPolicy.new_set_undef_range)
         left_summand = @board.mul(
-            @board.truncate(c.@x, to: 1),
+            c_wire,
             t_minus_f_wire,
             policy: OverflowPolicy.new_set_undef_range)
         result = @board.add(
             left_summand,
             f_wire,
             policy: OverflowPolicy.new_set_undef_range)
-        @board.assume_width!(result, Math.max(t_max_nbits, f_max_nbits))
+
+        @board.assume_width!(
+            result,
+            Math.max(t_max_nbits, f_max_nbits))
+
         return JoinedRequest.new_for_wire(result, width: width)
     end
 
@@ -298,13 +277,26 @@ struct RequestFactory
         if k.constant?
             return (k.@b != 0) ? k : j
         end
-        j_wire = @board.truncate(joined_to_wire!(j), to: 1)
-        k_wire = @board.truncate(joined_to_wire!(k), to: 1)
-        jk = @board.mul(j_wire, k_wire, policy: OverflowPolicy.new_set_undef_range)
-        minus_jk = @board.const_mul_neg(1, jk, policy: TruncatePolicy.new_no_truncate)
-        k_minus_jk = @board.add(k_wire, minus_jk, policy: OverflowPolicy.new_set_undef_range)
-        result = @board.add(j_wire, k_minus_jk, policy: OverflowPolicy.new_set_undef_range)
+        j_wire = joined_to_wire! j
+        k_wire = joined_to_wire! k
+        jk = @board.mul(
+            j_wire,
+            k_wire,
+            policy: OverflowPolicy.new_set_undef_range)
+        minus_jk = @board.const_mul_neg(
+            1,
+            jk)
+        k_minus_jk = @board.add(
+            k_wire,
+            minus_jk,
+            policy: OverflowPolicy.new_set_undef_range)
+        result = @board.add(
+            j_wire,
+            k_minus_jk,
+            policy: OverflowPolicy.new_set_undef_range)
+
         @board.assume_width!(result, 1)
+
         return JoinedRequest.new_for_wire(result, width: 1)
     end
 
@@ -313,48 +305,50 @@ struct RequestFactory
             return JoinedRequest.new_for_const(j.@b == 0 ? 0_u128 : 1_u128, width: 1)
         else
             j_wire = joined_to_wire! j
-            result = @board.zerop(j_wire, policy: TruncatePolicy.new_to_width(j.@width))
+            result = @board.zerop(j_wire)
             return JoinedRequest.new_for_wire(result, width: 1)
         end
     end
 
-    def joined_dload (w :  Array(JoinedRequest), idx : JoinedRequest) : JoinedRequest
+    def joined_dload (values :  Array(JoinedRequest), idx : JoinedRequest) : JoinedRequest
+        value_width = values[0].@width
+        unless values.all? { |v| v.@width == value_width }
+            raise "Bit widths differ"
+        end
         if idx.constant?
-            pp "ERROR - dload called with a constant index"
+            return values[idx.@b]? || JoinedRequest.new_for_const(0_u128, width: value_width)
         end
-        idx_width = Maths.new().log2(w.size); 
-        if (idx_width > idx.@width)
-            idx_width = idx.@width
-        end
-
-        bitwidth = 1;
-        wires = Array(Wire).new();
-        w.each do |i_req|
-             wires << joined_to_wire! i_req
-             if (bitwidth < i_req.@width)
-                bitwidth = i_req.@width
-             end
-        end
-        i_wire = @board.truncate(joined_to_wire!(idx), to: idx_width)
-        result = @board.dyn_load(wires , i_wire, bitwidth) 
-        return JoinedRequest.new_for_wire(result, width: bitwidth)
+        wires = values.map { |v| joined_to_wire! v, truncate: false }
+        idx_wire = joined_to_wire! idx
+        result = @board.dload(wires, idx_wire)
+        return JoinedRequest.new_for_wire(result, width: value_width)
     end
 
-    def joined_asplit (w : JoinedRequest, nindices : Int32) : Array(JoinedRequest)
-        if w.constant?
-            pp "ERROR - apslit called with a constant index"
+    def joined_asplit_prepare (j : JoinedRequest) : JoinedRequest
+        if j.constant?
+            j
+        else
+            JoinedRequest.new_for_wire(
+                joined_to_wire!(j),
+                width: j.@width)
         end
-        i_wire = joined_to_wire! w
-        idx_width = Maths.new().log2(nindices-1); 
-        if (idx_width > w.@width)
-            idx_width = w.@width
+    end
+
+    def joined_asplit (j : JoinedRequest, nindices : Int32) : Array(JoinedRequest)
+        if j.constant?
+            return Array(JoinedRequest).new(nindices) do |i|
+                JoinedRequest.new_for_const(j.@b == i ? 1_u128 : 0_u128, width: 1)
+            end
         end
-        splits = @board.a_split(i_wire, nindices, policy: TruncatePolicy.new_to_width(idx_width))
-        result =  Array(JoinedRequest).new()
-        (0..nindices-1).each do |i|
-            result << JoinedRequest.new_for_wire(splits[i], 1) 
+        j_wire = joined_to_wire! j
+        bits = @board.asplit(j_wire, nindices)
+        return Array(JoinedRequest).new(nindices) do |i|
+            if i < bits.size
+                JoinedRequest.new_for_wire(bits[i], width: 1)
+            else
+                JoinedRequest.new_for_const(0_u128, width: 1)
+            end
         end
-        return result;
     end
 
     def joined_zero_extend (j : JoinedRequest, to new_width : Int32) : JoinedRequest | SplitRequest
@@ -365,7 +359,7 @@ struct RequestFactory
         if j.constant?
             return JoinedRequest.new_for_const(j.@b, width: new_width)
         else
-            j_wire = joined_to_wire! j
+            j_wire = joined_to_wire! j, truncate: false
             if @board.max_nbits(j_wire).not_nil! <= old_width
                 return JoinedRequest.new_for_wire(j_wire, new_width)
             end
@@ -388,7 +382,7 @@ struct RequestFactory
                 JoinedRequest.new_for_const((value >> i) & 1, width: 1)
             end
         else
-            j_wire = joined_to_wire! j
+            j_wire = joined_to_wire! j, truncate: false
             bits = @board.split(j_wire)
             return SplitRequest.new(width) do |i|
                 if i < bits.size
@@ -400,24 +394,47 @@ struct RequestFactory
         end
     end
 
-    def joined_divide (j : JoinedRequest, k : JoinedRequest) : Array(JoinedRequest)
+    # returns {quotient, remainder}
+    def joined_divide (j : JoinedRequest, k : JoinedRequest) : {JoinedRequest, JoinedRequest}
         width = common_width! j.@width, k.@width
-        #if k.constant?  the frontend should have take care of this because ax/k != (a/k)*x
 
-        if j.@a == k.@a && j.@b == k.@b && j.@x == k.@x
-            return [
-                JoinedRequest.new_for_const(1_u128, width: width),
-                JoinedRequest.new_for_const(0_u128, width: width),
-            ]
+        if j.constant?
+            if j.@b == 0
+                return {
+                    JoinedRequest.new_for_const(0_u128, width: width),
+                    JoinedRequest.new_for_const(0_u128, width: width),
+                }
+            end
+            if k.constant? && k.@b != 0
+                return {
+                    JoinedRequest.new_for_const(j.@b // k.@b, width: width),
+                    JoinedRequest.new_for_const(j.@b % k.@b, width: width),
+                }
+            end
+        end
+        if k.constant?
+            if k.@b == 1
+                return {
+                    j,
+                    JoinedRequest.new_for_const(0_u128, width: width),
+                }
+            end
         end
 
-        j_wire = @board.truncate(joined_to_wire!(j), to: width)
-        k_wire = @board.truncate(joined_to_wire!(k), to: width)
-        division = @board.divide([j_wire, k_wire], width)
-        return [
-            JoinedRequest.new_for_wire(division[0], width: width),
-            JoinedRequest.new_for_wire(division[1], width: width),
-        ]
+        if j.@a == k.@a && j.@b == k.@b && j.@x == k.@x
+            return {
+                JoinedRequest.new_for_const(1_u128, width: width),
+                JoinedRequest.new_for_const(0_u128, width: width),
+            }
+        end
+
+        j_wire = joined_to_wire! j
+        k_wire = joined_to_wire! k
+        q_wire, r_wire = @board.divide(j_wire, k_wire, width: width)
+        return {
+            JoinedRequest.new_for_wire(q_wire, width: width),
+            JoinedRequest.new_for_wire(r_wire, width: width),
+        }
     end
 
     def joined_trunc (j : JoinedRequest, to new_width : Int32) : JoinedRequest
@@ -435,11 +452,16 @@ struct RequestFactory
             return JoinedRequest.new_for_const(j.@b != k.@b ? 1_u128 : 0_u128, width: 1)
         end
 
-        j_wire = @board.truncate(joined_to_wire!(j), to: width)
-        k_wire = @board.truncate(joined_to_wire!(k), to: width)
-        minus_k_wire = @board.const_mul_neg(1, k_wire, policy: TruncatePolicy.new_no_truncate)
-        diff = @board.add(j_wire, minus_k_wire, policy: OverflowPolicy.new_set_undef_range)
-        result = @board.zerop(diff, policy: TruncatePolicy.new_no_truncate)
+        j_wire = joined_to_wire! j
+        k_wire = joined_to_wire! k
+        minus_k_wire = @board.const_mul_neg(
+            1,
+            k_wire)
+        diff = @board.add(
+            j_wire,
+            minus_k_wire,
+            policy: OverflowPolicy.new_set_undef_range)
+        result = @board.zerop(diff)
         return JoinedRequest.new_for_wire(result, width: 1)
     end
 
@@ -453,10 +475,9 @@ struct RequestFactory
                 next
             end
 
-            ext_x = @board.truncate(joined_to_wire!(bit), to: 1)
             bit_wire = @board.const_mul(
                 1_u128 << i,
-                ext_x,
+                joined_to_wire!(bit),
                 policy: OverflowPolicy.new_cannot_overflow(i + 1))
 
             if wire_summand
@@ -503,7 +524,9 @@ struct RequestFactory
         else
             j_wire = joined_to_wire! j
             if negative
-                wire = @board.const_mul_neg(1, j_wire, policy: TruncatePolicy.new_no_truncate)
+                wire = @board.const_mul_neg(
+                    1,
+                    j_wire)
                 NagaiWire.new(wire)
             else
                 NagaiWire.new(j_wire)
@@ -544,10 +567,21 @@ struct RequestFactory
         t_wire = nagai_to_wire! t
         f_wire = nagai_to_wire! f
 
-        minus_f = @board.const_mul_neg(1, f_wire, policy: TruncatePolicy.new_no_truncate)
-        diff = @board.add(t_wire, minus_f, policy: OverflowPolicy.new_set_undef_range)
-        left_summand = @board.mul(c_wire, diff, policy: OverflowPolicy.new_set_undef_range)
-        result = @board.add(left_summand, f_wire, policy: OverflowPolicy.new_set_undef_range)
+        minus_f = @board.const_mul_neg(
+            1,
+            f_wire)
+        diff = @board.add(
+            t_wire,
+            minus_f,
+            policy: OverflowPolicy.new_set_undef_range)
+        left_summand = @board.mul(
+            c_wire,
+            diff,
+            policy: OverflowPolicy.new_set_undef_range)
+        result = @board.add(
+            left_summand,
+            f_wire,
+            policy: OverflowPolicy.new_set_undef_range)
         NagaiWire.new(result)
     end
 
@@ -671,7 +705,7 @@ struct RequestFactory
 
         j_wire = nagai_to_wire! j
         JoinedRequest.new_for_wire(
-            @board.zerop(j_wire, policy: TruncatePolicy.new_no_truncate),
+            @board.zerop(j_wire),
             width: 1)
     end
 
@@ -690,10 +724,7 @@ struct RequestFactory
     end
 
     def nagai_add_output! (j : NagaiRequest) : Nil
-        @board.add_output!(
-            nagai_to_wire!(j),
-            policy: TruncatePolicy.new_no_truncate,
-            nagai: true)
+        @board.add_output!(nagai_to_wire!(j), nagai: true)
     end
 end
 

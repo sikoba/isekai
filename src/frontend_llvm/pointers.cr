@@ -8,14 +8,20 @@ require "llvm-crystal/lib_llvm"
 module Isekai::LLVMFrontend
 
 # Assumes that both 'a' and 'b' are of integer type.
-def self.bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
+def self.sign_extend_to_common_bitwidth (a : DFGExpr, b : DFGExpr) : {DFGExpr, DFGExpr}
     case a.@bitwidth <=> b.@bitwidth
     when .< 0
         a = SignExtend.bake(a, b.@bitwidth)
     when .> 0
         b = SignExtend.bake(b, a.@bitwidth)
     end
-    return Add.bake(a, b)
+    {a, b}
+end
+
+# Assumes that both 'a' and 'b' are of integer type.
+def self.bitwidth_safe_signed_add (a : DFGExpr, b : DFGExpr) : DFGExpr
+    x, y = self.sign_extend_to_common_bitwidth(a, b)
+    Add.bake(x, y)
 end
 
 def self.make_undef_array_elem (arr : Structure) : DFGExpr
@@ -46,15 +52,43 @@ class UndefPointer < AbstractPointer
 
     def load (assumption : Assumption) : DFGExpr
         Log.log.info("possible undefined behavior: load from uninitialized pointer")
-        return TypeUtils.make_undef_expr_of_type(@target_type)
+        TypeUtils.make_undef_expr_of_type(@target_type)
     end
 
     def store! (value : DFGExpr, assumption : Assumption) : Nil
         Log.log.info("possible undefined behavior: store at uninitialized pointer")
     end
 
-    def move (by offset : DFGExpr) : AbstractPointer
-        return self
+    def move (by offset : DFGExpr) : DFGExpr
+        self
+    end
+end
+
+class PastOnePointer < AbstractPointer
+    def initialize (@original : AbstractPointer)
+        super()
+    end
+
+    def load (assumption : Assumption) : DFGExpr
+        Log.log.info("possible undefined behavior: load from past-one pointer")
+        @original.load(assumption)
+    end
+
+    def store! (value : DFGExpr, assumption : Assumption) : Nil
+        Log.log.info("possible undefined behavior: store at past-one pointer")
+    end
+
+    def move (by offset : DFGExpr) : DFGExpr
+        Conditional.bake(
+            # 'offset' is zero?
+            CmpEQ.bake(
+                offset,
+                Constant.new(0_i64, bitwidth: offset.@bitwidth)),
+            # Then, the result is 'self'.
+            self,
+            # Otherwise, the result is '@original' because moving this pointer past any value other
+            # than -1 is undefined behavior.
+            @original)
     end
 end
 
@@ -76,9 +110,16 @@ class StaticPointer < AbstractPointer
     end
 
     def move (by offset : DFGExpr) : DFGExpr
-        # Technically, we can move this pointer past *one* element, but cannot dereference the
-        # resulting pointer. Since we can't compare pointers, this implementation is OK.
-        return self
+        Conditional.bake(
+            # 'offset' is zero?
+            CmpEQ.bake(
+                offset,
+                Constant.new(value: 0_i64, bitwidth: offset.@bitwidth)),
+            # Then the result is 'self'.
+            self,
+            # Otherwise, the result is 'PastOnePointer.new(self)' because moving this pointer past
+            # any value other than 1 is undefined behavior.
+            PastOnePointer.new(self))
     end
 end
 
@@ -90,6 +131,10 @@ class StaticFieldPointer < AbstractPointer
 
     def valid?
         0 <= @field < @base.@elems.size
+    end
+
+    def field_as_expr
+        Constant.new(@field.to_i64, bitwidth: BitWidth.new(32))
     end
 
     def load (assumption : Assumption) : DFGExpr
@@ -112,14 +157,20 @@ class StaticFieldPointer < AbstractPointer
 
     def move (by offset : DFGExpr) : DFGExpr
         if @base.@type.struct?
-            # Technically, we can move this pointer past *one* element, but cannot dereference the
-            # resulting pointer. Since we can't compare pointers, this implementation is OK.
-            return self
+            Conditional.bake(
+                # 'offset' is zero?
+                CmpEQ.bake(
+                    offset,
+                    Constant.new(value: 0_i64, bitwidth: offset.@bitwidth)),
+                # Then, the result is 'self'.
+                self,
+                # Otherwise, the result is 'PastOnePointer.new(self)' because moving this pointer
+                # past any value other than 1 is undefined behavior.
+                PastOnePointer.new(self))
+        else
+            new_field = LLVMFrontend.bitwidth_safe_signed_add(offset, field_as_expr)
+            PointerFactory.bake_field_pointer(base: @base, field: new_field)
         end
-        new_field = LLVMFrontend.bitwidth_safe_signed_add(
-            offset,
-            Constant.new(@field.to_i64, BitWidth.new(32)))
-        return PointerFactory.bake_field_pointer(base: @base, field: new_field)
     end
 end
 
@@ -194,16 +245,8 @@ class DynamicFieldPointer < DynamicFieldPointer_legacy
             Log.log.info("possible undefined behavior: index is undefined or always invalid")
             return LLVMFrontend.make_undef_array_elem(@base)
         end
-        storage = [] of DFGExpr;
-        bitwidth = 1;
-        (0...n).each do |i|
-            storage.push(assumption.reduce(@base.@elems[i]));
-            if (@base.@elems[i].@bitwidth.@width > bitwidth)
-                bitwidth = @base.@elems[i].@bitwidth.@width
-            end
-        end
-        result = DynLoad.new(storage, @field, BitWidth.new(bitwidth));
-        return result;
+        storage = (0...n).map { |i| assumption.reduce(@base.@elems[i]) }
+        DynLoad.new(storage: storage, idx: @field)
     end
 
     #load using asplit gate. It should replace the load function BUT the result is not as good as with the dedicated dload gate (r1cs is much bigger). However the dload gate does the same as this so we should have only the asplit gate.. TODO make it as optimised as dload.
@@ -214,14 +257,15 @@ class DynamicFieldPointer < DynamicFieldPointer_legacy
         end
 
         result = assumption.reduce(@base.@elems[0])
-        
+        zero = Constant.new(0_i64, bitwidth: result.@bitwidth)
         (1...n).each do |i|
-            di = Asplit.new(@field, i, n)
-            zero = Constant.new(0_i64, bitwidth: @base.@elems[i].@bitwidth)
-            result = Add.new(result, Conditional.bake(
-                di,
-                assumption.reduce(@base.@elems[i]),
-                zero))
+            di = Asplit.new(@field, i, n)            
+            result = Add.bake(
+                result,
+                Conditional.bake(
+                    di,
+                    assumption.reduce(@base.@elems[i]),
+                    zero))
         end
         return result
     end
@@ -247,8 +291,137 @@ class DynamicFieldPointer < DynamicFieldPointer_legacy
             end
         end
     end
-
 end
+
+
+# The idea is that we can always "reduce" pointer comparison of a pair
+#     {AbstractPointer, AbstractPointer}
+# to another pair of
+#     {DFGExpr, DFGExpr}
+# representing *integer* values (of equal bitwidth) that compare the same. This possibly includes
+# making up a pair of constants if we know at compile-time how those pointers should compare.
+# The caller should do something like
+#     x, y = PointerComparator.compare_pointers(p, q)
+#     result = <CmpClass>.bake(x, y)
+# so that the result of constant comparison is folded to a constant in '<CmpClass>.bake()'.
+#
+# Now, for pointer comparison rules. The C standard says pointers to different objects can be
+# compared with "==" and "!=", and those comparison shall behave as if the pointers are not equal,
+# but if you compare them with "<", "<=", ">" or ">=", a conforming implementation may return
+# random/inconsistent junk as a result of these comparisons.
+#
+# We kind of take advantage of this wording and return a pair of constants representing
+# "greater" whenever we see such a comparison. Such places in the code are marked with the word
+# "unequal".
+
+module PointerComparator
+    private def self.from_numbers (a : Int64, b : Int64) : {DFGExpr, DFGExpr}
+        bitwidth = BitWidth.new(8)
+        {Constant.new(a, bitwidth), Constant.new(b, bitwidth)}
+    end
+
+    private def self.equal()
+        return self.from_numbers(0, 0)
+    end
+
+    private def self.greater()
+        return self.from_numbers(1, 0)
+    end
+
+    private def self.compare_past_one_pointer (a : PastOnePointer, b : AbstractPointer) : {DFGExpr, DFGExpr}
+        if b.is_a? PastOnePointer
+            # We are asked to compare '(x + 1)' to '(y + 1)', so let's compare 'x' to 'y'.
+            self.reduce_pointer_comparison(a.@original, b.@original)
+        else
+            # Everything else is ether less than or "unequal" to a.
+            self.greater()
+        end
+    end
+
+    private def self.field_pointer_index (
+            a : StaticFieldPointer | DynamicFieldPointer_legacy) : DFGExpr
+
+        if a.is_a? StaticFieldPointer
+            a.field_as_expr
+        else
+            a.@field
+        end
+    end
+
+    private def self.compare_field_pointers (
+            a : StaticFieldPointer | DynamicFieldPointer_legacy,
+            b : StaticFieldPointer | DynamicFieldPointer_legacy) : {DFGExpr, DFGExpr}
+
+        if a.@base.same?(b.@base)
+            LLVMFrontend.sign_extend_to_common_bitwidth(
+                self.field_pointer_index(a),
+                self.field_pointer_index(b))
+        else
+            # "unequal"
+            self.greater()
+        end
+    end
+
+    def self.reduce_pointer_comparison (a : AbstractPointer, b : AbstractPointer) : {DFGExpr, DFGExpr}
+        case a
+
+        when UndefPointer
+            # This is actually undefined behavior, but let's say they are "unequal".
+            self.greater()
+
+        when PastOnePointer
+            self.compare_past_one_pointer(a, b)
+
+        when StaticPointer
+            case b
+            when StaticPointer
+                if b.@target.same?(a.@target)
+                    self.equal()
+                else
+                    # "unequal"
+                    self.greater()
+                end
+            when PastOnePointer
+                left, right = self.compare_past_one_pointer(b, a)
+                {right, left}
+            else
+                # "unequal"
+                self.greater()
+            end
+
+        when StaticFieldPointer
+            case b
+            when StaticFieldPointer
+                self.compare_field_pointers(a, b)
+            when DynamicFieldPointer_legacy
+                self.compare_field_pointers(a, b)
+            when PastOnePointer
+                left, right = self.compare_past_one_pointer(b, a)
+                {right, left}
+            else
+                # "unequal"
+                self.greater()
+            end
+
+        when DynamicFieldPointer_legacy
+            case b
+            when StaticFieldPointer
+                self.compare_field_pointers(a, b)
+            when DynamicFieldPointer_legacy
+                self.compare_field_pointers(a, b)
+            when PastOnePointer
+                left, right = self.compare_past_one_pointer(b, a)
+                {right, left}
+            else
+                # "unequal"
+                self.greater()
+            end
+
+        else
+            raise "unreachable"
+        end
+    end
+end # module Isekai::LLVMFrontend::PointerComparator
 
 
 module PointerFactory
@@ -256,7 +429,13 @@ module PointerFactory
         if field.is_a? Constant
             return StaticFieldPointer.new(base: base, field: field.@value.to_i32!)
         else
-            return DynamicFieldPointer.new(base: base, field: field)
+            # If this is an array of non-integers, we should use 'DynamicFieldPointer_legacy',
+            # otherwise 'DynamicFieldPointer' (if the array is empty, there is no difference.)
+            if (e = base.@elems.first?) && e.@bitwidth.undefined?
+                return DynamicFieldPointer_legacy.new(base: base, field: field)
+            else
+                return DynamicFieldPointer.new(base: base, field: field)
+            end
         end
     end
 end # module Isekai::LLVMFrontend::PointerFactory

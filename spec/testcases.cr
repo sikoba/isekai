@@ -46,7 +46,7 @@ def run_isekai (on bitcode_file : String) : Nil
             output: null_output,
             p_bits_min: 254,
             p_bits_max: 254)
-        req_factory = Isekai::AltBackend::Arith::RequestFactory.new(board, sloppy: false)
+        req_factory = Isekai::AltBackend::Arith::RequestFactory.new(board)
         backend = Isekai::AltBackend::Arith::Backend.new(req_factory)
         outputs.each { |expr| Isekai::AltBackend.lay_down_output(backend, expr) }
         board.done!
