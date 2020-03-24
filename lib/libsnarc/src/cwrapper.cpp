@@ -5,7 +5,7 @@
 #include "skAurora.hpp"
 #include "skLigero.hpp"
 #include "skFractal.hpp"
-#include "util.hpp""
+#include "Util.hpp"
 
 using namespace std; 
 
