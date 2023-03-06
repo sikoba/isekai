@@ -1,5 +1,8 @@
 [![Build Status](https://api.travis-ci.com/shdown/isekai.svg?branch=develop)](https://travis-ci.com/shdown/isekai)
 
+# Notice
+
+No development of isekai has been done since March 2020, the project is now archived.
 
 # isekai in a nutshell
 
